@@ -30,7 +30,7 @@ export function renderGame(
   drawGrid(ctx, camera);
 
   // Ground decals: destination markers + player movement lines under everything else.
-  for (const m of view.moveMarkers) drawMoveMarker(ctx, camera, m);
+  for (const m of view.moveMarkers) drawMoveMarker(ctx, camera, m, state.viewPlayer);
   drawCommandMarkers(ctx, state, camera, view);
 
   // Gold deposits + Citadel are static landmarks: shown once explored (live count only when visible).
@@ -58,7 +58,7 @@ export function renderGame(
     const rx = (e.prevX ?? e.x) + (e.x - (e.prevX ?? e.x)) * alpha;
     const ry = (e.prevY ?? e.y) + (e.y - (e.prevY ?? e.y)) * alpha;
     if (!camera.isTileVisible(rx, ry)) continue;
-    if (e.owner !== 0 && fogAt(state, Math.floor(rx), Math.floor(ry)) !== "visible") continue;
+    if (e.owner !== state.viewPlayer && fogAt(state, Math.floor(rx), Math.floor(ry)) !== "visible") continue;
     drawUnit(ctx, camera, e, view.selectedIds.has(e.id), rx, ry);
   }
 

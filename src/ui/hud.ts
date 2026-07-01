@@ -21,7 +21,7 @@ import {
   UNIT_LABEL,
   UNIT_STATS,
 } from "../config/constants";
-import type { Building, BuildingType, GameState, ResearchKey, UnitType } from "../core/types";
+import type { Building, BuildingType, GameState, PlayerId, ResearchKey, UnitType } from "../core/types";
 import { buildAvailability, unitAvailability } from "../state/buildRules";
 import { canEnqueueResearch, unitCap } from "../state/upgrades";
 import type { Camera } from "../render/camera";
@@ -111,7 +111,10 @@ export class Hud {
   private cbButtons: BuildBtn[] = [];
   private cbSelect: HTMLElement | null = null;
 
-  constructor(parent: HTMLElement) {
+  private readonly local: PlayerId; // whose economy/selection/victory this HUD shows
+
+  constructor(parent: HTMLElement, localPlayerId: PlayerId = 0) {
+    this.local = localPlayerId;
     const root = document.createElement("div");
     root.className = "hud";
     root.innerHTML = `
@@ -216,7 +219,7 @@ export class Hud {
   }
 
   update(state: GameState, info: HudInfo): void {
-    const p = state.players[0];
+    const p = state.players[this.local];
     this.gold.textContent = String(Math.floor(p.gold));
 
     // Income rate: net Δgold over a ~1s window (15-logic §8). Seed the baseline on the first
@@ -245,7 +248,7 @@ export class Hud {
 
     const counts = new Map<UnitType, number>();
     for (const e of state.entities) {
-      if (e.kind === "unit" && e.owner === 0) counts.set(e.unitType, (counts.get(e.unitType) ?? 0) + 1);
+      if (e.kind === "unit" && e.owner === this.local) counts.set(e.unitType, (counts.get(e.unitType) ?? 0) + 1);
     }
     let units = 0;
     for (const n of counts.values()) units += n;
@@ -275,7 +278,7 @@ export class Hud {
 
     if (state.winner !== null && !this.victoryShown) {
       this.victoryShown = true;
-      this.victoryTitle.textContent = state.winner === 0 ? "You win!" : `Player ${state.winner + 1} wins`;
+      this.victoryTitle.textContent = state.winner === this.local ? "You win!" : `Player ${state.winner + 1} wins`;
       this.victory.hidden = false;
     }
   }
@@ -312,7 +315,7 @@ export class Hud {
   /** Left build panel (16 §4/§5/§6): grey out unavailable structures, tooltip explains why. */
   private updateBuildPanel(state: GameState): void {
     for (const pb of this.panelBtns) {
-      const av = buildAvailability(state, 0, pb.type);
+      const av = buildAvailability(state, this.local, pb.type);
       pb.el.disabled = !av.ok;
       pb.el.title = av.reason;
       pb.el.classList.toggle("locked", !av.ok);
@@ -321,8 +324,8 @@ export class Hud {
 
   private updateCitadelPanel(state: GameState): void {
     const cit = state.citadel;
-    const p0 = state.players[0];
-    const show = cit.controllingPlayer === 0 || p0.commandEnergy > 0;
+    const p0 = state.players[this.local];
+    const show = cit.controllingPlayer === this.local || p0.commandEnergy > 0;
     this.citadelPanel.hidden = !show;
     if (!show) return;
     this.energyText.textContent = String(Math.floor(p0.commandEnergy));
@@ -371,7 +374,7 @@ export class Hud {
           btn.el.disabled = !ok;
           btn.el.title = ok ? "" : "Researched, queued, needs a prerequisite, or unaffordable";
         } else {
-          const av = unitAvailability(state, 0, b, btn.key as UnitType); // §6 priority + tooltip
+          const av = unitAvailability(state, this.local, b, btn.key as UnitType); // §6 priority + tooltip
           btn.el.disabled = !av.ok;
           btn.el.title = av.reason;
         }

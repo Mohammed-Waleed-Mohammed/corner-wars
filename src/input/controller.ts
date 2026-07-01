@@ -29,7 +29,7 @@ import {
   UNIT_STATS,
 } from "../config/constants";
 import { clamp } from "../core/math";
-import type { AnyEntity, Building, BuildingType, GameState, ResearchKey, Unit, UnitType, Vec2 } from "../core/types";
+import type { AnyEntity, Building, BuildingType, GameState, PlayerId, ResearchKey, Unit, UnitType, Vec2 } from "../core/types";
 import { fogAt } from "../engine/fog";
 import { navPassable } from "../engine/pathfinding";
 import { footprintClear, planWallLine, wallLineTiles, withinBuildRadius } from "../engine/placement";
@@ -42,8 +42,6 @@ import type { CommandType } from "../sim/commands";
 import type { Session } from "../net/session";
 import type { InputManager } from "./input";
 import { entityAtTile, enemyEntityAtTile, goldSourceAtTile, unitsInBox } from "./selection";
-
-const HUMAN = 0 as const;
 
 const UNIT_LABELS: Record<UnitType, string> = {
   worker: "Worker",
@@ -89,18 +87,20 @@ export class InputController {
   private wallDragStart: Vec2 | null = null; // §1 drag-to-build walls (tile)
   private commandMarkers: CommandMarker[] = []; // §3 player move/attack-move lines
   private session: Session;
+  private readonly local: PlayerId; // the local player this UI controls (0 in SP; the slot in MP)
 
   constructor(state: GameState, camera: Camera, input: InputManager, session: Session) {
     this.state = state;
     this.camera = camera;
     this.input = input;
     this.session = session;
+    this.local = session.localPlayerId;
   }
 
   /** Build a human Command and push it to the Session (17-multiplayer §2.4). The controller
    *  NEVER mutates sim state directly anymore — it only reads state to decide, and emits. */
   private emit(type: CommandType, payload: Record<string, unknown>): void {
-    this.session.submit({ type, playerId: HUMAN, seq: 0, payload });
+    this.session.submit({ type, playerId: this.local, seq: 0, payload });
   }
 
   update(dt: number): void {
@@ -339,7 +339,7 @@ export class InputController {
 
   private clickSelect(screen: Vec2, additive: boolean): void {
     const tile = this.camera.screenToTile(screen.x, screen.y);
-    const hit = entityAtTile(this.state, tile, HUMAN);
+    const hit = entityAtTile(this.state, tile, this.local);
     if (hit) {
       if (additive) {
         if (this.selectedIds.has(hit.id)) this.selectedIds.delete(hit.id);
@@ -353,7 +353,7 @@ export class InputController {
   }
 
   private boxSelect(a: Vec2, b: Vec2, additive: boolean): void {
-    const units = unitsInBox(this.state, a, b, HUMAN);
+    const units = unitsInBox(this.state, a, b, this.local);
     if (!additive) this.selectedIds.clear();
     for (const u of units) this.selectedIds.add(u.id);
   }
@@ -361,7 +361,7 @@ export class InputController {
   /** A left click; a second click on the same unit within the window selects all that type on-screen (§8). */
   private clickOrDoubleClick(screenX: number, screenY: number, additive: boolean): void {
     const tile = this.camera.screenToTile(screenX, screenY);
-    const hit = entityAtTile(this.state, tile, HUMAN);
+    const hit = entityAtTile(this.state, tile, this.local);
     const isDouble =
       !!hit && hit.kind === "unit" && hit.id === this.lastClickId && this.clock - this.lastClickTime < INPUT.doubleClickTime;
     if (isDouble && hit && hit.kind === "unit") {
@@ -377,7 +377,7 @@ export class InputController {
   selectByType(type: UnitType, onScreenOnly: boolean): void {
     const ids = new Set<number>();
     for (const e of this.state.entities) {
-      if (e.kind !== "unit" || e.owner !== HUMAN || e.unitType !== type) continue;
+      if (e.kind !== "unit" || e.owner !== this.local || e.unitType !== type) continue;
       if (onScreenOnly && !this.camera.isTileVisible(e.x, e.y, 0)) continue;
       ids.add(e.id);
     }
@@ -425,10 +425,10 @@ export class InputController {
     const hasUnits = units.length > 0;
 
     // §2a: enemies are only hoverable/highlightable on a currently-visible tile — no fog leak.
-    const enemy = enemyEntityAtTile(this.state, tile, HUMAN);
+    const enemy = enemyEntityAtTile(this.state, tile, this.local);
     if (enemy && hasUnits && this.enemyTargetable(enemy)) return { action: "attack", glow: entityGlow(enemy, "rgba(239,68,68,0.9)") };
 
-    const own = entityAtTile(this.state, tile, HUMAN);
+    const own = entityAtTile(this.state, tile, this.local);
     if (own) {
       // A damaged friendly building + a Worker selected → repair cursor + green glow (§7).
       if (own.kind === "building" && own.buildProgress >= 1 && own.hp < own.maxHp && units.some((u) => u.unitType === "worker")) {
@@ -504,7 +504,7 @@ export class InputController {
 
     // Attack a specific enemy — only if it's on a currently-visible tile (§2a; else fall through
     // to a move order, since you can't target what you can't see).
-    const enemy = enemyEntityAtTile(this.state, tile, HUMAN);
+    const enemy = enemyEntityAtTile(this.state, tile, this.local);
     if (enemy && this.enemyTargetable(enemy)) {
       this.emit("ATTACK_TARGET", { unitIds: ids, targetId: enemy.id, keepHarvest: false });
       this.pushMarker(tile.x, tile.y);
@@ -513,7 +513,7 @@ export class InputController {
     }
 
     // Workers: help build an unfinished site, or repair a damaged finished friendly building (§7).
-    const ownHit = entityAtTile(this.state, tile, HUMAN);
+    const ownHit = entityAtTile(this.state, tile, this.local);
     if (ownHit && ownHit.kind === "building" && workerIds.length > 0) {
       const repairing = ownHit.buildProgress >= 1 && ownHit.hp < ownHit.maxHp;
       const building = ownHit.buildProgress < 1;
@@ -558,7 +558,7 @@ export class InputController {
 
   /** Enter placement mode for a build-panel button / hotkey — only if it's currently buildable (§5/§6). */
   enterPlacement(type: BuildingType): void {
-    if (!buildAvailability(this.state, HUMAN, type).ok) {
+    if (!buildAvailability(this.state, this.local, type).ok) {
       this.state.soundEvents.push("insufficientFunds");
       return;
     }
@@ -577,7 +577,7 @@ export class InputController {
 
   /** Fire (instant) or begin targeting a Citadel power for the human player. */
   activatePower(key: string): void {
-    if (!canFirePower(this.state, HUMAN, key)) return;
+    if (!canFirePower(this.state, this.local, key)) return;
     this.clearPendingModes();
     if (powerNeedsTarget(key)) this.pendingPowerKey = key; // fired on the next left-click (§ above)
     else this.emit("USE_POWER", { powerId: key, x: null, y: null });
@@ -595,14 +595,14 @@ export class InputController {
     if (!this.placementType) return false;
     return (
       footprintClear(this.state, f.x, f.y, f.w, f.h) &&
-      withinBuildRadius(this.state, HUMAN, f.x, f.y, f.w, f.h) // §7: creep your base outward
+      withinBuildRadius(this.state, this.local, f.x, f.y, f.w, f.h) // §7: creep your base outward
     );
   }
 
   private tryPlace(): void {
     const f = this.placementFootprint();
     if (!f || !this.placementType) return;
-    if (!buildAvailability(this.state, HUMAN, this.placementType).ok) {
+    if (!buildAvailability(this.state, this.local, this.placementType).ok) {
       this.state.soundEvents.push("insufficientFunds"); // tech / gold / power / limit (§5/§6)
       return;
     }
@@ -618,7 +618,7 @@ export class InputController {
   getSelectedBuilding(): Building | null {
     let found: Building | null = null;
     for (const e of this.state.entities) {
-      if (!this.selectedIds.has(e.id) || e.kind !== "building" || e.owner !== HUMAN) continue;
+      if (!this.selectedIds.has(e.id) || e.kind !== "building" || e.owner !== this.local) continue;
       if (found) return null;
       found = e;
     }
@@ -637,7 +637,7 @@ export class InputController {
   getBuiltTypes(): Set<BuildingType> {
     const s = new Set<BuildingType>();
     for (const e of this.state.entities) {
-      if (e.kind === "building" && e.owner === HUMAN && e.buildProgress >= 1) s.add(e.buildingType);
+      if (e.kind === "building" && e.owner === this.local && e.buildProgress >= 1) s.add(e.buildingType);
     }
     return s;
   }
@@ -655,7 +655,7 @@ export class InputController {
     const b = this.getSelectedBuilding();
     if (!b) return false;
     // Cheap local gold check just for the click feedback; QUEUE_UNIT re-validates authoritatively.
-    if (this.state.players[HUMAN].gold < UNIT_STATS[unitType].gold) {
+    if (this.state.players[this.local].gold < UNIT_STATS[unitType].gold) {
       this.state.soundEvents.push("insufficientFunds");
       return false;
     }
@@ -666,7 +666,7 @@ export class InputController {
   researchFromSelected(key: ResearchKey): boolean {
     const b = this.getSelectedBuilding();
     if (!b) return false;
-    if (this.state.players[HUMAN].gold < RESEARCH[key].gold) {
+    if (this.state.players[this.local].gold < RESEARCH[key].gold) {
       this.state.soundEvents.push("insufficientFunds");
       return false;
     }
@@ -677,7 +677,7 @@ export class InputController {
   private selectedUnits(): Unit[] {
     const out: Unit[] = [];
     for (const e of this.state.entities) {
-      if (e.kind === "unit" && e.owner === HUMAN && this.selectedIds.has(e.id)) out.push(e);
+      if (e.kind === "unit" && e.owner === this.local && this.selectedIds.has(e.id)) out.push(e);
     }
     return out;
   }
@@ -696,7 +696,7 @@ export class InputController {
   private wallDragSegments(end: Vec2): WallSegment[] {
     if (!this.wallDragStart) return [];
     const tiles = wallLineTiles(this.wallDragStart.x, this.wallDragStart.y, end.x, end.y);
-    return planWallLine(this.state, HUMAN, tiles, this.state.players[HUMAN].gold, this.wallCount(HUMAN));
+    return planWallLine(this.state, this.local, tiles, this.state.players[this.local].gold, this.wallCount(this.local));
   }
 
   /** Commit a wall drag by emitting one PLACE_WALL_LINE; executeCommand re-plans the SAME segments

@@ -109,7 +109,7 @@ export function updateResearch(state: GameState, dt: number): void {
       e.researchTimer = 0;
       q.shift();
       applyResearch(state, e.owner, key);
-      if (e.owner === 0) state.soundEvents.push("buildComplete"); // human cue
+      if (e.owner === state.viewPlayer) state.soundEvents.push("buildComplete"); // local player cue
     }
   }
 }

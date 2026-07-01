@@ -35,8 +35,8 @@ export function drawMinimap(ctx: CanvasRenderingContext2D, state: GameState, cam
   ctx.fillStyle = COLORS.ground;
   ctx.fillRect(r.x, r.y, r.w, r.h);
 
-  // §5: radar goes dark while the human is in power deficit — no map, no dots.
-  if (isLowPower(state, 0)) {
+  // §5: radar goes dark while the local player is in power deficit — no map, no dots.
+  if (isLowPower(state, state.viewPlayer)) {
     ctx.fillStyle = "#0c0e12";
     ctx.fillRect(r.x, r.y, r.w, r.h);
     ctx.fillStyle = COLORS.hpLow;
@@ -88,7 +88,7 @@ export function drawMinimap(ctx: CanvasRenderingContext2D, state: GameState, cam
       ctx.fillStyle = ownerColor(e.owner);
       ctx.fillRect(px(e.x), py(e.y), Math.max(2, e.width * sx), Math.max(2, e.height * sy));
     } else {
-      if (e.owner !== 0 && fog(e.x, e.y) !== "visible") continue;
+      if (e.owner !== state.viewPlayer && fog(e.x, e.y) !== "visible") continue;
       ctx.fillStyle = ownerColor(e.owner);
       ctx.fillRect(px(e.x) - 1, py(e.y) - 1, 2.5, 2.5);
     }

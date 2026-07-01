@@ -1,12 +1,11 @@
-// Fog of war (§11), HUMAN ONLY — the AI sees the whole map (a v1 simplification). Three
-// states per tile: unexplored (never seen) -> explored (seen before; static objects shown
-// dimmed, but not live enemy positions) -> visible (currently in a friendly sight radius).
-// Recomputed on a slow timer for performance, not every frame.
+// Fog of war (§11), for the LOCAL player (state.viewPlayer) — the AI sees the whole map (a v1
+// simplification). Three states per tile: unexplored (never seen) -> explored (seen before; static
+// objects shown dimmed, but not live enemy positions) -> visible (currently in a friendly sight
+// radius). Recomputed on a slow timer for performance, not every frame. Fog is cosmetic/local — it
+// is NOT hashed by the checksum, so computing it per-peer-perspective doesn't affect determinism.
 
 import { FOG_UPDATE_INTERVAL } from "../config/constants";
 import type { FogState, GameState } from "../core/types";
-
-const HUMAN = 0;
 
 export function updateFog(state: GameState, dt: number): void {
   state.fogTimer = (state.fogTimer ?? 0) + dt;
@@ -23,7 +22,7 @@ export function updateFog(state: GameState, dt: number): void {
   }
 
   for (const e of state.entities) {
-    if (e.owner !== HUMAN || e.hp <= 0) continue;
+    if (e.owner !== state.viewPlayer || e.hp <= 0) continue;
     const cx = e.kind === "building" ? e.x + e.width / 2 : e.x;
     const cy = e.kind === "building" ? e.y + e.height / 2 : e.y;
     reveal(state, cx, cy, e.sightRadius);

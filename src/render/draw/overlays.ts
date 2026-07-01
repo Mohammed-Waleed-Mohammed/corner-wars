@@ -70,11 +70,12 @@ export function drawMoveMarker(
   ctx: CanvasRenderingContext2D,
   camera: Camera,
   m: MoveMarker,
+  owner: number,
 ): void {
   const t = clamp(m.ttl / m.maxTtl, 0, 1); // 1 -> 0 over its life
   const p = camera.tileToScreen(m.x, m.y);
   const r = lerp(2, 14, 1 - t) * camera.zoom;
-  ctx.strokeStyle = COLORS.players[0];
+  ctx.strokeStyle = COLORS.players[owner]; // the local player's color (move markers are their orders)
   ctx.globalAlpha = t;
   ctx.lineWidth = 2;
   ctx.beginPath();

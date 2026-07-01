@@ -41,6 +41,20 @@ export interface MatchOptions {
   terrain?: boolean; // generate impassable terrain (default true); tests disable for open maps
 }
 
+/** Reconfigure player roles for a multiplayer match from the agreed lobby slots (17-multiplayer M4).
+ *  Human seats never run AI; AI seats keep a brain; closed/empty seats go inert (no brain, not human)
+ *  so nobody drives them. Role config only gates runAI (host-only) + fog/HUD focus and is NOT hashed
+ *  by the checksum, so applying it identically on every peer keeps state uniform without affecting
+ *  determinism. */
+export function configurePlayers(state: GameState, humanIds: PlayerId[], aiIds: PlayerId[]): void {
+  const humans = new Set<PlayerId>(humanIds);
+  const ais = new Set<PlayerId>(aiIds);
+  for (const p of state.players) {
+    p.isHuman = humans.has(p.id);
+    p.ai = ais.has(p.id) ? (p.ai ?? { mode: "expand", decisionTimer: p.id * 0.15, attackClock: 0 }) : undefined;
+  }
+}
+
 export function createInitialState(seed?: number, opts: MatchOptions = {}): GameState {
   const resolvedSeed = seed ?? Math.floor(Math.random() * 0xffffffff);
   const state: GameState = {
@@ -63,6 +77,7 @@ export function createInitialState(seed?: number, opts: MatchOptions = {}): Game
     // All-ground terrain (until M8). Fog starts unexplored and is revealed by sight (§11).
     terrain: Array.from({ length: GRID.height }, () => new Array<TerrainType>(GRID.width).fill("ground")),
     fog: Array.from({ length: GRID.height }, () => new Array<FogState>(GRID.width).fill("unexplored")),
+    viewPlayer: 0, // SP default; MP overrides to the local player after createInitialState
     mapWidth: GRID.width,
     mapHeight: GRID.height,
     winner: null,

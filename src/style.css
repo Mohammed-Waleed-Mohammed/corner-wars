@@ -641,3 +641,140 @@ canvas {
     transition: none;
   }
 }
+
+/* ── Menu / lobby (17-multiplayer §9) ────────────────────────────────────── */
+.lobby {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(1200px 800px at 50% 30%, #1c2230 0%, var(--void) 70%);
+  z-index: 50;
+}
+.lobby-card {
+  width: min(440px, 92vw);
+  padding: 32px 30px;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 14px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+  text-align: center;
+}
+.lobby-card.wide { width: min(520px, 94vw); }
+.lobby-title {
+  font-size: 30px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  margin-bottom: 6px;
+}
+.lobby-sub { color: var(--muted); margin-bottom: 22px; font-size: 14px; }
+.lobby-actions { display: flex; flex-direction: column; gap: 10px; }
+.lobby-actions.row { flex-direction: row; justify-content: space-between; }
+.lobby-btn {
+  padding: 12px 18px;
+  font-family: var(--sans);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+  background: #232833;
+  border: 1px solid var(--panel-border);
+  border-radius: 9px;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s, transform 0.05s;
+}
+.lobby-btn:hover { background: #2b323f; border-color: #3a4250; }
+.lobby-btn:active { transform: translateY(1px); }
+.lobby-btn.primary { background: var(--p0); border-color: var(--p0); color: #fff; }
+.lobby-btn.primary:hover { background: #2f6fe0; }
+.lobby-btn.tiny { padding: 5px 10px; font-size: 12px; }
+.lobby-note { margin-top: 16px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.lobby-err { color: var(--hp-low); font-size: 14px; margin: 4px 0 14px; min-height: 1em; }
+
+.lobby-room {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  justify-content: center;
+  margin: 4px 0 20px;
+}
+.lobby-room-label { color: var(--muted); font-size: 13px; }
+.lobby-room-code {
+  font-family: var(--mono);
+  font-size: 14px;
+  padding: 6px 10px;
+  background: #0f1216;
+  border: 1px solid var(--panel-border);
+  border-radius: 7px;
+  user-select: all;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lobby-slots { display: flex; flex-direction: column; gap: 8px; margin-bottom: 22px; }
+.lobby-slot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 14px;
+  background: #1e222b;
+  border: 1px solid var(--panel-border);
+  border-radius: 9px;
+  text-align: left;
+}
+.lobby-slot.empty { cursor: pointer; opacity: 0.72; }
+.lobby-slot.empty:hover { opacity: 1; border-color: #3a4250; }
+.lobby-slot.human { border-color: #35507e; }
+.lobby-dot { width: 12px; height: 12px; border-radius: 50%; flex: 0 0 auto; }
+.lobby-slot-name { flex: 1; font-weight: 600; font-size: 14px; }
+.lobby-slot-corner { color: var(--muted); font-size: 12px; font-family: var(--mono); }
+
+.lobby-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  text-align: left;
+  margin-bottom: 14px;
+}
+.lobby-field span { color: var(--muted); font-size: 13px; }
+.lobby-field input {
+  padding: 10px 12px;
+  font-family: var(--sans);
+  font-size: 15px;
+  color: var(--text);
+  background: #0f1216;
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  outline: none;
+}
+.lobby-field input:focus { border-color: var(--p0); }
+
+.lobby-spinner {
+  width: 26px;
+  height: 26px;
+  margin: 18px auto 2px;
+  border: 3px solid var(--panel-border);
+  border-top-color: var(--p0);
+  border-radius: 50%;
+  animation: lobby-spin 0.8s linear infinite;
+}
+@keyframes lobby-spin { to { transform: rotate(360deg); } }
+
+/* MP lockstep stall indicator (17-multiplayer §3.3) */
+.net-stall {
+  position: fixed;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 8px 16px;
+  background: rgba(20, 24, 29, 0.92);
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  color: var(--gold);
+  font-size: 13px;
+  font-weight: 600;
+  z-index: 40;
+  pointer-events: none;
+}

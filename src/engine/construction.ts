@@ -57,7 +57,7 @@ export function updateConstruction(state: GameState, dt: number): void {
       site.hp = site.maxHp;
       site.attackTimer = 0;
       completed = true;
-      if (site.owner === 0) state.soundEvents.push("buildComplete"); // human only
+      if (site.owner === state.viewPlayer) state.soundEvents.push("buildComplete"); // local player only
 
       // A Refinery includes 1 free Worker (06-buildings.md).
       if (site.buildingType === "refinery") {

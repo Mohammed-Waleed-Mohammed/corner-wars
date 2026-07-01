@@ -93,7 +93,7 @@ function spawnUnit(state: GameState, building: Building, unitType: UnitType): vo
     if (u.unitType === "worker") u.autoHarvest = false;
   }
   state.entities.push(u);
-  if (building.owner === 0) state.soundEvents.push("unitReady"); // human only — avoid AI beeps
+  if (building.owner === state.viewPlayer) state.soundEvents.push("unitReady"); // local player only — avoid AI beeps
 }
 
 function countUnits(state: GameState, owner: PlayerId): number {

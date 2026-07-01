@@ -243,7 +243,10 @@ export interface GameState {
   goldSources: GoldSource[];
   citadel: Citadel;
   terrain: TerrainType[][]; // [48][48] (§3; generated: mountain border + scattered features when terrain is on)
-  fog: FogState[][]; // [48][48], human only (§11; revealed from sight radii)
+  fog: FogState[][]; // [48][48], the LOCAL player's visibility (§11; revealed from sight radii)
+  viewPlayer: PlayerId; // the local player's perspective (fog owner + HUD/render focus); 0 in SP,
+  // the client's assigned slot in MP. LOCAL-only + cosmetic — NOT hashed by the checksum, so it may
+  // legitimately differ across peers without breaking determinism.
   mapWidth: number; // 48
   mapHeight: number; // 48
   winner: PlayerId | null;

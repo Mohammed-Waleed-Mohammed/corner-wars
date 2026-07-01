@@ -81,8 +81,9 @@ export function updateGame(state: GameState, dt: number): void {
     if ((p.frenzyTimer ?? 0) > 0) p.frenzyTimer = Math.max(0, (p.frenzyTimer ?? 0) - dt);
   }
 
-  // Power-low warning cue on the human's transition into low power (§10).
-  const lowNow = isLowPower(state, 0);
+  // Power-low warning cue on the LOCAL player's transition into low power (§10). viewPlayer (not a
+  // hardcoded 0) so a non-host client hears its OWN warning; sounds are cosmetic + unhashed.
+  const lowNow = isLowPower(state, state.viewPlayer);
   if (lowNow && !state.humanLowPower) state.soundEvents.push("powerLow");
   state.humanLowPower = lowNow;
 }

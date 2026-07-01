@@ -20,7 +20,7 @@ export function drawBuildArea(ctx: CanvasRenderingContext2D, state: GameState, c
   ctx.globalAlpha = 0.12;
   for (let ty = y0; ty <= y1; ty++) {
     for (let tx = x0; tx <= x1; tx++) {
-      if (withinBuildRadius(state, 0, tx, ty, 1, 1)) {
+      if (withinBuildRadius(state, state.viewPlayer, tx, ty, 1, 1)) { // local player's build radius
         const p = camera.tileToScreen(tx, ty);
         ctx.fillRect(p.x, p.y, size, size);
       }
