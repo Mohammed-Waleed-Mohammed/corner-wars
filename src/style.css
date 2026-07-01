@@ -1,0 +1,643 @@
+:root {
+  --void: #15181d;
+  --panel: #1a1d23;
+  --panel-border: #2b313b;
+  --text: #e2e8f0;
+  --muted: #8b93a1;
+  --p0: #3b82f6;
+  --gold: #f5c518;
+  --hp-full: #22c55e;
+  --hp-low: #ef4444;
+  --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+  --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--void);
+  color: var(--text);
+  font-family: var(--sans);
+}
+
+#app {
+  width: 100%;
+  height: 100%;
+}
+
+canvas {
+  display: block;
+  cursor: crosshair;
+}
+
+/* ── Mute toggle (top-right) ──────────────────────────────────────────────── */
+.mute-btn {
+  position: fixed;
+  top: 14px;
+  right: 14px;
+  z-index: 15;
+  width: 38px;
+  height: 38px;
+  font-size: 17px;
+  line-height: 1;
+  color: var(--text);
+  background: color-mix(in srgb, var(--panel) 92%, transparent);
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  cursor: pointer;
+  backdrop-filter: blur(6px);
+}
+
+.mute-btn:hover {
+  border-color: color-mix(in srgb, var(--p0) 55%, var(--panel-border));
+}
+
+.mute-btn.muted {
+  opacity: 0.6;
+}
+
+/* ── HUD ─────────────────────────────────────────────────────────────────── */
+.hud {
+  position: fixed;
+  inset: 0;
+  pointer-events: none; /* let all clicks reach the canvas */
+  z-index: 10;
+}
+
+.hud-panel {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  min-width: 190px;
+  padding: 12px 14px 11px;
+  background: color-mix(in srgb, var(--panel) 92%, transparent);
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  backdrop-filter: blur(6px);
+}
+
+.hud-eyebrow {
+  font-size: 10px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+
+.hud-gold {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--mono);
+  font-size: 26px;
+  font-weight: 600;
+  color: var(--gold);
+  line-height: 1;
+}
+
+.hud-coin {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: var(--gold);
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--gold) 55%, #000);
+}
+
+.hud-power {
+  margin-top: 11px;
+}
+
+.hud-power-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 4px;
+}
+
+.hud-key {
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.hud-power-text {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text);
+}
+
+.hud-bar {
+  height: 6px;
+  border-radius: 3px;
+  background: #0e1116;
+  overflow: hidden;
+  border: 1px solid var(--panel-border);
+}
+
+.hud-bar-fill {
+  height: 100%;
+  width: 0%;
+  background: var(--hp-full);
+  transition: width 0.15s linear;
+}
+
+.hud-bar-fill.low {
+  background: var(--hp-low);
+}
+
+.hud-stat {
+  margin-top: 10px;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text);
+}
+
+.hud-dev {
+  margin-top: 8px;
+  padding-top: 9px;
+  border-top: 1px solid var(--panel-border);
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+}
+
+/* ── Command bar (bottom-center, contextual) ─────────────────────────────── */
+.command-bar {
+  position: absolute;
+  bottom: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 260px;
+  /* Keep the centered bar clear of the bottom-right minimap (≈180px + gutter each side). */
+  max-width: min(680px, calc(100vw - 384px));
+  padding: 10px 14px;
+  background: color-mix(in srgb, var(--panel) 92%, transparent);
+  border: 1px solid var(--panel-border);
+  border-radius: 12px;
+  backdrop-filter: blur(6px);
+}
+
+.command-bar.active {
+  border-color: color-mix(in srgb, var(--p0) 45%, var(--panel-border));
+}
+
+.cb-hint,
+.cb-select,
+.cb-placing {
+  font-size: 12px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.cb-hint {
+  white-space: nowrap;
+}
+
+.cb-hint b,
+.cb-placing b {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.cb-placing {
+  color: var(--text);
+}
+
+.cb-select {
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 13px;
+}
+
+.cb-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.cb-title {
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text);
+}
+
+.cb-queue {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.cb-progress {
+  height: 4px;
+  border-radius: 2px;
+  background: #0e1116;
+  overflow: hidden;
+}
+
+.cb-progress-fill {
+  height: 100%;
+  width: 0%;
+  background: #38bdf8;
+}
+
+.cb-buttons {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.cb-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  font-family: var(--sans);
+  font-size: 13px;
+  color: var(--text);
+  background: #20242c;
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+
+.cb-btn:hover:not(:disabled) {
+  background: #283041;
+  border-color: color-mix(in srgb, var(--p0) 55%, var(--panel-border));
+}
+
+.cb-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Structures get a subtle accent to distinguish them from unit production. */
+.cb-btn.structure {
+  border-style: dashed;
+  border-color: color-mix(in srgb, var(--muted) 50%, var(--panel-border));
+}
+
+/* Lab research: purple accent, matching the Lab's command color. */
+.cb-btn.research {
+  border-color: color-mix(in srgb, #a855f7 55%, var(--panel-border));
+  background: #241f30;
+}
+.cb-btn.research .cb-btn-cost {
+  color: #c4b5fd;
+}
+
+/* §8 top-bar: income rate + low-power emphasis. */
+.hud-income {
+  margin-left: 8px;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--hp-full, #22c55e);
+}
+.hud-income.neg {
+  color: var(--hp-low, #ef4444);
+}
+.hud-power-text.low,
+.hud-stat.low {
+  color: #ef4444;
+  font-weight: 700;
+}
+
+/* §8 roster strip: per-type chips, click to select. */
+.roster {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: center;
+  max-width: min(680px, calc(100vw - 320px));
+  pointer-events: auto;
+}
+.roster-chip {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding: 4px 9px;
+  font-family: var(--sans);
+  font-size: 12px;
+  color: var(--text);
+  background: color-mix(in srgb, var(--panel) 92%, transparent);
+  border: 1px solid var(--panel-border);
+  border-radius: 7px;
+  cursor: pointer;
+}
+.roster-chip:hover {
+  border-color: color-mix(in srgb, var(--p0) 55%, var(--panel-border));
+}
+.roster-n {
+  font-family: var(--mono);
+  font-weight: 700;
+  color: var(--p0);
+}
+
+/* §7 queue slots + §8 selection command buttons. */
+.cb-queue-chips {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.cb-qchip {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding: 3px 8px;
+  font-size: 11px;
+  color: var(--text);
+  background: #20242c;
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.cb-qchip:hover {
+  border-color: #ef4444;
+}
+.cb-qchip .x {
+  color: #ef4444;
+  font-weight: 700;
+}
+.cb-commands {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+}
+.cb-cmd {
+  padding: 6px 14px;
+  font-family: var(--sans);
+  font-size: 12px;
+  color: var(--text);
+  background: #20242c;
+  border: 1px solid var(--panel-border);
+  border-radius: 7px;
+  cursor: pointer;
+}
+.cb-cmd:hover {
+  border-color: color-mix(in srgb, var(--p0) 55%, var(--panel-border));
+}
+
+/* §1 hotkey chips on command-card + build-panel buttons. */
+.cb-btn-hk,
+.bp-hk {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--p0);
+  border: 1px solid color-mix(in srgb, var(--p0) 45%, var(--panel-border));
+  border-radius: 4px;
+  padding: 0 4px;
+  margin-right: 4px;
+}
+
+/* §4 left-side build panel: always-on vertical column of structure buttons. */
+.build-panel {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  pointer-events: auto;
+  max-height: 86vh;
+  overflow-y: auto;
+}
+.bp-btn {
+  display: grid;
+  grid-template-columns: 22px 1fr auto auto;
+  align-items: center;
+  gap: 7px;
+  width: 190px;
+  padding: 6px 8px;
+  font-family: var(--sans);
+  font-size: 12px;
+  color: var(--text);
+  background: color-mix(in srgb, var(--panel) 92%, transparent);
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  cursor: pointer;
+  text-align: left;
+}
+.bp-btn:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--p0) 55%, var(--panel-border));
+  background: #283041;
+}
+.bp-btn:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+.bp-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  font-weight: 700;
+  font-size: 11px;
+  color: var(--text);
+  background: #11151b;
+  border-radius: 5px;
+}
+.bp-cost {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--gold);
+}
+
+.cb-btn-cost {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--gold);
+}
+
+.cb-btn-cost::before {
+  content: "◆ ";
+  font-size: 9px;
+  vertical-align: middle;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cb-btn {
+    transition: none;
+  }
+}
+
+/* ── Citadel power panel (top-center) ────────────────────────────────────── */
+.citadel-panel {
+  position: absolute;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  pointer-events: auto;
+  min-width: 320px;
+  max-width: min(620px, 92vw);
+  padding: 9px 12px 10px;
+  background: color-mix(in srgb, var(--panel) 92%, transparent);
+  border: 1px solid color-mix(in srgb, #a855f7 40%, var(--panel-border));
+  border-radius: 10px;
+  backdrop-filter: blur(6px);
+}
+
+.citadel-panel[hidden] {
+  display: none;
+}
+
+.cit-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 5px;
+}
+
+.cit-key {
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #c4b5fd;
+}
+
+.cit-energy {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text);
+}
+
+.cit-bar {
+  margin-bottom: 9px;
+}
+
+.cit-fill {
+  background: #a855f7;
+}
+
+.cit-powers {
+  display: flex;
+  gap: 7px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.cit-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 11px;
+  font-family: var(--sans);
+  font-size: 12px;
+  color: var(--text);
+  background: #221d2e;
+  border: 1px solid color-mix(in srgb, #a855f7 35%, var(--panel-border));
+  border-radius: 7px;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+
+.cit-btn:hover:not(:disabled) {
+  background: #2c2440;
+  border-color: #a855f7;
+}
+
+.cit-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.cit-btn-cost {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: #c4b5fd;
+}
+
+.cit-btn-cost::before {
+  content: "⚡";
+  font-size: 9px;
+  margin-right: 2px;
+}
+
+/* ── Victory overlay ─────────────────────────────────────────────────────── */
+.victory {
+  position: absolute;
+  inset: 0;
+  pointer-events: auto;
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, #0a0c10 72%, transparent);
+  backdrop-filter: blur(3px);
+  z-index: 20;
+}
+
+.victory[hidden] {
+  display: none;
+}
+
+.victory-card {
+  text-align: center;
+  padding: 36px 48px;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 16px;
+}
+
+.victory-eyebrow {
+  font-size: 11px;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 10px;
+}
+
+.victory-title {
+  font-size: 40px;
+  font-weight: 700;
+  color: var(--gold);
+  margin-bottom: 24px;
+}
+
+.victory-btn {
+  padding: 11px 26px;
+  font-family: var(--sans);
+  font-size: 15px;
+  font-weight: 600;
+  color: #0a0c10;
+  background: var(--p0);
+  border: none;
+  border-radius: 9px;
+  cursor: pointer;
+  transition: filter 0.12s;
+}
+
+.victory-btn:hover {
+  filter: brightness(1.12);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cit-btn,
+  .victory-btn {
+    transition: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hud-bar-fill {
+    transition: none;
+  }
+}

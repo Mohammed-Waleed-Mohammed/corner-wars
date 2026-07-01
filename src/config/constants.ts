@@ -1,0 +1,562 @@
+// Single source of truth for all tunable numbers.
+// Every value here MIRRORS a description/ file — when a number changes, change it in
+// the description first, then here. The source file is noted on each block.
+
+import type {
+  BuildingType,
+  CombatType,
+  Owner,
+  PlayerId,
+  ResearchKey,
+  UnitType,
+} from "../core/types";
+
+// ── Grid & world (02-map.md) ────────────────────────────────────────────────
+export const GRID = { width: 48, height: 48 } as const;
+export const TILE_SIZE = 32; // px per tile
+export const WORLD = {
+  width: GRID.width * TILE_SIZE, // 1536
+  height: GRID.height * TILE_SIZE, // 1536
+} as const;
+export const MAP_CENTER = { x: 24, y: 24 } as const;
+
+// ── Fixed map features (02-map.md) ──────────────────────────────────────────
+// Base (x,y) is the TOP-LEFT tile of the Construction Yard's footprint.
+// Home mine is 4 tiles toward center from the base anchor.
+export interface BaseDef {
+  player: PlayerId;
+  x: number;
+  y: number;
+  mine: { x: number; y: number };
+}
+export const BASES: BaseDef[] = [
+  { player: 0, x: 6, y: 6, mine: { x: 10, y: 10 } }, // top-left (human)
+  { player: 1, x: 41, y: 6, mine: { x: 37, y: 10 } }, // top-right
+  { player: 2, x: 6, y: 41, mine: { x: 10, y: 37 } }, // bottom-left
+  { player: 3, x: 41, y: 41, mine: { x: 37, y: 37 } }, // bottom-right
+];
+export const CITADEL_POS = { x: 24, y: 24 } as const;
+
+// ── Economy (03-resources-economy.md) ───────────────────────────────────────
+export const START_GOLD = 1000;
+export const HOME_MINE_GOLD = 5000;
+export const NEUTRAL_DEPOSIT_GOLD = 3000;
+export const CENTRAL_DEPOSIT_GOLD = 8000;
+// Unit cap is now tiered by Supply Lines research (15-logic §2): base 80, +30 per tier (→170).
+export const BASE_UNIT_CAP = 80;
+export const SUPPLY_LINE_CAP_BONUS = 30;
+export const PRODUCTION_QUEUE_MAX = 5;
+export const WORKER = {
+  capacity: 10, // gold per trip
+  mineTime: 2, // seconds to fill
+  refineryBonus: 0.25, // +25% effective mining at a Refinery
+} as const;
+
+// Contact distances for the harvest loop (engine tuning, 08-combat-formulas.md loop).
+export const HARVEST = {
+  sourceContact: 1.0, // tiles — close enough to mine a deposit
+  dropoffPadding: 0.6, // tiles beyond a building's half-extent counts as "at drop-off"
+} as const;
+
+// Random neutral-deposit generation (03-resources-economy.md §"Random generation")
+export const RESOURCE_GEN = {
+  minPerQuadrant: 2,
+  maxPerQuadrant: 3,
+  baseExclusion: 5, // tiles around a base
+  citadelExclusion: 6, // tiles around the Citadel
+  minSpacing: 4, // tiles between deposits
+  centralRingRadius: 7, // rich deposits ring around Citadel
+  centralCountMin: 1,
+  centralCountMax: 2,
+} as const;
+
+// ── Units (05-units.md) ─────────────────────────────────────────────────────
+export interface UnitStat {
+  combatType?: CombatType;
+  hp: number;
+  damage: number;
+  cooldown: number; // seconds between attacks
+  range: number; // tiles
+  minRange?: number; // tiles — cannot fire closer (artillery)
+  speed: number; // tiles/s
+  splashRadius?: number; // tiles — area damage on the shot (grenadier/artillery)
+  collisionRadius: number; // tiles (§12 separation)
+  sight: number; // tiles (§11 fog)
+  gold: number;
+  buildTime: number; // seconds
+  requires?: BuildingType; // built-at is in PRODUCES; this is an extra building prereq if any
+  unlock?: UnlockKey; // Lab research gate (15-logic §4): Heavy Tank / Artillery
+}
+export const UNIT_STATS: Record<UnitType, UnitStat> = {
+  worker: { hp: 40, damage: 3, cooldown: 1.5, range: 1, speed: 2.5, collisionRadius: 0.35, sight: 5, gold: 50, buildTime: 8 },
+  rifleman: {
+    combatType: "infantry",
+    hp: 60, damage: 8, cooldown: 1.0, range: 1, speed: 3.5, collisionRadius: 0.35, sight: 6, gold: 75, buildTime: 10,
+  },
+  rocket: {
+    combatType: "ranged",
+    hp: 45, damage: 9, cooldown: 1.0, range: 4, speed: 2.3, collisionRadius: 0.35, sight: 7, gold: 90, buildTime: 12,
+  },
+  tank: {
+    combatType: "heavy",
+    hp: 160, damage: 18, cooldown: 1.4, range: 2, speed: 1.8, collisionRadius: 0.55, sight: 6, gold: 180, buildTime: 18,
+  },
+  // 15-logic §4 — expanded roster.
+  grenadier: {
+    combatType: "infantry",
+    hp: 55, damage: 12, cooldown: 1.5, range: 3, speed: 2.8, splashRadius: 1.0, collisionRadius: 0.35, sight: 6, gold: 110, buildTime: 13,
+  },
+  scoutBuggy: {
+    combatType: "ranged",
+    hp: 50, damage: 6, cooldown: 0.6, range: 3, speed: 5.0, collisionRadius: 0.4, sight: 7, gold: 70, buildTime: 9,
+  },
+  heavyTank: {
+    combatType: "heavy",
+    hp: 280, damage: 30, cooldown: 1.5, range: 3, speed: 1.4, collisionRadius: 0.6, sight: 6, gold: 360, buildTime: 28, unlock: "advancedVehicles",
+  },
+  artillery: {
+    combatType: "siege",
+    hp: 70, damage: 45, cooldown: 3.0, range: 9, minRange: 3, speed: 1.5, splashRadius: 1.5, collisionRadius: 0.45, sight: 9, gold: 300, buildTime: 22, unlock: "siegeDoctrine",
+  },
+};
+
+// Weapon delivery per attacker (§9). melee/hitscan apply damage instantly; rocket/shell fly.
+export type WeaponKind = "melee" | "hitscan" | "rocket" | "shell";
+export const UNIT_WEAPON: Record<UnitType, WeaponKind> = {
+  worker: "melee",
+  rifleman: "hitscan",
+  rocket: "rocket",
+  tank: "shell",
+  grenadier: "shell", // lobbed grenade (carries splash)
+  scoutBuggy: "hitscan", // rapid light gun
+  heavyTank: "shell",
+  artillery: "shell", // lobbed shell (carries splash, min-range)
+};
+// Siege units deal +100% to buildings (15-logic §4), outside the counter triangle.
+export const SIEGE_BUILDING_BONUS = 1.0;
+export const PROJECTILE = {
+  rocketSpeed: 10, // tiles/s
+  shellSpeed: 16,
+  arrivalDist: 0.3, // tiles — close enough to detonate
+} as const;
+
+// Counter triangle: attacking the type you counter deals +50% (05-units.md, 08-combat). Partial:
+// "siege" has no entry (it's outside the triangle — normal vs units, +100% vs buildings).
+export const COUNTERS: Partial<Record<CombatType, CombatType>> = {
+  infantry: "ranged",
+  ranged: "heavy",
+  heavy: "infantry",
+};
+export const COUNTER_BONUS = 0.5; // +50%
+export const AGGRO_RADIUS = 6; // tiles (08-combat-formulas.md)
+// Walls/gates are excluded from auto-target acquisition (16 §2c). A unit only breaks a wall when
+// it's the blocking segment on an otherwise-impassable route — the nearest enemy wall within this.
+export const WALL_BREAK_RADIUS = 1.8; // tiles
+
+// ── Buildings (06-buildings.md, 04-power.md) ────────────────────────────────
+// `power` is NET: positive = produced, negative = consumed.
+export type UnlockKey = "advancedVehicles" | "siegeDoctrine" | "advancedDefenses";
+export interface BuildingStat {
+  hp: number;
+  gold: number;
+  buildTime: number; // seconds
+  power: number;
+  width: number; // footprint tiles
+  height: number;
+  sight: number; // tiles (§11 fog)
+  requires?: BuildingType; // building prerequisite (tech tree)
+  unlock?: UnlockKey; // Lab research gate (15-logic §2)
+  letter: string; // HUD/render label
+}
+export const BUILDING_STATS: Record<BuildingType, BuildingStat> = {
+  // gold/buildTime are for a BUILT expansion CY (16 §5 maxCount 2); the starting CYs are created
+  // complete so they ignore these. 1000g is a spec-gap value (file 16 doesn't price the expansion).
+  constructionYard: { hp: 1500, gold: 1000, buildTime: 40, power: 50, width: 3, height: 3, sight: 10, letter: "CY" },
+  powerPlant: { hp: 500, gold: 200, buildTime: 14, power: 100, width: 2, height: 2, sight: 7, letter: "P" },
+  refinery: { hp: 700, gold: 250, buildTime: 22, power: -30, width: 2, height: 2, sight: 7, letter: "R" },
+  barracks: { hp: 700, gold: 200, buildTime: 20, power: -20, width: 2, height: 2, sight: 7, letter: "B" },
+  warFactory: { hp: 800, gold: 350, buildTime: 28, power: -40, width: 3, height: 2, sight: 7, requires: "barracks", letter: "W" },
+  lab: { hp: 700, gold: 500, buildTime: 30, power: -30, width: 2, height: 2, sight: 7, requires: "barracks", letter: "L" },
+  // Defenses (15-logic §3). turret = "Gun Turret" (general-purpose). All 1×1.
+  turret: { hp: 600, gold: 200, buildTime: 15, power: -20, width: 1, height: 1, sight: 8, letter: "T" },
+  pillbox: { hp: 400, gold: 150, buildTime: 10, power: -10, width: 1, height: 1, sight: 6, letter: "Pb" },
+  antiArmorCannon: { hp: 700, gold: 300, buildTime: 18, power: -30, width: 1, height: 1, sight: 7, unlock: "advancedDefenses", letter: "AC" },
+  missileTower: { hp: 650, gold: 400, buildTime: 20, power: -40, width: 1, height: 1, sight: 10, unlock: "advancedDefenses", letter: "MT" },
+  // Walls & gates (15-logic §1). 1×1, no power.
+  wall: { hp: 250, gold: 20, buildTime: 3, power: 0, width: 1, height: 1, sight: 2, letter: "" },
+  gate: { hp: 400, gold: 75, buildTime: 8, power: 0, width: 1, height: 1, sight: 2, letter: "" },
+};
+
+// Defense combat params (15-logic §3), keyed by buildingType (single source; not per-instance).
+// `bonusVsType` gives +COUNTER_BONUS (+50%) vs that unit combat-type (or "building").
+export interface DefenseStat {
+  damage: number;
+  cooldown: number; // seconds
+  range: number; // tiles
+  weapon: "hitscan" | "shell" | "rocket";
+  bonusVsType?: CombatType | "building";
+  splashRadius?: number; // tiles (area damage on arrival)
+}
+export const DEFENSE_STATS: Partial<Record<BuildingType, DefenseStat>> = {
+  pillbox: { damage: 5, cooldown: 0.4, range: 5, weapon: "hitscan", bonusVsType: "infantry" },
+  turret: { damage: 25, cooldown: 1.0, range: 7, weapon: "shell" },
+  antiArmorCannon: { damage: 40, cooldown: 1.6, range: 6, weapon: "shell", bonusVsType: "heavy" },
+  missileTower: { damage: 30, cooldown: 2.0, range: 9, weapon: "rocket", splashRadius: 1.5 },
+};
+
+// Gates (15-logic §1) + the per-player wall/gate performance cap.
+export const GATE = { openRadius: 1.5, closeDelay: 1.0 } as const; // friendly within 1.5 opens; closes 1s after
+export const STRUCTURE_CAP = { wallsPerPlayer: 60 } as const;
+
+// What each production building can build (06-buildings.md, 15-logic §4). ORDER = the fixed
+// Q/W/E/R hotkey slots (16 §1): Barracks Q/W/E = Rifleman/Grenadier/Rocket; War Factory
+// Q/W/E/R = Scout/Tank/Heavy/Artillery; CY Q = Worker.
+export const PRODUCES: Partial<Record<BuildingType, UnitType[]>> = {
+  constructionYard: ["worker"],
+  warFactory: ["scoutBuggy", "tank", "heavyTank", "artillery", "worker"],
+  barracks: ["rifleman", "grenadier", "rocket"],
+};
+// Positional hotkeys for the Nth unit-production slot (16 §1). worker (5th WF slot) has none.
+export const UNIT_HOTKEY_SLOTS = ["Q", "W", "E", "R"] as const;
+
+// What each building can construct (structures, placed on the map). The Construction
+// Yard's command card OFFERS all structures (06-buildings.md tech tree); the actual
+// building is done by Workers at the placed site (15-logic worker-built construction).
+export const CONSTRUCTS: Partial<Record<BuildingType, BuildingType[]>> = {
+  constructionYard: [
+    "powerPlant", "refinery", "barracks", "warFactory", "lab",
+    "pillbox", "turret", "antiArmorCannon", "missileTower", "wall", "gate",
+    "constructionYard", // expansion base (16 §5, maxCount 2)
+  ],
+};
+
+// Build panel = the full buildable list, shown left-edge always (16 §4). Order = panel order.
+export const BUILD_PANEL: BuildingType[] = [
+  "powerPlant", "refinery", "barracks", "warFactory", "lab",
+  "turret", "pillbox", "antiArmorCannon", "missileTower", "wall", "gate", "constructionYard",
+];
+
+// Fixed mnemonic build hotkeys (16 §1). P/R/B/F/L/T/G/Y per spec; the rest are free letters.
+export const BUILD_HOTKEYS: Partial<Record<BuildingType, string>> = {
+  powerPlant: "P", refinery: "R", barracks: "B", warFactory: "F", lab: "L",
+  turret: "T", pillbox: "X", antiArmorCannon: "C", missileTower: "V",
+  wall: "Y", gate: "G", constructionYard: "N",
+};
+
+// Build-once limits per player (16 §5). Absent = unlimited (walls/gates use STRUCTURE_CAP).
+export const BUILD_MAX_COUNT: Partial<Record<BuildingType, number>> = {
+  constructionYard: 2,
+  lab: 1,
+};
+
+// Movement-line feedback (16 §3).
+export const MOVE_LINE = { lifetime: 1.5 } as const; // seconds to fade
+
+// One-line descriptions for build/production tooltips (16 §6).
+export const BUILDING_DESC: Record<BuildingType, string> = {
+  constructionYard: "Main base — build structures. Lose all to be eliminated.",
+  powerPlant: "+100 power to run your base.",
+  refinery: "Drop-off with +25% mining; includes a free Worker.",
+  barracks: "Trains infantry: Rifleman, Grenadier, Rocket.",
+  warFactory: "Builds vehicles: Scout, Tank, Heavy Tank, Artillery.",
+  lab: "Researches upgrades and unlocks advanced units/defenses.",
+  turret: "Balanced defense; shells at range 7.",
+  pillbox: "Cheap anti-infantry defense (+50% vs Infantry).",
+  antiArmorCannon: "Anti-armor defense (+50% vs Heavy).",
+  missileTower: "Long-range splash defense.",
+  wall: "Blocks movement; funnels attackers. Drag to build a line.",
+  gate: "Opens for your units, closed to enemies.",
+};
+export const UNIT_DESC: Record<UnitType, string> = {
+  worker: "Gathers gold, builds and repairs structures.",
+  rifleman: "Cheap infantry (+50% vs Ranged).",
+  grenadier: "Splash infantry; anti-clump (+50% vs Ranged).",
+  rocket: "Ranged anti-armor (+50% vs Heavy).",
+  scoutBuggy: "Fast raider/scout (+50% vs Heavy).",
+  tank: "Heavy armor (+50% vs Infantry).",
+  heavyTank: "Late-game bruiser (+50% vs Infantry).",
+  artillery: "Siege: long range, splash, +100% vs buildings; fragile.",
+};
+
+// Display names (shared by the HUD + build-rule tooltips; no DOM).
+export const BUILDING_LABEL: Record<BuildingType, string> = {
+  constructionYard: "Construction Yard", powerPlant: "Power Plant", refinery: "Refinery",
+  barracks: "Barracks", warFactory: "War Factory", lab: "Lab", turret: "Gun Turret",
+  pillbox: "Pillbox", antiArmorCannon: "Anti-Armor Cannon", missileTower: "Missile Tower",
+  wall: "Wall", gate: "Gate",
+};
+export const UNIT_LABEL: Record<UnitType, string> = {
+  worker: "Worker", rifleman: "Rifleman", grenadier: "Grenadier", rocket: "Rocket",
+  scoutBuggy: "Scout Buggy", tank: "Tank", heavyTank: "Heavy Tank", artillery: "Artillery",
+};
+export const UNLOCK_LABEL: Record<UnlockKey, string> = {
+  advancedVehicles: "Advanced Vehicles", siegeDoctrine: "Siege Doctrine", advancedDefenses: "Advanced Defenses",
+};
+
+// Lab research (15-logic §2). One at a time, queue up to 3; effects are per-player multipliers
+// (applied in state/upgrades.ts). `requires` is a prerequisite research key (tiering).
+export const RESEARCH_QUEUE_MAX = 3;
+export interface ResearchDef {
+  label: string;
+  gold: number;
+  time: number; // seconds
+  requires?: ResearchKey;
+}
+export const RESEARCH: Record<ResearchKey, ResearchDef> = {
+  mining1: { label: "Improved Mining I", gold: 300, time: 30 },
+  mining2: { label: "Improved Mining II", gold: 600, time: 45, requires: "mining1" },
+  constructionCrews: { label: "Construction Crews", gold: 350, time: 35 },
+  streamlinedProduction: { label: "Streamlined Production", gold: 450, time: 40 },
+  weapons1: { label: "Weapons I", gold: 400, time: 40 },
+  weapons2: { label: "Weapons II", gold: 700, time: 55, requires: "weapons1" },
+  armor1: { label: "Armor I", gold: 400, time: 40 },
+  armor2: { label: "Armor II", gold: 700, time: 55, requires: "armor1" },
+  fieldLogistics: { label: "Field Logistics", gold: 500, time: 45 },
+  supply1: { label: "Supply Lines I", gold: 350, time: 35 },
+  supply2: { label: "Supply Lines II", gold: 600, time: 50, requires: "supply1" },
+  supply3: { label: "Supply Lines III", gold: 900, time: 65, requires: "supply2" },
+  advancedVehicles: { label: "Advanced Vehicles", gold: 600, time: 50 },
+  siegeDoctrine: { label: "Siege Doctrine", gold: 400, time: 40 },
+  advancedDefenses: { label: "Advanced Defenses", gold: 500, time: 45 },
+};
+// Research offered by each building (only the Lab), in command-card order.
+export const RESEARCHES: Partial<Record<BuildingType, ResearchKey[]>> = {
+  lab: [
+    "mining1", "mining2", "weapons1", "weapons2", "armor1", "armor2",
+    "fieldLogistics", "constructionCrews", "streamlinedProduction",
+    "supply1", "supply2", "supply3",
+    "advancedVehicles", "siegeDoctrine", "advancedDefenses",
+  ],
+};
+
+// ── Worker-built construction (15-logic) ────────────────────────────────────
+// Placing a structure pays gold up front and creates a site at buildProgress 0;
+// Workers walk to it and build. Build speed = min(sqrt(workersAtSite), maxSpeed),
+// so 1 worker = base time, 4+ = the 2x cap; 0 workers pauses progress.
+export const CONSTRUCTION = {
+  maxSpeed: 2.0, // multiplier cap on a site's base build rate
+  autoAssignWorkers: 2, // nearest idle Workers auto-assigned when a site is placed
+  chainRadius: 8, // tiles — a Worker that finishes a build picks up the nearest unbuilt site within this
+} as const;
+
+// Worker repair (16 §7): 20 HP/s per Worker costing 0.25 gold/HP (= 5 gold/s), stacking with the
+// same sqrt curve as construction (×2 at 4 Workers). Total gold to repair X HP is X × 0.25.
+export const REPAIR = {
+  hpPerSecond: 20,
+  goldPerHp: 0.25,
+  maxSpeed: 2.0,
+} as const;
+
+// ── Power (04-power.md) ──────────────────────────────────────────────────────
+// When powerUsed > powerProduced: production timers run at x0.5 and turrets at half rate.
+export const LOW_POWER_PRODUCTION_MULT = 0.5;
+
+// ── Citadel (07-citadel.md) ─────────────────────────────────────────────────
+export const CITADEL = {
+  captureRadius: 3, // tiles
+  captureTime: 12, // seconds of uncontested presence to flip
+  goldPerSecond: 2, // flat holder income
+  productionSpeedBonus: 0.2, // +20% production while held
+  energyPerSecond: 0.5, // Command Energy generation while held
+  maxEnergy: 100,
+  winHoldTime: 120, // hold continuously to win
+  visualRadius: 2, // tiles (hexagon ~4x4 footprint)
+} as const;
+
+export interface CitadelPowerDef {
+  energy: number;
+  damage?: number;
+  radius?: number;
+  count?: number;
+  damageBonus?: number;
+  speedBonus?: number;
+  duration?: number;
+  unitHeal?: number;
+  structureHeal?: number;
+}
+export const CITADEL_POWERS: Record<string, CitadelPowerDef> = {
+  artillery: { energy: 25, damage: 150, radius: 3 },
+  reinforcements: { energy: 30, count: 3 },
+  frenzy: { energy: 40, damageBonus: 0.3, speedBonus: 0.3, duration: 20 },
+  repair: { energy: 35, unitHeal: 50, structureHeal: 200 },
+  ion: { energy: 80, damage: 600, radius: 4 },
+};
+
+// ── Build placement & fog (§7, §11) ─────────────────────────────────────────
+export const BUILD_RADIUS = 6; // tiles — a new building must be within this of a friendly one
+export const FOG_UPDATE_INTERVAL = 0.2; // s between fog recomputations (human only)
+
+// ── Terrain generation & navigation (§3, §12) ───────────────────────────────
+export const TERRAIN_GEN = {
+  border: 1, // mountain ring thickness around the map edge
+  featuresPerQuadrant: 5, // cluster seeds generated in one quadrant, then mirrored
+  clusterMin: 2, // tiles per cluster
+  clusterMax: 6,
+  baseMargin: 2, // keep clear around each base footprint
+  citadelMargin: 4, // keep clear around the Citadel
+  mineMargin: 1, // keep clear around home/neutral gold
+  depositClear: true, // never bury a gold deposit
+  maxAttempts: 40, // regenerate until the connectivity check passes, then fall back to border-only
+} as const;
+
+// Relative likelihood of each impassable type when scattering interior terrain.
+export const TERRAIN_WEIGHTS = [
+  { type: "mountain", weight: 5 },
+  { type: "rock", weight: 3 },
+  { type: "water", weight: 2 },
+] as const;
+
+export const NAV = {
+  repathDist: 2.5, // tiles the goal may drift before a unit recomputes its path
+  waypointReach: 0.35, // tiles — close enough to a waypoint to advance to the next
+  maxAStarNodes: 6000, // hard cap on A* expansions (safety)
+  repathCooldown: 0.4, // s — after a no-route result, wait this long before re-running A*
+} as const;
+
+// ── Win conditions (01-overview.md, 08-combat) ──────────────────────────────
+export const CITADEL_DOMINATION_TIME = CITADEL.winHoldTime; // canonical: CITADEL.winHoldTime
+
+// ── Colors / visual language (11-visuals-assets.md) ─────────────────────────
+export const COLORS = {
+  voidBg: "#15181d", // outside the map (render-only)
+  ground: "#23272e",
+  grid: "#31363f",
+  players: ["#3b82f6", "#ef4444", "#22c55e", "#eab308"] as const, // P0..P3
+  neutralGold: "#f5c518",
+  citadelNeutral: "#cbd5e1",
+  citadelEnergy: "#a855f7",
+  hpFull: "#22c55e",
+  hpLow: "#ef4444",
+  selection: "#ffffff",
+  uiPanel: "#1a1d23",
+  uiText: "#e2e8f0",
+  accentPowerPlant: "#facc15",
+  accentRefinery: "#f5c518",
+  accentBarracks: "#94a3b8",
+  accentWarFactory: "#f97316",
+  // Terrain (§3, §15).
+  mountain: "#4b463f",
+  water: "#1e3a5f",
+  rock: "#6b7280",
+  validPlace: "#22c55e",
+  invalidPlace: "#ef4444",
+  // Render-only outline/detail colors (not part of the spec palette).
+  mapBorder: "#3a4150",
+  outline: "#11151b",
+  outlineDeep: "#0f1216",
+  goldShadow: "#d9a400",
+  production: "#38bdf8", // production-progress bar
+  muzzle: "#fde68a", // muzzle flash
+  shell: "#e5e7eb", // shell/bullet
+} as const;
+
+// Fog overlay opacity (§11, §15).
+export const FOG_ALPHA = { unexplored: 1, explored: 0.55, visible: 0 } as const;
+
+export function ownerColor(owner: Owner): string {
+  return owner === "neutral" ? COLORS.neutralGold : COLORS.players[owner];
+}
+
+// Per-type building accent stripe (11-visuals-assets.md)
+export const BUILDING_ACCENT: Record<BuildingType, string> = {
+  constructionYard: COLORS.selection,
+  powerPlant: COLORS.accentPowerPlant,
+  refinery: COLORS.accentRefinery,
+  barracks: COLORS.accentBarracks,
+  warFactory: COLORS.accentWarFactory,
+  lab: COLORS.citadelEnergy, // research → purple
+  turret: COLORS.citadelNeutral,
+  pillbox: "#cbd5e1",
+  antiArmorCannon: "#f97316", // anti-armor → orange
+  missileTower: "#a855f7", // long-range → purple
+  wall: "#6b7280",
+  gate: "#9ca3af",
+};
+
+// ── Render sizes (11-visuals-assets.md; 1 tile = 32px) ──────────────────────
+export const RENDER = {
+  workerRadius: 8, // ⌀16px
+  riflemanSize: 18,
+  rocketSize: 18,
+  tankSize: 24,
+  grenadierSize: 18,
+  scoutBuggySize: 16,
+  heavyTankSize: 30,
+  artillerySize: 24,
+  hpBarHeight: 3,
+  selectionPadding: 4,
+  moveMarkerTtl: 0.6, // s — right-click destination feedback fade
+  minimapSize: 168, // px — square minimap
+  minimapMargin: 12, // px from the screen corner
+} as const;
+
+// Spacing between units when a multi-unit move spreads into a formation (tiles).
+export const FORMATION_SPACING = 0.9;
+
+// Guard-area command (15-logic §6): fixed radius, leash to avoid being baited.
+export const GUARD = { radius: 8, chaseMultiplier: 1.5 } as const;
+
+// Queue cancel refunds (15-logic §7): full if not started, half if in progress.
+export const REFUND = { queued: 1.0, inProgress: 0.5 } as const;
+
+// Input timing (15-logic §8/§9): double-click + right-drag-vs-order disambiguation.
+export const INPUT = {
+  doubleClickTime: 0.32, // s between clicks to count as a double-click
+  rightDragPx: 8, // px of right-drag before it becomes a camera pan (suppress order)
+  rightDragHold: 0.2, // s of right-hold before it becomes a pan
+} as const;
+
+// ── Combat feedback & separation (§10, §12) ─────────────────────────────────
+export const EFFECTS = {
+  muzzleLife: 0.08, // s
+  hitLife: 0.1,
+  tracerLife: 0.05,
+  deathLife: 0.32,
+  hitFlashTime: 0.1, // s a struck entity flashes white
+  lungeTime: 0.13, // s melee lunge animation
+  lungeDist: 0.28, // tiles a melee attacker lunges forward
+} as const;
+
+export const SEPARATION = {
+  maxPushPerFrame: 0.12, // tiles — clamp so jostling never teleports
+} as const;
+
+// ── AI opponents (09-ai.md) ─────────────────────────────────────────────────
+export const AI = {
+  decisionInterval: 0.6, // s between brain evaluations (slower than the render loop)
+  workerTarget: 9, // ramp workers to ~this many
+  armyAttackThreshold: 8, // combat units before pushing out
+  threatRadius: 14, // enemy combat units within this of the base -> DEFEND
+  reattackInterval: 6, // s between re-issuing attack orders
+  citadelContestCount: 2, // units peeled off toward the Citadel during an attack
+  goldBuffer: 60, // keep this much gold free when deciding to spend on structures
+} as const;
+
+// ── Camera (02-map.md) ──────────────────────────────────────────────────────
+export const CAMERA = {
+  panSpeed: 900, // screen px/s via keyboard
+  minZoom: 0.4,
+  maxZoom: 2.0,
+  zoomStep: 0.12,
+  dragThreshold: 6, // px of movement before a left-drag becomes a selection box
+} as const;
+
+// ── Multiplayer / deterministic lockstep (17-multiplayer-implementation.md §7) ──
+export const NET = {
+  SIM_HZ: 30, // fixed simulation rate
+  TICKS_PER_TURN: 3, // a lockstep turn = 3 sim ticks (= TURN_MS at 30 Hz)
+  TURN_MS: 100,
+  INPUT_DELAY_TURNS: 3, // a command issued at turn T executes at T + this (hides latency)
+  CHECKSUM_INTERVAL: 30, // turns between desync checksum compares
+  MAX_PLAYERS: 4,
+  ICE: {
+    iceServers: [
+      { urls: "stun:stun.l.google.com:19302" },
+      // TURN entry added here when needed (file 17); credentials from env/config.
+    ],
+  },
+} as const;
+
+// The one fixed simulation timestep. The sim ONLY ever advances by this — never a frame dt
+// (17 §1.2). Rendering stays 60fps and interpolates between the last two sim states.
+export const SIM_DT = 1 / NET.SIM_HZ;

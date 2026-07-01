@@ -23,4 +23,5 @@ dist-ssr
 *.sln
 *.sw?
 .claude
-.package-lock.json
+package-lock.json
+skills-lock.json
