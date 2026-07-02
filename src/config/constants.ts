@@ -17,7 +17,7 @@ export const GRID = { width: 48, height: 48 } as const;
 // Map editor limits (18 §B): tunable bounds for custom maps.
 export const MAP_EDITOR = {
   minSize: 20,
-  maxSize: 56,
+  maxSize: 160, // raised for the 3x-scaled official maps (validation + editor + import clamp)
   maxCustomMaps: 24,       // localStorage "My Maps" cap
   defaultMineAmount: 3000,
   maxMineAmount: 20000,
@@ -47,14 +47,14 @@ export const BASES: BaseDef[] = [
 export const CITADEL_POS = { x: 24, y: 24 } as const;
 
 // ── Economy (03-resources-economy.md) ───────────────────────────────────────
-export const START_GOLD = 1000;
+export const START_GOLD = 10000; // user: matches start rich (also the MP default)
 export const HOME_MINE_GOLD = 5000;
 export const NEUTRAL_DEPOSIT_GOLD = 3000;
 export const CENTRAL_DEPOSIT_GOLD = 8000;
 // Unit cap is now tiered by Supply Lines research (15-logic §2): base 80, +30 per tier (→170).
 export const BASE_UNIT_CAP = 80;
 export const SUPPLY_LINE_CAP_BONUS = 30;
-export const PRODUCTION_QUEUE_MAX = 5;
+export const PRODUCTION_QUEUE_MAX = 12; // user: up to 12 queued per building
 export const WORKER = {
   capacity: 10, // gold per trip
   mineTime: 2, // seconds to fill
@@ -706,6 +706,46 @@ export const UI = {
   OVERLAY: "rgba(20, 22, 26, 0.6)", // dark veil laid over a screen's background image so panels/text stay legible
 } as const;
 
+// ── In-game HUD design tokens (21 §B) — single source; mirrored as CSS vars in src/ui/hud.css ──
+export const HUD = {
+  // Surfaces
+  BG_PANEL: "rgba(21, 24, 29, 0.94)", // console fill (#15181d @ 94%)
+  BG_WELL: "rgba(10, 12, 15, 0.85)", // inset content wells (#0a0c0f)
+  BG_CHIP: "rgba(35, 39, 46, 0.95)", // small chips/buttons (#23272e)
+  // Bevel borders (fake depth: light top/left, dark bottom/right)
+  EDGE_LIGHT: "#3d434e",
+  EDGE_DARK: "#0c0e11",
+  BORDER: "#2b313b",
+  // Identity
+  TRIM_GOLD: "#f5c518", // the gold trim line — the game's signature
+  TRIM_GOLD_DIM: "rgba(245,197,24,0.35)",
+  // Text
+  TEXT: "#e2e8f0",
+  TEXT_DIM: "#8b94a3",
+  TEXT_GOLD: "#f5c518",
+  GOOD: "#22c55e", BAD: "#ef4444", WARN: "#f59e0b", ENERGY: "#a855f7",
+  // Geometry
+  CHAMFER: 10, // px cut on chamfered corners (large panels)
+  CHAMFER_SM: 6, // small chips/buttons
+  PAD: 10, // internal padding unit
+  CONSOLE_H: 148, // bottom console height
+  STATUS_W: 232, // status console width
+  SIDEBAR_W: 168, // build sidebar width
+  MINIMAP: 168, // minimap inner square
+  TRIM_H: 2, // gold trim line thickness
+} as const;
+
+// 21 §L micro-interaction timings — display-only; never touch the sim.
+export const HUD_ANIM = {
+  ENTRANCE_MS: 250, // console slide-in duration
+  ENTRANCE_STAGGER_MS: 60, // status → sidebar → bottom
+  ENTRANCE_SLIDE_PX: 12,
+  TWEEN_RATE: 0.08, // gold/energy readouts lerp toward the real value at this rate per frame
+  INCOME_FLASH_MS: 300, // income text flash when it changes by more than ±5
+  INCOME_FLASH_DELTA: 5,
+  HOVER_THROTTLE_MS: 80, // ui_hover sound throttle
+} as const;
+
 // 20: per-screen background images (public/backgrounds/*). The ScreenManager renders the current
 // screen's image full-bleed cover-fit behind everything, under UI.OVERLAY. Purely visual — never
 // touches layout/sim/determinism/MP. A screen with no entry (or a 404) falls back to plain UI.BG.
@@ -721,8 +761,8 @@ export const SCREEN_BACKGROUNDS: Record<string, string> = {
 
 // 20 §D/§K: skirmish + shared match options (game speed is determinism-critical — see NET note).
 export const MATCH_OPTIONS = {
-  startingGoldDefault: 1000,
-  startingGoldChoices: [500, 1000, 1500, 2000] as const,
+  startingGoldDefault: 10000,
+  startingGoldChoices: [5000, 10000, 20000, 50000] as const,
   gameSpeedChoices: [0.75, 1, 1.25] as const,
   gameSpeedDefault: 1 as const,
 } as const;

@@ -63,6 +63,33 @@ interface MapSpec {
   paint?: (t: MapTile[][], W: number, H: number, fold: number) => void; // characteristic terrain
 }
 
+// User directive (2026-07-02): official maps are much bigger — every map is upscaled by an integer
+// factor at build time (area ×MAP_SCALE² ≥ 5× the originals). Nearest-neighbor tile expansion; point
+// features map to the CENTER of their scaled block (x → x·K + (K−1)/2), which keeps the Citadel at
+// the exact rotation centre ((W·K−1)/2) and preserves every equidistance/symmetry guarantee.
+const MAP_SCALE = 3;
+
+function scaleMap(m: GameMap, K: number): GameMap {
+  if (K <= 1) return m;
+  const off = (K - 1) / 2;
+  const terrain: MapTile[][] = [];
+  for (let y = 0; y < m.height; y++) {
+    const rows: MapTile[] = [];
+    for (let x = 0; x < m.width; x++) for (let k = 0; k < K; k++) rows.push(m.terrain[y][x]);
+    for (let k = 0; k < K; k++) terrain.push(rows.slice());
+  }
+  const pt = (v: number): number => v * K + off;
+  return {
+    ...m,
+    width: m.width * K,
+    height: m.height * K,
+    terrain,
+    startPositions: m.startPositions.map((s) => ({ slot: s.slot, x: pt(s.x), y: pt(s.y) })),
+    goldMines: m.goldMines.map((g) => ({ x: pt(g.x), y: pt(g.y), amount: g.amount })),
+    citadel: m.citadel ? { x: pt(m.citadel.x), y: pt(m.citadel.y) } : null,
+  };
+}
+
 function build(s: MapSpec): GameMap {
   const { width: W, height: H, fold } = s;
   const t = groundGrid(W, H);
@@ -79,11 +106,11 @@ function build(s: MapSpec): GameMap {
   for (const g of goldMines) rect(t, g.x - 1, g.y - 1, g.x + 1, g.y + 1, "ground");
   for (const p of startPositions) rect(t, p.x - 1, p.y - 1, p.x + 4, p.y + 4, "ground");
 
-  return {
+  return scaleMap({
     id: s.id, name: s.name, author: "official", maxPlayers: s.maxPlayers,
     width: W, height: H, terrain: t, startPositions, goldMines,
     citadel: { x: (W - 1) / 2, y: (H - 1) / 2 }, // exact rotation centre → equal distance to every start
-  };
+  }, MAP_SCALE);
 }
 
 // ── The five official maps ───────────────────────────────────────────────────

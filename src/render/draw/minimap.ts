@@ -1,9 +1,12 @@
-// Minimap: a fixed bottom-right panel showing the whole map at a glance — gold, the
-// Citadel, entities colored by owner, the fog overlay, and the current camera viewport.
-// Respects the human's fog (enemy units only while visible; static objects once explored).
-// Click/drag it to move the camera (handled in the input controller via minimapRect).
+// Minimap = the TACTICAL section of the bottom console (21 §J). It renders into a DEDICATED small
+// canvas that sits inside the console's inset well (the DOM console would otherwise cover anything
+// drawn on the game canvas). Content logic is unchanged from file 15/18/19: terrain, gold, Citadel,
+// fog-gated entity dots, breaking-formation pings, camera rectangle. New per §J: a bezel (1px inner
+// frame + 4px gold corner ticks) and a low-power state that shows ANIMATED STATIC + a blinking
+// RADAR OFFLINE instead of a blank square. Click/drag-to-move stays in the controller via
+// minimapRect(), which now reports the well's on-screen rect (set by the HUD each layout change).
 
-import { COLORS, FOG_ALPHA, RENDER, ownerColor } from "../../config/constants";
+import { COLORS, FOG_ALPHA, HUD, RENDER, ownerColor } from "../../config/constants";
 import { fogAt } from "../../engine/fog";
 import { isLowPower } from "../../state/gameState";
 import type { GameState } from "../../core/types";
@@ -16,46 +19,82 @@ export interface Rect {
   h: number;
 }
 
+// The TACTICAL well's viewport rect, reported by the HUD (bottom console) whenever layout changes.
+// The controller reads it for click/drag hit-testing; before the first report we fall back to the
+// legacy bottom-right corner square so nothing breaks headless or mid-boot.
+let screenRect: Rect | null = null;
+export function setMinimapScreenRect(r: Rect | null): void {
+  screenRect = r;
+}
 export function minimapRect(viewportW: number, viewportH: number): Rect {
+  if (screenRect) return screenRect;
   const s = RENDER.minimapSize;
   const m = RENDER.minimapMargin;
   return { x: viewportW - s - m, y: viewportH - s - m, w: s, h: s };
 }
 
-export function drawMinimap(ctx: CanvasRenderingContext2D, state: GameState, camera: Camera): void {
-  const r = minimapRect(camera.viewportW, camera.viewportH);
-  const sx = r.w / state.mapWidth;
-  const sy = r.h / state.mapHeight;
-  const px = (tx: number) => r.x + tx * sx;
-  const py = (ty: number) => r.y + ty * sy;
+/** Tiny deterministic PRNG for the radar static (render-only; seeded per animation frame so the
+ *  noise dances without touching Math.random or the sim). */
+function noise(seed: number): () => number {
+  let s = seed >>> 0;
+  return () => {
+    s = (Math.imul(s, 1664525) + 1013904223) >>> 0;
+    return s / 0xffffffff;
+  };
+}
+
+/** §C.5/§J bezel: 1px light/dark frame + 4px gold L-ticks at the four corners. */
+function drawBezel(ctx: CanvasRenderingContext2D, w: number, h: number): void {
+  ctx.strokeStyle = HUD.BORDER;
+  ctx.lineWidth = 1;
+  ctx.strokeRect(0.5, 0.5, w - 1, h - 1);
+  ctx.strokeStyle = HUD.TRIM_GOLD;
+  ctx.lineWidth = 2;
+  const t = 4;
+  for (const [cx, cy, dx, dy] of [[1, 1, 1, 1], [w - 1, 1, -1, 1], [w - 1, h - 1, -1, -1], [1, h - 1, 1, -1]] as const) {
+    ctx.beginPath();
+    ctx.moveTo(cx + dx * t, cy);
+    ctx.lineTo(cx, cy);
+    ctx.lineTo(cx, cy + dy * t);
+    ctx.stroke();
+  }
+}
+
+/** Render the minimap into its own canvas context (already DPR-transformed), at 0,0..w,h. */
+export function drawMinimap(ctx: CanvasRenderingContext2D, state: GameState, camera: Camera, w: number, h: number): void {
+  const sx = w / state.mapWidth;
+  const sy = h / state.mapHeight;
+  const px = (tx: number) => tx * sx;
+  const py = (ty: number) => ty * sy;
   const fog = (tx: number, ty: number) => fogAt(state, Math.floor(tx), Math.floor(ty));
 
-  ctx.fillStyle = COLORS.uiPanel;
-  ctx.fillRect(r.x - 3, r.y - 3, r.w + 6, r.h + 6);
-  ctx.fillStyle = COLORS.ground;
-  ctx.fillRect(r.x, r.y, r.w, r.h);
-
-  // §5: radar goes dark while the local player is in power deficit — no map, no dots.
+  // §J radar offline: animated static + blinking label, never a blank square.
   if (isLowPower(state, state.viewPlayer)) {
-    ctx.fillStyle = "#0c0e12";
-    ctx.fillRect(r.x, r.y, r.w, r.h);
-    ctx.fillStyle = COLORS.hpLow;
-    ctx.font = "bold 12px ui-monospace, monospace";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText("RADAR OFFLINE", r.x + r.w / 2, r.y + r.h / 2);
-    ctx.textAlign = "left";
-    ctx.textBaseline = "alphabetic";
-    ctx.strokeStyle = COLORS.mapBorder;
-    ctx.lineWidth = 1;
-    ctx.strokeRect(r.x, r.y, r.w, r.h);
+    ctx.fillStyle = "#0a0c0f"; // BG_WELL, opaque (own canvas)
+    ctx.fillRect(0, 0, w, h);
+    const rnd = noise(Math.floor(state.time * 8) * 2654435761 + 1);
+    ctx.fillStyle = HUD.TEXT_DIM;
+    ctx.globalAlpha = 0.15;
+    for (let i = 0; i < 300; i++) {
+      const x = rnd() * w, y = rnd() * h, s = 1 + rnd();
+      ctx.fillRect(x, y, s, s);
+    }
+    ctx.globalAlpha = 1;
+    if (Math.floor(state.time) % 2 === 0) { // 1s blink
+      ctx.fillStyle = HUD.BAD;
+      ctx.font = `700 11px ${'"Rajdhani", "Segoe UI", system-ui, sans-serif'}`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText("RADAR OFFLINE", w / 2, h / 2);
+      ctx.textAlign = "left";
+      ctx.textBaseline = "alphabetic";
+    }
+    drawBezel(ctx, w, h);
     return;
   }
 
-  ctx.save();
-  ctx.beginPath();
-  ctx.rect(r.x, r.y, r.w, r.h);
-  ctx.clip();
+  ctx.fillStyle = COLORS.ground;
+  ctx.fillRect(0, 0, w, h);
 
   // Terrain shading.
   for (let ty = 0; ty < state.mapHeight; ty++) {
@@ -117,16 +156,14 @@ export function drawMinimap(ctx: CanvasRenderingContext2D, state: GameState, cam
     ctx.stroke();
   }
 
-  // Camera viewport rectangle.
+  // Camera viewport rectangle (§J: TEXT at 80% alpha).
   const tl = camera.screenToTile(0, 0);
   const br = camera.screenToTile(camera.viewportW, camera.viewportH);
-  ctx.strokeStyle = COLORS.selection;
+  ctx.strokeStyle = HUD.TEXT;
+  ctx.globalAlpha = 0.8;
   ctx.lineWidth = 1;
   ctx.strokeRect(px(tl.x), py(tl.y), (br.x - tl.x) * sx, (br.y - tl.y) * sy);
+  ctx.globalAlpha = 1;
 
-  ctx.restore();
-
-  ctx.strokeStyle = COLORS.mapBorder;
-  ctx.lineWidth = 1;
-  ctx.strokeRect(r.x, r.y, r.w, r.h);
+  drawBezel(ctx, w, h);
 }

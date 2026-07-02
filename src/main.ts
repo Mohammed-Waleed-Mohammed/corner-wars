@@ -4,6 +4,7 @@
 // shared seed. The command pipeline underneath is identical (LocalSession today; NetworkSession in M4).
 
 import "./style.css";
+import "./ui/hud.css"; // 21: in-game HUD chrome (tokens mirrored from constants.HUD)
 import { AudioManager } from "./audio/audioManager";
 import { COLORS, colorKeyToIndex, resetPlayerPalette, setPlayerPalette } from "./config/constants";
 import type { GameMap, PlayerId } from "./core/types";
@@ -24,6 +25,8 @@ import { Lobby } from "./ui/lobby/lobby";
 import { ScreenManager } from "./ui/screens/screenManager";
 import { mainMenuScreen, type MenuServices } from "./ui/screens/menuScreens";
 import { initAppBackground, setAppBackground } from "./ui/screens/appBackground";
+import { renderIcon } from "./ui/iconRenderer";
+import { playUiSound, setUiSoundPlayer } from "./ui/uiSound";
 import { showPauseOverlay, showPostMatch } from "./ui/screens/matchOverlays";
 import { openSettings } from "./ui/settings/settingsPanel";
 
@@ -121,6 +124,9 @@ function bootMatch(opts: MatchOpts): void {
   hud.setCommandHandler((cmd) => {
     if (cmd === "stop") controller.stopSelected();
     else if (cmd === "guard") controller.enterGuard();
+    else if (cmd === "fallback") controller.fallBackSelected(); // 21 §G.3 command buttons
+    else if (cmd === "breakform") controller.breakFormationSelected();
+    else if (cmd === "rally") controller.enterRallyMode();
   });
   hud.setCancelHandler((index) => controller.cancelQueueItem(index));
   hud.setRestartHandler(() => location.reload());
@@ -135,6 +141,22 @@ function bootMatch(opts: MatchOpts): void {
   window.addEventListener("pointerdown", resumeAudio);
   window.addEventListener("keydown", resumeAudio);
 
+  // 21 §L HUD interaction sounds: one delegated pair of listeners covers every HUD button/chip —
+  // pointerdown on an enabled button = ui_click, on a disabled one = ui_error; mouseover = ui_hover
+  // (throttled in uiSound). Display-only; removed on teardown.
+  setUiSoundPlayer(audio);
+  const uiSoundDown = (e: PointerEvent): void => {
+    const btn = (e.target as HTMLElement | null)?.closest?.("button");
+    if (!btn) return;
+    playUiSound(btn.disabled || btn.classList.contains("is-disabled") ? "ui_error" : "ui_click");
+  };
+  const uiSoundOver = (e: MouseEvent): void => {
+    const btn = (e.target as HTMLElement | null)?.closest?.("button");
+    if (btn && !btn.disabled) playUiSound("ui_hover");
+  };
+  document.addEventListener("pointerdown", uiSoundDown, true);
+  document.addEventListener("mouseover", uiSoundOver, true);
+
   const muteBtn = document.createElement("button");
   muteBtn.className = "mute-btn";
   muteBtn.title = "Mute (M)";
@@ -144,7 +166,7 @@ function bootMatch(opts: MatchOpts): void {
   const disposeSettings = onSettingsChange((s) => {
     audio.setVolume(s.masterVolume);
     audio.setMuted(s.muted);
-    muteBtn.textContent = s.muted ? "🔇" : "🔊";
+    muteBtn.replaceChildren(renderIcon(s.muted ? "speakerMuted" : "speaker", 20)); // 21 §E drawn glyph
     muteBtn.classList.toggle("muted", s.muted);
   });
   muteBtn.addEventListener("click", () => {
@@ -203,7 +225,14 @@ function bootMatch(opts: MatchOpts): void {
     (alpha) => {
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0); // draw in CSS px; handle HiDPI
       const view = controller.getView();
-      renderGame(ctx, state, camera, view, alpha);
+      // 21 §J: the minimap draws into the bottom console's TACTICAL well canvas.
+      const mmCtx = hud.minimapCanvas.getContext("2d");
+      let minimap: { ctx: CanvasRenderingContext2D; w: number; h: number } | null = null;
+      if (mmCtx && hud.minimapCanvas.width > 0) {
+        mmCtx.setTransform(hud.minimapDpr, 0, 0, hud.minimapDpr, 0, 0);
+        minimap = { ctx: mmCtx, w: hud.minimapCanvas.width / hud.minimapDpr, h: hud.minimapCanvas.height / hud.minimapDpr };
+      }
+      renderGame(ctx, state, camera, view, alpha, minimap);
       canvas.style.cursor = CURSORS[view.hover.action] ?? "default";
       stallEl.hidden = !session.isStalled?.();
       if (!debugEl.hidden && session.debug) {
@@ -226,6 +255,7 @@ function bootMatch(opts: MatchOpts): void {
         debugVisible: controller.isDebugVisible(),
         formationOptions: controller.getFormationOptions(),
         armyBar: controller.getArmyBar(),
+        selection: controller.getSelectionDetail(),
       });
       if (state.winner !== null) onWinner(); // 20 §J: stop + show the post-match screen (once)
     },
@@ -251,6 +281,9 @@ function bootMatch(opts: MatchOpts): void {
   const teardown = (): void => {
     loop.stop();
     disposeSettings();
+    setUiSoundPlayer(null);
+    document.removeEventListener("pointerdown", uiSoundDown, true);
+    document.removeEventListener("mouseover", uiSoundOver, true);
     window.removeEventListener("resize", resize);
     window.removeEventListener("keydown", muteKey);
     window.removeEventListener("keydown", f4Key);
@@ -278,6 +311,7 @@ function bootMatch(opts: MatchOpts): void {
     net?.sendPauseNotice(getSettings().username, on); // cosmetic notice; lockstep stalls safely anyway
     if (on) {
       loop.stop();
+      playUiSound("ui_open");
       pauseEl = showPauseOverlay(app, {
         mp: !!opts.peer,
         onResume: () => setPaused(false),
@@ -316,6 +350,7 @@ function bootMatch(opts: MatchOpts): void {
     ended = true;
     if (pauseEl) { pauseEl.remove(); pauseEl = null; }
     loop.stop();
+    playUiSound("ui_open");
     const isMP = !!opts.peer;
     const overlay = showPostMatch(app, state, opts.localPlayerId, opts.slots, {
       onRematch: isMP || opts.onExit ? undefined : () => { teardown(); bootMatch(opts); },
@@ -333,6 +368,12 @@ function bootMatch(opts: MatchOpts): void {
 // ── Boot: the screen system (20) owns the menu family; game/lobby/editor are full takeovers ──────
 const VERSION = "The Fall of the Citadel · v0.20";
 initAppBackground(app); // 20: the persistent full-bleed background layer (behind everything)
+// 21 §F: warm the HUD display font before the first HUD paint (canvas text needs it loaded).
+// Missing font files just fall back to the system stack — never an error.
+try {
+  document.fonts?.load('700 10px "Rajdhani"').catch(() => {});
+  document.fonts?.load('500 12px "Rajdhani"').catch(() => {});
+} catch { /* older browsers without the Font Loading API */ }
 const screens = new ScreenManager(app);
 
 /** Lobby handlers shared by host/join entry (SP + editor routes go through the menu now). */

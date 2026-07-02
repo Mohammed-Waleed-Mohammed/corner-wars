@@ -40,14 +40,14 @@ export function deriveBuffs(state: GameState, pid: PlayerId): Buff[] {
   // Citadel control — active bonuses + current Command Energy.
   if (state.citadel.controllingPlayer === pid) {
     out.push({
-      id: "citadel", short: "👑 Citadel", kind: "citadel",
+      id: "citadel", short: "Citadel", kind: "citadel",
       tooltip: `Citadel held: +${CITADEL.goldPerSecond} gold/s, +${Math.round(CITADEL.productionSpeedBonus * 100)}% production speed · Command Energy ${Math.floor(p.commandEnergy)}/${CITADEL.maxEnergy}`,
     });
   }
 
   // Timed powers — Battle Frenzy with a live countdown.
   if ((p.frenzyTimer ?? 0) > 0) {
-    out.push({ id: "frenzy", short: "⚡ Frenzy", tooltip: POWER_INFO.frenzy.tooltip, kind: "power", countdown: p.frenzyTimer });
+    out.push({ id: "frenzy", short: "Frenzy", tooltip: POWER_INFO.frenzy.tooltip, kind: "power", countdown: p.frenzyTimer });
   }
 
   // Low power — the red warning lives in the strip too (§K).

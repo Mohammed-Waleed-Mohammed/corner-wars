@@ -7,11 +7,13 @@
 
 import {
   BUILD_HOTKEYS,
+  HUD_ANIM,
   BUILD_PANEL,
   BUILDING_LABEL,
   BUILDING_STATS,
   CITADEL,
-  COLORS,
+  HUD,
+  TILE_SIZE,
   CITADEL_POWERS,
   POWER_INFO,
   PRODUCES,
@@ -24,15 +26,18 @@ import {
   UNIT_STATS,
 } from "../config/constants";
 import type { Building, BuildingType, GameState, PlayerId, ResearchKey, UnitType } from "../core/types";
-import type { ArmyBarEntry, FormationOption } from "../input/controller";
-import { slotsToIcon } from "../sim/formations";
+import type { ArmyBarEntry, FormationOption, SelectionDetail } from "../input/controller";
 import { deriveBuffs } from "../state/buffs";
 import { buildAvailability, unitAvailability } from "../state/buildRules";
 import { unitCap } from "../state/upgrades";
-import type { Camera } from "../render/camera";
+import { Camera } from "../render/camera";
+import { drawBuilding } from "../render/draw/buildings";
+import { setMinimapScreenRect } from "../render/draw/minimap";
+import { renderIcon, setIconOwner } from "./iconRenderer";
+import { drawUnit } from "../render/draw/units";
 import { TechTree } from "./techTree";
 
-export type GroupCommand = "stop" | "guard";
+export type GroupCommand = "stop" | "guard" | "fallback" | "breakform" | "rally";
 
 // Stable display order for the roster strip (15-logic §8).
 const ROSTER_ORDER: UnitType[] = [
@@ -50,29 +55,21 @@ export interface HudInfo {
   debugVisible: boolean;
   formationOptions: FormationOption[]; // 19 §G + 20 §I (cards with silhouettes/traits)
   armyBar: ArmyBarEntry[]; // 20 §I persistent bound-group roster
+  selection: SelectionDetail; // 21 §G.3 portrait/info zones
 }
 
 const UNIT_LABELS = UNIT_LABEL;
 const BUILDING_LABELS = BUILDING_LABEL;
-const HINT =
-  "<b>Left-drag</b> select · <b>Right-click</b> move · <b>Ctrl+Right</b> attack-move · " +
-  "<b>Build</b> from the left panel or hotkeys · <b>WASD</b> pan · <b>Wheel</b> zoom";
-
 // §J: power button order. Icon/label/tooltip come from POWER_INFO (numbers templated from CITADEL_POWERS).
 const POWER_ORDER = ["artillery", "reinforcements", "frenzy", "repair", "ion"] as const;
 
 // §G formation preset display names (order = hotkeys 1..4).
 const FORMATION_LABEL: Record<string, string> = { spear: "Spear", line: "Line", box: "Box", column: "Column" };
 
-interface BuildBtn {
-  el: HTMLButtonElement;
-  kind: "unit" | "research"; // structures moved to the always-on left build panel (16 §4)
-  key: string;
-  cost: number;
-}
 interface PanelBtn {
   el: HTMLButtonElement;
   type: BuildingType;
+  maxBadge: HTMLElement; // 21 §I "MAX" label when the build limit is reached
 }
 
 export class Hud {
@@ -81,9 +78,10 @@ export class Hud {
   private timer: HTMLElement;
   private powerFill: HTMLElement;
   private powerText: HTMLElement;
+  private powerSurplus: HTMLElement; // 21 §H.3 right-aligned surplus readout
+  private powerHead: HTMLElement;
   private army: HTMLElement;
   private dev: HTMLElement;
-  private bar: HTMLElement;
 
   private citadelPanel: HTMLElement;
   private energyText: HTMLElement;
@@ -102,6 +100,9 @@ export class Hud {
   // Income-rate sampling (net Δgold over a ~1s window).
   private incomeRate = 0;
   private incomeInit = false;
+  private displayGold = 0; // 21 §L tweened readouts (display-only)
+  private displayEnergy = 0;
+  private lastIncomeShown = 0;
   private lastSampleTime = 0;
   private lastSampleGold = 0;
   private roster: HTMLElement;
@@ -110,15 +111,22 @@ export class Hud {
   private panelBtns: PanelBtn[] = [];
   private powerBtns: { el: HTMLButtonElement; key: string; cost: number }[] = [];
   private victoryShown = false;
-  private barSig = "";
-  private cbQueue: HTMLElement | null = null;
-  private cbQueueChips: HTMLElement | null = null;
-  private cbProgFill: HTMLElement | null = null;
-  private cbButtons: BuildBtn[] = [];
-  private cbSelect: HTMLElement | null = null;
-  private cbFormations: HTMLElement | null = null;
-  private formationBtns: { el: HTMLButtonElement; id: string }[] = []; // §G/§L formation menu buttons
-  private formationSig = ""; // rebuild the menu only when the option-id set changes
+  // 21 §G.3 fixed command card — zones built once; only their contents change per mode.
+  private cardSig = "";
+  private queueSig = "";
+  private ccPortrait!: HTMLCanvasElement;
+  private ccWell!: HTMLElement;
+  private ccBadge!: HTMLElement;
+  private ccName!: HTMLElement;
+  private ccTitle!: HTMLElement;
+  private ccRow2!: HTMLElement;
+  private ccRow3!: HTMLElement;
+  private ccActions!: HTMLElement;
+  private ccSlots: { el: HTMLButtonElement; hk: HTMLElement; label: HTMLElement }[] = [];
+  private ccQueueCounter: HTMLElement | null = null;
+  private ccQueueFront: HTMLElement | null = null; // the in-progress chip's gold progress bar
+  private portraitCam = new Camera(); // scratch camera for live portrait draws
+  private portraitKey = ""; // skip redrawing an identical portrait every frame
   private formationHandler: ((id: string) => void) | null = null;
   private formationPreviewHandler: ((id: string | null) => void) | null = null; // 20 §I hover ghost
   private groupHandler: ((n: number, center: boolean) => void) | null = null; // 20 §I army bar clicks
@@ -133,41 +141,116 @@ export class Hud {
 
   private rootEl!: HTMLElement; // for destroy() (20 §H Test Play teardown)
   private readonly local: PlayerId; // whose economy/selection/victory this HUD shows
+  /** 21 §J: the TACTICAL well's canvas — main.ts hands its ctx to renderGame each frame. */
+  minimapCanvas!: HTMLCanvasElement;
+  minimapDpr = 1;
+  private tacWell!: HTMLElement;
+  private hudResize = (): void => this.layoutMinimap();
+
+  /** Size the minimap canvas to the well + report the well's viewport rect for click hit-testing. */
+  private layoutMinimap(): void {
+    const r = this.tacWell.getBoundingClientRect();
+    if (r.width === 0) return; // not laid out yet
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    this.minimapDpr = dpr;
+    this.minimapCanvas.width = Math.floor(r.width * dpr);
+    this.minimapCanvas.height = Math.floor(r.height * dpr);
+    setMinimapScreenRect({ x: r.left, y: r.top, w: r.width, h: r.height });
+  }
 
   /** Remove the HUD (and its body-level tech-tree overlay) — used when a match is torn down in place. */
   destroy(): void {
+    window.removeEventListener("resize", this.hudResize);
+    setMinimapScreenRect(null);
     this.rootEl.remove();
     this.techTree.destroyOverlay();
   }
 
   constructor(parent: HTMLElement, localPlayerId: PlayerId = 0) {
     this.local = localPlayerId;
+    setIconOwner(localPlayerId); // 21 §E: entity icons render in the local player's color
     const root = document.createElement("div");
     root.className = "hud";
     root.innerHTML = `
-      <div class="hud-panel">
-        <div class="hud-eyebrow">The Fall of the Citadel · <span data-timer>0:00</span></div>
-        <div class="hud-gold"><span class="hud-coin"></span><span data-gold>0</span><span class="hud-income" data-income></span></div>
-        <div class="hud-power">
-          <div class="hud-power-head">
-            <span class="hud-key">Power</span><span class="hud-power-text" data-powertext>0 / 0</span>
+      <div id="hud-left-stack">
+      <div id="console-status" class="hud-console hud-chamfer">
+        <div class="hud-console-inner hud-chamfer">
+          <div class="status-eyebrow"><span class="hud-header">Resources</span><span class="status-timer" data-timer>0:00</span></div>
+          <div class="status-gold">
+            <span class="status-glyph" data-goldglyph></span>
+            <span class="status-gold-amount" data-gold>0</span>
+            <span class="status-gold-income" data-income></span>
           </div>
-          <div class="hud-bar"><div class="hud-bar-fill" data-power></div></div>
+          <div class="status-power">
+            <div class="status-power-head" data-powerhead>
+              <span class="status-power-left"><span class="status-glyph" data-powerglyph></span><span class="status-power-label">Power</span><span data-powertext>0/0</span></span>
+              <span class="status-power-surplus" data-powersurplus></span>
+            </div>
+            <div class="status-power-bar hud-well hud-chamfer-sm"><div class="status-power-fill" data-power></div></div>
+          </div>
+          <div class="status-units">
+            <span class="status-glyph" data-capglyph></span>
+            <span class="status-units-label">Units</span>
+            <span class="status-units-nums" data-army>0 / 0</span>
+          </div>
+          <div class="hud-buffs" data-buffs></div>
+          <div class="hud-dev" data-dev hidden></div>
         </div>
-        <div class="hud-stat" data-army></div>
-        <div class="hud-buffs" data-buffs></div>
-        <div class="hud-dev" data-dev hidden></div>
+      </div>
+      <div id="console-citadel" class="hud-console hud-chamfer" data-citadel hidden>
+        <div class="hud-console-inner hud-chamfer">
+          <div class="citadel-eyebrow"><span class="status-glyph" data-citglyph></span><span class="hud-header">Citadel Uplink</span></div>
+          <div class="citadel-energy">
+            <span class="status-glyph" data-energyglyph></span>
+            <span class="citadel-energy-val" data-energy>0</span>
+            <div class="citadel-bar hud-well hud-chamfer-sm"><div class="citadel-fill" data-energyfill></div></div>
+          </div>
+          <div class="citadel-powers" data-powers></div>
+        </div>
+      </div>
+      <div id="sidebar-build" class="hud-console hud-chamfer">
+        <div class="hud-console-inner hud-chamfer">
+          <div class="hud-header sb-title">Construction</div>
+          <div class="sb-body" data-buildpanel></div>
+        </div>
+      </div>
       </div>
       <div class="hud-toasts" data-toasts></div>
-      <div class="army-bar" data-armybar style="display:none"></div>
       <div class="roster" data-roster hidden></div>
-      <div class="build-panel" data-buildpanel></div>
-      <div class="citadel-panel" data-citadel hidden>
-        <div class="cit-head"><span class="cit-key">Command Energy</span><span class="cit-energy" data-energy>0</span></div>
-        <div class="hud-bar cit-bar"><div class="hud-bar-fill cit-fill" data-energyfill></div></div>
-        <div class="cit-powers" data-powers></div>
+      <div id="console-bottom" class="hud-console hud-chamfer">
+        <div class="hud-console-inner hud-chamfer">
+          <div class="console-section section-armies">
+            <div class="hud-header">Armies</div>
+            <div class="army-row" data-armybar></div>
+          </div>
+          <div class="console-sep"></div>
+          <div class="console-section section-command">
+            <div class="hud-header">Command</div>
+            <div class="command-card" data-bar>
+              <div class="cc-portrait">
+                <div class="cc-portrait-well hud-well hud-chamfer-sm" data-ccwell>
+                  <canvas class="cc-portrait-canvas" width="96" height="96" data-ccportrait></canvas>
+                  <span class="cc-badge" data-ccbadge hidden></span>
+                </div>
+                <div class="cc-portrait-name" data-ccname></div>
+              </div>
+              <div class="cc-info">
+                <div class="cc-title" data-cctitle></div>
+                <div class="cc-row2" data-ccrow2></div>
+                <div class="cc-row3" data-ccrow3></div>
+              </div>
+              <div class="cc-actions" data-ccactions></div>
+            </div>
+          </div>
+          <div class="console-sep"></div>
+          <div class="console-section section-tactical">
+            <div class="hud-header">Tactical</div>
+            <div class="tactical-well hud-well hud-chamfer-sm" data-tacwell>
+              <canvas class="minimap-canvas" data-minimap></canvas>
+            </div>
+          </div>
+        </div>
       </div>
-      <div class="command-bar" data-bar></div>
       <div class="victory" data-victory hidden>
         <div class="victory-card">
           <div class="victory-eyebrow">Match over</div>
@@ -185,12 +268,31 @@ export class Hud {
     this.buildPanel = root.querySelector("[data-buildpanel]") as HTMLElement;
     this.powerFill = root.querySelector("[data-power]") as HTMLElement;
     this.powerText = root.querySelector("[data-powertext]") as HTMLElement;
+    this.powerSurplus = root.querySelector("[data-powersurplus]") as HTMLElement;
+    this.powerHead = root.querySelector("[data-powerhead]") as HTMLElement;
     this.army = root.querySelector("[data-army]") as HTMLElement;
     this.buffsEl = root.querySelector("[data-buffs]") as HTMLElement;
     this.toastsEl = root.querySelector("[data-toasts]") as HTMLElement;
     this.armyBarEl = root.querySelector("[data-armybar]") as HTMLElement;
     this.dev = root.querySelector("[data-dev]") as HTMLElement;
-    this.bar = root.querySelector("[data-bar]") as HTMLElement;
+    // 21 §G.3: fixed command-card zone references + the 8 permanent action slots.
+    this.ccPortrait = root.querySelector("[data-ccportrait]") as HTMLCanvasElement;
+    this.ccWell = root.querySelector("[data-ccwell]") as HTMLElement;
+    this.ccBadge = root.querySelector("[data-ccbadge]") as HTMLElement;
+    this.ccName = root.querySelector("[data-ccname]") as HTMLElement;
+    this.ccTitle = root.querySelector("[data-cctitle]") as HTMLElement;
+    this.ccRow2 = root.querySelector("[data-ccrow2]") as HTMLElement;
+    this.ccRow3 = root.querySelector("[data-ccrow3]") as HTMLElement;
+    this.ccActions = root.querySelector("[data-ccactions]") as HTMLElement;
+    for (let i = 0; i < 8; i++) {
+      const btn = document.createElement("button");
+      btn.className = "cc-btn hud-chamfer-sm empty";
+      const hk = el("span", "cc-btn-hk");
+      const label = el("span", "cc-btn-label");
+      btn.append(hk, label);
+      this.ccActions.append(btn);
+      this.ccSlots.push({ el: btn, hk, label });
+    }
     this.citadelPanel = root.querySelector("[data-citadel]") as HTMLElement;
     this.energyText = root.querySelector("[data-energy]") as HTMLElement;
     this.energyFill = root.querySelector("[data-energyfill]") as HTMLElement;
@@ -202,37 +304,72 @@ export class Hud {
       const cost = CITADEL_POWERS[key].energy;
       const info = POWER_INFO[key];
       const btn = document.createElement("button");
-      btn.className = "cit-btn";
-      btn.innerHTML =
-        `<span class="cit-btn-icon">${info.icon}</span>` +
-        `<span class="cit-btn-name">${info.label}</span>` +
-        `<span class="cit-btn-cost">${cost}</span>`;
+      btn.className = "citadel-chip hud-chamfer-sm";
       btn.title = `${info.label} (${cost} energy) — ${info.tooltip}`; // §J verbatim effect + numbers
+      btn.append(renderIcon(key === "artillery" ? "artillery_power" : (key as "reinforcements" | "frenzy" | "repair" | "ion"), 24));
+      const badge = el("span", "citadel-chip-cost");
+      badge.textContent = String(cost);
+      btn.append(badge);
       btn.addEventListener("click", () => this.powerHandler?.(key));
       powersEl.append(btn);
       this.powerBtns.push({ el: btn, key, cost });
     }
+    // 21 §H status glyphs — drawn, never emoji.
+    (root.querySelector("[data-goldglyph]") as HTMLElement).append(renderIcon("gold", 16));
+    (root.querySelector("[data-powerglyph]") as HTMLElement).append(renderIcon("power", 14));
+    (root.querySelector("[data-capglyph]") as HTMLElement).append(renderIcon("cap", 14));
+    (root.querySelector("[data-citglyph]") as HTMLElement).append(renderIcon("citadel", 14, HUD.ENERGY));
+    (root.querySelector("[data-energyglyph]") as HTMLElement).append(renderIcon("energy", 16));
     (root.querySelector("[data-restart]") as HTMLButtonElement).addEventListener("click", () =>
       this.restartHandler?.(),
     );
 
-    // Left build panel (16 §4): one button per buildable structure, always available.
-    for (const type of BUILD_PANEL) {
-      const btn = document.createElement("button");
-      btn.className = "bp-btn";
-      const hk = BUILD_HOTKEYS[type];
-      btn.innerHTML =
-        `<span class="bp-icon">${BUILDING_STATS[type].letter}</span>` +
-        `<span class="bp-name">${BUILDING_LABEL[type]}</span>` +
-        `<span class="bp-cost">${BUILDING_STATS[type].gold}</span>` +
-        (hk ? `<span class="bp-hk">${hk}</span>` : "");
-      btn.addEventListener("click", () => this.placeHandler?.(type));
-      this.buildPanel.append(btn);
-      this.panelBtns.push({ el: btn, type });
+    // 21 §I CONSTRUCTION sidebar: category sub-labels + 44px rows (icon well 40 · name/cost · hotkey).
+    const CATEGORIES: [string, BuildingType[]][] = [
+      ["Economy", ["powerPlant", "refinery", "constructionYard"]],
+      ["Military", ["barracks", "warFactory", "lab"]],
+      ["Defense", ["pillbox", "turret", "antiArmorCannon", "missileTower"]],
+      ["Walls", ["wall", "gate"]],
+    ];
+    const inPanel = new Set(BUILD_PANEL);
+    for (const [label, types] of CATEGORIES) {
+      const catTypes = types.filter((t) => inPanel.has(t));
+      if (catTypes.length === 0) continue;
+      const sep = el("div", "sb-cat");
+      sep.textContent = label;
+      this.buildPanel.append(sep);
+      for (const type of catTypes) {
+        const btn = document.createElement("button");
+        btn.className = "sb-row hud-chamfer-sm";
+        const iconWell = el("span", "sb-icon hud-well hud-chamfer-sm");
+        iconWell.append(renderIcon(type, 32));
+        const stack = el("span", "sb-stack");
+        const nm = el("span", "sb-name");
+        nm.textContent = BUILDING_LABEL[type];
+        const cost = el("span", "sb-cost");
+        cost.textContent = `${BUILDING_STATS[type].gold}`;
+        stack.append(nm, cost);
+        btn.append(iconWell, stack);
+        const maxBadge = el("span", "sb-max");
+        maxBadge.textContent = "MAX";
+        maxBadge.hidden = true;
+        btn.append(maxBadge);
+        const hk = BUILD_HOTKEYS[type];
+        if (hk) { const hkEl = el("span", "sb-hk"); hkEl.textContent = hk; btn.append(hkEl); }
+        btn.addEventListener("click", () => this.placeHandler?.(type));
+        this.buildPanel.append(btn);
+        this.panelBtns.push({ el: btn, type, maxBadge });
+      }
     }
 
     // §I: the tech-tree overlay. Clicking an available node routes through the normal research handler.
     this.techTree = new TechTree((key) => this.researchHandler?.(key));
+
+    // 21 §J: wire the TACTICAL minimap canvas + keep its screen rect current for the controller.
+    this.minimapCanvas = root.querySelector("[data-minimap]") as HTMLCanvasElement;
+    this.tacWell = root.querySelector("[data-tacwell]") as HTMLElement;
+    window.addEventListener("resize", this.hudResize);
+    requestAnimationFrame(() => this.layoutMinimap()); // after first layout
   }
 
   setBuildHandler(fn: (unitType: UnitType) => void): void {
@@ -271,7 +408,11 @@ export class Hud {
 
   update(state: GameState, info: HudInfo): void {
     const p = state.players[this.local];
-    this.gold.textContent = String(Math.floor(p.gold));
+    // 21 §L number tween: the readout lerps toward the real value at TWEEN_RATE per frame.
+    // Display-only — the sim value stays exact; snap when close so it never drifts.
+    this.displayGold += (p.gold - this.displayGold) * HUD_ANIM.TWEEN_RATE;
+    if (Math.abs(this.displayGold - p.gold) < 1) this.displayGold = p.gold;
+    this.gold.textContent = String(Math.floor(this.displayGold));
 
     // Income rate: net Δgold over a ~1s window (15-logic §8). Seed the baseline on the first
     // frame so the opening sample isn't (startingGold − 0) of garbage.
@@ -286,16 +427,29 @@ export class Hud {
       this.lastSampleGold = p.gold;
     }
     const r = Math.round(this.incomeRate);
+    // §L: flash the income text when the rate jumps by more than ±INCOME_FLASH_DELTA.
+    if (Math.abs(r - this.lastIncomeShown) > HUD_ANIM.INCOME_FLASH_DELTA) {
+      const cls = r >= this.lastIncomeShown ? "flash-good" : "flash-bad";
+      this.income.classList.remove("flash-good", "flash-bad");
+      void this.income.offsetWidth; // restart the animation
+      this.income.classList.add(cls);
+      window.setTimeout(() => this.income.classList.remove(cls), HUD_ANIM.INCOME_FLASH_MS);
+    }
+    this.lastIncomeShown = r;
     this.income.textContent = `${r >= 0 ? "+" : ""}${r}/s`;
     this.income.classList.toggle("neg", r < 0);
 
+    // §H.3 power row: `POWER used/produced` + right-aligned surplus; bar fill GOOD/BAD,
+    // width = min(used/produced, 1). LOW POWER itself lives in the buff strip (blinking chip).
     const low = p.powerUsed > p.powerProduced;
     const frac = p.powerProduced > 0 ? p.powerUsed / p.powerProduced : p.powerUsed > 0 ? 1 : 0;
     this.powerFill.style.width = `${Math.min(100, frac * 100)}%`;
     this.powerFill.classList.toggle("low", low);
     const surplus = p.powerProduced - p.powerUsed;
-    this.powerText.textContent = low ? "LOW POWER" : `${p.powerUsed} / ${p.powerProduced} (+${surplus})`;
-    this.powerText.classList.toggle("low", low);
+    this.powerText.textContent = `${p.powerUsed}/${p.powerProduced}`;
+    this.powerSurplus.textContent = `(${surplus >= 0 ? "+" : ""}${surplus})`;
+    this.powerSurplus.classList.toggle("neg", surplus < 0);
+    this.powerHead.classList.toggle("low", low);
 
     const counts = new Map<UnitType, number>();
     for (const e of state.entities) {
@@ -304,8 +458,10 @@ export class Hud {
     let units = 0;
     for (const n of counts.values()) units += n;
     const cap = unitCap(p);
-    this.army.innerHTML = `Units <b>${units} / ${cap}</b>`;
-    this.army.classList.toggle("low", units >= cap);
+    // §H.4 units row: WARN at ≥90% of cap, BAD at cap.
+    this.army.textContent = `${units} / ${cap}`;
+    this.army.classList.toggle("warn", units >= cap * 0.9 && units < cap);
+    this.army.classList.toggle("bad", units >= cap);
 
     const mins = Math.floor(state.time / 60);
     const secs = Math.floor(state.time % 60);
@@ -378,6 +534,7 @@ export class Hud {
       pb.el.disabled = !av.ok;
       pb.el.title = av.reason;
       pb.el.classList.toggle("locked", !av.ok);
+      pb.maxBadge.hidden = av.ok || av.reason !== "Maximum built"; // §I at-limit label
     }
   }
 
@@ -391,6 +548,12 @@ export class Hud {
       this.buffCountdowns.clear();
       for (const b of buffs) {
         const chip = el("span", `buff ${b.kind}`);
+        const glyphKind = b.id === "citadel" ? "citadel" : b.id === "frenzy" ? "frenzy" : b.id === "lowpower" ? "warning" : null;
+        if (glyphKind) {
+          const g = el("span", "buff-glyph");
+          g.append(renderIcon(glyphKind as "citadel" | "frenzy" | "warning", 12, b.id === "citadel" ? HUD.ENERGY : b.id === "lowpower" ? HUD.BAD : undefined));
+          chip.append(g);
+        }
         const label = el("span", "buff-label");
         label.textContent = b.short;
         chip.append(label);
@@ -422,17 +585,28 @@ export class Hud {
       breakingNow.add(f.id);
       if (!this.breakingSeen.has(f.id)) {
         const name = FORMATION_LABEL[f.formationDefId] ?? "formation";
-        this.showToast(`⚠ Your ${name} is breaking!`);
+        this.showToast(`Your ${name} is breaking!`, "bad");
       }
     }
     this.breakingSeen = breakingNow; // recovered/dissolved formations can alert again later
   }
 
-  private showToast(text: string): void {
-    const t = el("div", "hud-toast");
-    t.textContent = text;
+  private toastQueue: { text: string; severity: "warn" | "bad" | "good" }[] = [];
+  private showToast(text: string, severity: "warn" | "bad" | "good" = "warn"): void {
+    // §K.4: stack max 3 on screen; queue the rest.
+    if (this.toastsEl.childElementCount >= 3) { this.toastQueue.push({ text, severity }); return; }
+    const t = el("div", `hud-toast hud-chamfer-sm ${severity}`);
+    const col = severity === "bad" ? HUD.BAD : severity === "good" ? HUD.GOOD : HUD.WARN;
+    t.append(renderIcon("warning", 16, col));
+    const span = el("span", "hud-toast-text");
+    span.textContent = text;
+    t.append(span);
     this.toastsEl.append(t);
-    setTimeout(() => t.remove(), 3500);
+    setTimeout(() => {
+      t.remove();
+      const next = this.toastQueue.shift();
+      if (next) this.showToast(next.text, next.severity);
+    }, 3500);
   }
 
   private updateCitadelPanel(state: GameState): void {
@@ -441,7 +615,9 @@ export class Hud {
     const show = cit.controllingPlayer === this.local || p0.commandEnergy > 0;
     this.citadelPanel.hidden = !show;
     if (!show) return;
-    this.energyText.textContent = String(Math.floor(p0.commandEnergy));
+    this.displayEnergy += (p0.commandEnergy - this.displayEnergy) * HUD_ANIM.TWEEN_RATE; // §L tween
+    if (Math.abs(this.displayEnergy - p0.commandEnergy) < 0.5) this.displayEnergy = p0.commandEnergy;
+    this.energyText.textContent = String(Math.floor(this.displayEnergy));
     this.energyFill.style.width = `${(p0.commandEnergy / CITADEL.maxEnergy) * 100}%`;
     for (const b of this.powerBtns) {
       const ok = p0.commandEnergy >= b.cost;
@@ -450,214 +626,264 @@ export class Hud {
     }
   }
 
-  private updateCommandBar(state: GameState, info: HudInfo): void {
-    const b = info.selectedBuilding;
-    const canBuild = !!b && (buildItems(b.buildingType).length > 0 || hasResearch(b.buildingType));
-    const mode = info.placementType ? "placing" : canBuild ? "build" : info.selectionLabel ? "select" : "hint";
-    const sig =
-      mode === "placing" ? `placing:${info.placementType}` : mode === "build" ? `build:${b!.buildingType}` : mode;
-
-    if (sig !== this.barSig) {
-      this.barSig = sig;
-      this.rebuildBar(mode, b, info.placementType);
-    }
-
-    if (mode === "build" && b) {
-      const isLab = b.buildingType === "lab";
-      const queue = isLab ? b.researchQueue ?? [] : b.productionQueue;
-      const queued = queue.length;
-      if (this.cbQueue) this.cbQueue.textContent = `${queued}/${isLab ? RESEARCH_QUEUE_MAX : PRODUCTION_QUEUE_MAX}`;
-      if (this.cbProgFill) {
-        const total = queued === 0 ? 0 : isLab ? RESEARCH[queue[0] as ResearchKey].time : UNIT_STATS[b.productionQueue[0]].buildTime;
-        const timer = isLab ? b.researchTimer ?? 0 : b.productionTimer;
-        this.cbProgFill.style.width = `${total > 0 ? Math.min(1, timer / total) * 100 : 0}%`;
-      }
-      // Clickable queue slots — click to cancel (refund; §7).
-      if (this.cbQueueChips) {
-        this.cbQueueChips.replaceChildren();
-        queue.forEach((item, i) => {
-          const label = isLab ? RESEARCH[item as ResearchKey].label : UNIT_LABELS[item as UnitType];
-          const chip = document.createElement("button");
-          chip.className = "cb-qchip";
-          chip.innerHTML = `<span>${i === 0 ? "▶ " : ""}${label}</span><span class="x">✕</span>`;
-          chip.title = `Cancel — refund ${i === 0 ? "50%" : "100%"}`;
-          chip.addEventListener("click", () => this.cancelHandler?.(i));
-          this.cbQueueChips!.append(chip);
-        });
-      }
-      for (const btn of this.cbButtons) {
-        const av = unitAvailability(state, this.local, b, btn.key as UnitType); // §6 priority + tooltip
-        btn.el.disabled = !av.ok;
-        btn.el.title = av.reason;
-      }
-    } else if (mode === "select" && this.cbSelect) {
-      this.cbSelect.textContent = info.selectionLabel ?? "";
-      // 20 §I formation CARDS: silhouette + name + trait + hotkey; greyed cards PRINT the missing
-      // requirement. Rebuilt when the option set (or its silhouettes/availability) changes.
-      const opts = info.formationOptions;
-      if (this.cbFormations) this.cbFormations.style.display = opts.length > 0 ? "" : "none";
-      const sig = opts.map((o) => `${o.id}:${o.ok ? 1 : 0}:${o.slots.length}:${o.reason ?? ""}`).join("|");
-      if (this.cbFormations && sig !== this.formationSig) {
-        this.formationSig = sig;
-        for (const fb of this.formationBtns) fb.el.remove();
-        this.formationBtns = [];
-        for (const o of opts) {
-          const btn = this.formationCard(o);
-          this.cbFormations.append(btn);
-          this.formationBtns.push({ el: btn, id: o.id });
-        }
-      }
-    }
-  }
-
-  /** 20 §I: one formation card — silhouette (role-colored dot diagram, forward=up), name, trait
-   *  one-liner, hotkey; when unavailable, the MISSING REQUIREMENT is printed on the card. */
-  private formationCard(o: FormationOption): HTMLButtonElement {
-    const btn = document.createElement("button");
-    btn.className = `fcard${o.ok ? "" : " off"}`;
-    const canvas = document.createElement("canvas");
-    canvas.width = 64; canvas.height = 48; canvas.className = "fcard-icon";
-    const ctx = canvas.getContext("2d");
-    if (ctx) {
-      const ROLE_COLOR: Record<string, string> = {
-        front: COLORS.players[0], flank: COLORS.players[1], rear: COLORS.players[2],
-        artillery: COLORS.players[3], support: "#e5e7eb",
-      };
-      for (const p of slotsToIcon(o.slots)) {
-        ctx.fillStyle = ROLE_COLOR[p.role] ?? "#fff";
-        ctx.beginPath();
-        ctx.arc(6 + p.x * 52, 4 + p.y * 40, 2.4, 0, Math.PI * 2);
-        ctx.fill();
-      }
-    }
-    btn.append(canvas);
-    const body = el("div", "fcard-body");
-    const head = el("div", "fcard-head");
-    if (o.hotkey) head.append(Object.assign(el("span", "cb-btn-hk"), { textContent: o.hotkey }));
-    head.append(Object.assign(el("span", "fcard-name"), { textContent: o.name }));
-    body.append(head);
-    const sub = el("div", "fcard-sub");
-    sub.textContent = o.ok ? o.trait : (o.reason ?? "Unavailable"); // requirement printed, no hover needed
-    sub.classList.toggle("req", !o.ok);
-    body.append(sub);
-    btn.append(body);
-    btn.disabled = !o.ok;
-    btn.addEventListener("click", () => this.formationHandler?.(o.id));
-    btn.addEventListener("mouseenter", () => this.formationPreviewHandler?.(o.id)); // 20 §I world ghost
-    btn.addEventListener("mouseleave", () => this.formationPreviewHandler?.(null));
-    return btn;
-  }
-
-  /** 20 §I army bar: bound control groups as chips — number, formation letter, count, integrity ring. */
+  /** 21 §G.2 ARMIES section: 44×44 chamfered chips — group number (display 18/700) inside a 4px
+   *  conic-gradient integrity ring (GOOD ≥70% / WARN 40–69% / BAD <40%), a 9px `L·12` line beneath,
+   *  0.5s blink while breaking. Click = select, double-click = center. Empty → bind hint. */
   private updateArmyBar(entries: ArmyBarEntry[]): void {
     const sig = entries.map((e) => `${e.n}:${e.count}:${e.formationDefId ?? ""}:${e.integrity?.toFixed(2) ?? ""}:${e.breaking ? 1 : 0}`).join("|");
     if (sig === this.armySig) return;
     this.armySig = sig;
     this.armyBarEl.replaceChildren();
-    this.armyBarEl.style.display = entries.length ? "" : "none";
+    if (entries.length === 0) {
+      const empty = el("div", "army-empty");
+      empty.textContent = "CTRL+1\u20139 TO BIND";
+      this.armyBarEl.append(empty);
+      return;
+    }
     const ICON: Record<string, string> = { spear: "S", line: "L", box: "B", column: "C" };
     for (const e of entries) {
-      const chip = el("button", `army-chip${e.breaking ? " breaking" : ""}`);
-      const ring = el("span", "army-ring");
-      if (e.integrity != null) {
-        ring.style.borderColor = e.integrity > 0.66 ? "#22c55e" : e.integrity > 0.33 ? "#eab308" : "#ef4444";
-        ring.textContent = String(e.n);
-      } else {
-        ring.style.borderColor = "#4b5563";
-        ring.textContent = String(e.n);
-      }
-      chip.append(ring);
-      const label = el("span", "army-label");
-      label.textContent = e.formationDefId ? `${ICON[e.formationDefId] ?? "✎"}·${e.count}` : `${e.count}`;
-      chip.append(label);
+      const chip = document.createElement("button");
+      chip.className = `army-chip hud-chamfer-sm${e.breaking ? " breaking" : ""}`;
+      const frac = e.integrity ?? 1;
+      const ringColor = e.integrity == null ? "#4b5563" : frac >= 0.7 ? "var(--hud-good)" : frac >= 0.4 ? "var(--hud-warn)" : "var(--hud-bad)";
+      chip.style.background = `conic-gradient(${ringColor} ${frac * 360}deg, var(--hud-border) ${frac * 360}deg 360deg)`;
+      const core = el("span", "army-core hud-chamfer-sm");
+      const num = el("span", "army-num");
+      num.textContent = String(e.n);
+      const sub = el("span", "army-sub");
+      sub.textContent = e.formationDefId ? `${ICON[e.formationDefId] ?? "C"}\u00b7${e.count}` : `${e.count}`;
+      core.append(num, sub);
+      chip.append(core);
       chip.title = e.formationDefId ? `Army ${e.n} — ${e.formationDefId} formation, ${e.count} units${e.breaking ? " — BREAKING!" : ""}` : `Group ${e.n} — ${e.count} units`;
-      // click = select · double-click = select + center (20 §I).
       chip.addEventListener("click", () => this.groupHandler?.(e.n, false));
       chip.addEventListener("dblclick", () => this.groupHandler?.(e.n, true));
       this.armyBarEl.append(chip);
     }
   }
 
-  private rebuildBar(mode: string, b: Building | null, placing: BuildingType | null): void {
-    this.bar.replaceChildren();
-    this.cbQueue = null;
-    this.cbQueueChips = null;
-    this.cbProgFill = null;
-    this.cbButtons = [];
-    this.cbSelect = null;
-    this.cbFormations = null;
-    this.formationBtns = [];
-    this.bar.classList.toggle("active", mode !== "hint");
+  // ═══ 21 §G.3 — the FIXED command card: three zones that never move ═══════════════════════════
+  private updateCommandBar(state: GameState, info: HudInfo): void {
+    const b = info.selectedBuilding;
+    const sel = info.selection;
+    const producing = !!b && (buildItems(b.buildingType).length > 0 || hasResearch(b.buildingType));
+    const mode: string = info.placementType ? "placing" : producing ? "production" : sel.total > 0 ? "units" : "empty";
+    const sig = mode === "placing" ? `placing:${info.placementType}` : mode === "production" ? `prod:${b!.buildingType}:${b!.id}` : mode;
 
-    if (mode === "placing" && placing) {
-      const t = el("div", "cb-placing");
-      t.innerHTML = `Placing <b>${BUILDING_LABELS[placing]}</b> — left-click to build · right-click / Esc to cancel`;
-      this.bar.append(t);
-      return;
+    if (sig !== this.cardSig) {
+      this.cardSig = sig;
+      this.queueSig = "";
+      this.populateActions(mode, b, info);
+    }
+    this.updatePortrait(mode, state, info);
+    this.updateInfoZone(mode, info);
+    this.refreshActionStates(mode, state, info);
+  }
+
+  // ── portrait zone (120px · 96 well): live entity draw per mode ────────────────
+  private updatePortrait(mode: string, state: GameState, info: HudInfo): void {
+    const sel = info.selection;
+    const b = info.selectedBuilding;
+    this.ccWell.classList.toggle("pulse", mode === "placing");
+    let key = "empty";
+    let name = "";
+    let badge = "";
+    if (mode === "placing" && info.placementType) { key = `place:${info.placementType}`; name = BUILDING_LABELS[info.placementType]; }
+    else if (mode === "production" && b) { key = `b:${b.buildingType}`; name = BUILDING_LABELS[b.buildingType]; }
+    else if (mode === "units" && sel.rep) {
+      key = `u:${sel.rep.unitType}:${sel.rep.owner}`;
+      name = sel.single ? UNIT_LABELS[sel.single.unitType] : UNIT_LABELS[sel.rep.unitType];
+      if (sel.total > 1) badge = `×${sel.total}`;
+    }
+    this.ccName.textContent = name;
+    this.ccBadge.hidden = badge === "";
+    this.ccBadge.textContent = badge;
+    if (key === this.portraitKey) return;
+    this.portraitKey = key;
+
+    const ctx = this.ccPortrait.getContext("2d");
+    if (!ctx) return;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, 96, 96);
+    const cam = this.portraitCam;
+    cam.setViewport(96, 96);
+    if (mode === "units" && sel.rep) {
+      cam.zoom = 76 / (PORTRAIT_UNIT_PX[sel.rep.unitType] ?? 14);
+      cam.x = sel.rep.x * TILE_SIZE - 48 / cam.zoom;
+      cam.y = sel.rep.y * TILE_SIZE - 48 / cam.zoom;
+      drawUnit(ctx, cam, sel.rep, false);
+    } else if ((mode === "production" && b) || (mode === "placing" && info.placementType)) {
+      const type = mode === "placing" ? info.placementType! : b!.buildingType;
+      const stats = BUILDING_STATS[type];
+      const ghost = mode === "placing" || !b ? makePortraitBuilding(type, this.local) : b;
+      cam.zoom = 76 / (Math.max(stats.width, stats.height) * TILE_SIZE);
+      cam.x = (ghost.x + ghost.width / 2) * TILE_SIZE - 48 / cam.zoom;
+      cam.y = (ghost.y + ghost.height / 2) * TILE_SIZE - 48 / cam.zoom;
+      try { drawBuilding(ctx, cam, ghost, false, false, false, state.time); } catch { /* portrait only */ }
+    } else {
+      // Nothing selected: the citadel glyph at 30% opacity (§G.3a).
+      ctx.globalAlpha = 0.3;
+      ctx.drawImage(renderIcon("citadel", 72, HUD.TEXT_DIM), 12, 12, 72, 72);
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  // ── info zone (flex): title / row2 (stats or queue) / row3 (contextual) ───────
+  private updateInfoZone(mode: string, info: HudInfo): void {
+    const sel = info.selection;
+    const b = info.selectedBuilding;
+    if (mode === "empty") this.ccTitle.textContent = "LEFT-DRAG SELECT · RIGHT-CLICK MOVE · F FORMATIONS";
+    else if (mode === "placing") this.ccTitle.textContent = `PLACING ${BUILDING_LABELS[info.placementType!].toUpperCase()}`;
+    else if (mode === "production" && b) this.ccTitle.textContent = BUILDING_LABELS[b.buildingType];
+    else this.ccTitle.textContent = info.selectionLabel ?? "";
+    this.ccTitle.classList.toggle("dim", mode === "empty");
+
+    // Row 2: single-unit stat block, or the production queue strip.
+    if (mode === "units" && sel.single) {
+      const u = sel.single;
+      const hpFrac = u.maxHp > 0 ? u.hp / u.maxHp : 1;
+      const hpCls = hpFrac > 0.66 ? "good" : hpFrac > 0.33 ? "warn" : "bad";
+      this.ccRow2.innerHTML =
+        `<span class="cc-stat">HP <b class="${hpCls}">${Math.ceil(u.hp)}/${Math.ceil(u.maxHp)}</b></span>` +
+        (u.damage > 0 ? `<span class="cc-stat">DMG <b>${u.damage}</b></span><span class="cc-stat">RNG <b>${u.range}</b></span>` : "") +
+        `<span class="cc-stat">SPD <b>${u.speed.toFixed(1)}</b></span>`;
+      this.queueSig = "";
+    } else if (mode === "production" && b) {
+      this.updateQueueStrip(b);
+    } else if (this.ccRow2.childElementCount || this.ccRow2.textContent) {
+      this.ccRow2.replaceChildren();
+      this.queueSig = "";
     }
 
-    if (mode === "build" && b) {
-      const head = el("div", "cb-head");
-      const title = el("span", "cb-title");
-      title.textContent = BUILDING_LABELS[b.buildingType];
-      this.cbQueue = el("span", "cb-queue");
-      head.append(title, this.cbQueue);
+    // Row 3: contextual secondary line.
+    if (mode === "units") this.ccRow3.textContent = sel.traitLine;
+    else if (mode === "production" && b) this.ccRow3.textContent = b.rallyPoint ? "RALLY SET" : "RALLY: press the button, then click the ground";
+    else if (mode === "placing") this.ccRow3.textContent = "LEFT-CLICK TO BUILD · RIGHT-CLICK / ESC CANCELS";
+    else this.ccRow3.textContent = "";
+  }
 
-      const prog = el("div", "cb-progress");
-      this.cbProgFill = el("div", "cb-progress-fill");
-      prog.append(this.cbProgFill);
-
-      this.cbQueueChips = el("div", "cb-queue-chips");
-
-      const btns = el("div", "cb-buttons");
-      for (const item of buildItems(b.buildingType)) {
-        const btn = document.createElement("button");
-        btn.className = "cb-btn";
-        const hk = item.hotkey ? `<span class="cb-btn-hk">${item.hotkey}</span>` : "";
-        btn.innerHTML = `${hk}<span class="cb-btn-name">${item.label}</span><span class="cb-btn-cost">${item.cost}</span>`;
-        const key = item.key as UnitType;
-        btn.addEventListener("click", () => this.buildHandler?.(key));
-        btns.append(btn);
-        this.cbButtons.push({ el: btn, kind: item.kind, key: item.key, cost: item.cost });
-      }
-      // §I: research-capable buildings (the Lab) open the tech-tree overlay instead of a flat list.
-      if (hasResearch(b.buildingType)) {
-        const tt = document.createElement("button");
-        tt.className = "cb-btn research tt-open";
-        tt.innerHTML = `<span class="cb-btn-name">🔬 Tech Tree</span>`;
-        tt.title = "Open the tech tree (research upgrades)";
-        tt.addEventListener("click", () => this.techTree.openTree());
-        btns.append(tt);
-      }
-      this.bar.append(head, prog, this.cbQueueChips, btns);
-      return;
+  /** Queue strip (§G.3b): ≤5 chips 32×32; front chip carries a 3px gold progress bar; ✕/right-click
+   *  cancels with the existing refund logic; `n/max` counter at the right end. */
+  private updateQueueStrip(b: Building): void {
+    const isLab = b.buildingType === "lab";
+    const queue: string[] = isLab ? (b.researchQueue ?? []) : b.productionQueue;
+    const max = isLab ? RESEARCH_QUEUE_MAX : PRODUCTION_QUEUE_MAX;
+    const sig = `${b.id}:${queue.join(",")}`;
+    if (sig !== this.queueSig) {
+      this.queueSig = sig;
+      this.ccRow2.replaceChildren();
+      const strip = el("div", "cc-queue");
+      queue.forEach((item, i) => {
+        const chip = document.createElement("button");
+        chip.className = "cc-qchip hud-chamfer-sm";
+        const code = el("span", "cc-qcode");
+        code.textContent = isLab
+          ? RESEARCH[item as ResearchKey].label.split(" ").map((w) => w[0]).join("").slice(0, 3).toUpperCase()
+          : UNIT_LABELS[item as UnitType].slice(0, 3).toUpperCase();
+        chip.append(code);
+        if (i === 0) { const prog = el("div", "cc-qprog"); chip.append(prog); if (i === 0) this.ccQueueFront = prog; }
+        chip.title = `Cancel — refund ${i === 0 ? "50%" : "100%"}`;
+        chip.addEventListener("click", () => this.cancelHandler?.(i));
+        chip.addEventListener("contextmenu", (e) => { e.preventDefault(); this.cancelHandler?.(i); });
+        strip.append(chip);
+      });
+      if (queue.length === 0) this.ccQueueFront = null;
+      const counter = el("span", "cc-qcounter");
+      this.ccQueueCounter = counter;
+      strip.append(counter);
+      this.ccRow2.append(strip);
     }
-
-    if (mode === "select") {
-      this.cbSelect = el("div", "cb-select");
-      const cmds = el("div", "cb-commands");
-      for (const c of [{ cmd: "stop", label: "Stop" }, { cmd: "guard", label: "Guard (G)" }] as const) {
-        const btn = document.createElement("button");
-        btn.className = "cb-cmd";
-        btn.textContent = c.label;
-        btn.addEventListener("click", () => this.commandHandler?.(c.cmd));
-        cmds.append(btn);
-      }
-      // §G/§L formation menu: presets + saved customs, greyed-with-reason. Buttons are (re)built from
-      // the live options in updateCommandBar (so customs appear); states refresh each frame.
-      this.cbFormations = el("div", "cb-formations");
-      this.formationBtns = [];
-      this.formationSig = "";
-      const label = el("span", "cb-form-label");
-      label.textContent = "Form (F):";
-      this.cbFormations.append(label);
-      this.bar.append(this.cbSelect, cmds, this.cbFormations);
-      return;
+    if (this.ccQueueCounter) this.ccQueueCounter.textContent = `${queue.length}/${max}`;
+    if (this.ccQueueFront && queue.length > 0) {
+      const total = isLab ? RESEARCH[queue[0] as ResearchKey].time : UNIT_STATS[queue[0] as UnitType].buildTime;
+      const timer = isLab ? b.researchTimer ?? 0 : b.productionTimer;
+      this.ccQueueFront.style.width = `${total > 0 ? Math.min(1, timer / total) * 100 : 0}%`;
     }
+  }
 
-    const hint = el("div", "cb-hint");
-    hint.innerHTML = HINT;
-    this.bar.append(hint);
+  // ── action zone (fixed 292px, 4×2 grid): populate the 8 permanent slots per mode ──
+  private populateActions(mode: string, b: Building | null, info: HudInfo): void {
+    // Reset every slot to an empty 20%-opacity well.
+    for (const s of this.ccSlots) {
+      const fresh = s.el.cloneNode(false) as HTMLButtonElement; // drop old listeners
+      fresh.className = "cc-btn hud-chamfer-sm empty";
+      fresh.disabled = true;
+      fresh.title = "";
+      const hk = el("span", "cc-btn-hk"); const label = el("span", "cc-btn-label");
+      fresh.append(hk, label);
+      s.el.replaceWith(fresh);
+      s.el = fresh; s.hk = hk; s.label = label;
+    }
+    const setSlot = (i: number, label: string, hk: string, onClick: () => void, opts?: { hoverId?: string; icon?: Parameters<typeof renderIcon>[0] }): void => {
+      const s = this.ccSlots[i];
+      if (!s) return;
+      s.el.className = "cc-btn hud-chamfer-sm";
+      s.el.disabled = false;
+      s.label.textContent = label;
+      s.hk.textContent = hk;
+      if (opts?.icon) {
+        const ic = el("span", "cc-btn-icon");
+        ic.append(renderIcon(opts.icon, 24));
+        s.el.insertBefore(ic, s.hk);
+      }
+      s.el.addEventListener("click", onClick);
+      if (opts?.hoverId) {
+        s.el.addEventListener("mouseenter", () => this.formationPreviewHandler?.(opts.hoverId!));
+        s.el.addEventListener("mouseleave", () => this.formationPreviewHandler?.(null));
+      }
+    };
+
+    if (mode === "units") {
+      setSlot(0, "STOP", "", () => this.commandHandler?.("stop"));
+      setSlot(1, "GUARD", "G", () => this.commandHandler?.("guard"));
+      setSlot(2, "FALL BACK", "V", () => this.commandHandler?.("fallback"));
+      setSlot(3, "BREAK", "\u21e7F", () => this.commandHandler?.("breakform"));
+      const presets = info.formationOptions.slice(0, 4);
+      presets.forEach((o, i) => setSlot(4 + i, o.name.toUpperCase(), o.hotkey, () => this.formationHandler?.(o.id), { hoverId: o.id, icon: `formation:${o.id}` }));
+    } else if (mode === "production" && b) {
+      const prods = PRODUCES[b.buildingType] ?? [];
+      prods.forEach((u, i) => {
+        if (i > 5) return;
+        setSlot(i, `${UNIT_LABELS[u].toUpperCase()} · ${UNIT_STATS[u].gold}`, UNIT_HOTKEY_SLOTS[i] ?? "", () => this.buildHandler?.(u));
+        this.ccSlots[i].label.classList.add("cost");
+      });
+      let next = Math.min(prods.length, 6);
+      setSlot(next++, "RALLY", "", () => this.commandHandler?.("rally"));
+      if (hasResearch(b.buildingType)) setSlot(next++, "RESEARCH", "", () => this.techTree.openTree(), { icon: "flask" });
+    }
+    // "placing" and "empty" leave all 8 slots as dim empty wells — the frame never changes.
+  }
+
+  /** Per-frame enable/disable + reason tooltips on the populated action slots. */
+  private refreshActionStates(mode: string, state: GameState, info: HudInfo): void {
+    if (mode === "units") {
+      const inF = info.selection.inFormation;
+      const reason = inF ? "" : "No formation — form up first";
+      for (const i of [2, 3]) { // Fall Back / Break
+        const s = this.ccSlots[i];
+        if (s.el.classList.contains("empty")) continue;
+        s.el.disabled = !inF;
+        s.el.classList.toggle("is-disabled", !inF);
+        s.el.title = reason;
+      }
+      const presets = info.formationOptions.slice(0, 4);
+      presets.forEach((o, i) => {
+        const s = this.ccSlots[4 + i];
+        if (!s || s.el.classList.contains("empty")) return;
+        s.el.disabled = !o.ok;
+        s.el.classList.toggle("is-disabled", !o.ok);
+        s.el.title = o.ok ? o.trait : o.reason ?? "Unavailable";
+      });
+    } else if (mode === "production" && info.selectedBuilding) {
+      const b = info.selectedBuilding;
+      (PRODUCES[b.buildingType] ?? []).forEach((u, i) => {
+        const s = this.ccSlots[i];
+        if (!s || s.el.classList.contains("empty")) return;
+        const av = unitAvailability(state, this.local, b, u);
+        s.el.disabled = !av.ok;
+        s.el.classList.toggle("is-disabled", !av.ok);
+        s.el.title = av.reason;
+      });
+    }
   }
 }
 
@@ -688,4 +914,21 @@ function el(tag: string, className: string): HTMLElement {
   const e = document.createElement(tag);
   e.className = className;
   return e;
+}
+
+// 21 §G.3a: approximate on-screen px of each unit shape at zoom 1, for portrait zoom fitting
+// (the draw functions size in screen px via RENDER constants, not tiles).
+const PORTRAIT_UNIT_PX: Partial<Record<UnitType, number>> = {
+  worker: 16, medic: 16, rifleman: 14, rocket: 13, grenadier: 14,
+  scoutBuggy: 15, tank: 18, heavyTank: 22, artillery: 18,
+};
+
+/** A throwaway Building object for portrait/placement drawing — never enters the sim. */
+function makePortraitBuilding(type: BuildingType, owner: PlayerId): Building {
+  const s = BUILDING_STATS[type];
+  return {
+    id: -1, kind: "building", owner, x: 0, y: 0, hp: s.hp, maxHp: s.hp, sightRadius: 0,
+    buildingType: type, width: s.width, height: s.height, buildProgress: 1,
+    productionQueue: [], productionTimer: 0, rallyPoint: null, attackTimer: 0,
+  } as unknown as Building;
 }

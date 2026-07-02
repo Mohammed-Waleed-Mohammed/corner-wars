@@ -136,4 +136,20 @@ export class AudioManager {
     this.last.set(id, t);
     SYNTHS[id]?.(this.ctx, this.master, t);
   }
+
+  /** 21 §L HUD interaction sounds — UI-side only (never emitted by the sim). */
+  playUi(id: "ui_click" | "ui_hover" | "ui_error" | "ui_open"): void {
+    if (this.muted || !this.ctx || !this.master) return;
+    const t = this.ctx.currentTime;
+    switch (id) {
+      case "ui_click": tone(this.ctx, this.master, t, 700, "square", 0.045, 0.08, 500); break;
+      case "ui_hover": tone(this.ctx, this.master, t, 900, "sine", 0.03, 0.03); break;
+      case "ui_error": tone(this.ctx, this.master, t, 160, "square", 0.12, 0.1, 120); break;
+      case "ui_open": {
+        tone(this.ctx, this.master, t, 420, "triangle", 0.07, 0.09);
+        tone(this.ctx, this.master, t + 0.06, 640, "triangle", 0.08, 0.09);
+        break;
+      }
+    }
+  }
 }

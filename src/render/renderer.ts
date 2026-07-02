@@ -25,6 +25,7 @@ export function renderGame(
   camera: Camera,
   view: RenderView,
   alpha = 1,
+  minimap?: { ctx: CanvasRenderingContext2D; w: number; h: number } | null, // 21 §J: TACTICAL well canvas
 ): void {
   drawBackground(ctx, camera, state);
   drawTerrainLayer(ctx, state, camera); // cached offscreen terrain, blitted
@@ -102,7 +103,9 @@ export function renderGame(
   if (view.dragBox) drawDragBox(ctx, view.dragBox.start, view.dragBox.end);
 
   // Minimap last, anchored to the screen corner.
-  drawMinimap(ctx, state, camera);
+  // 21 §J: the minimap lives in the bottom console's TACTICAL well (its own canvas); without one
+  // (headless/tests) it simply isn't drawn.
+  if (minimap) drawMinimap(minimap.ctx, state, camera, minimap.w, minimap.h);
 }
 
 /** §3: player move (white) / attack-move (red) lines from each ordered unit to the destination,

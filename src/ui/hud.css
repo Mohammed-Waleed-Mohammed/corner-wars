@@ -1,0 +1,940 @@
+/* ═══ 21 — In-game HUD: the command console ═══════════════════════════════════
+   Single stylesheet for the in-game HUD chrome. Tokens mirror constants.HUD (§B) —
+   change a value there and here together. ZERO border-radius in-game: every panel,
+   chip, and button is chamfered via the §C.1 clip-path polygon. */
+
+/* §F typography — Rajdhani (SIL OFL), woff2 only; graceful system fallback if absent. */
+@font-face {
+  font-family: "Rajdhani";
+  src: url("/fonts/rajdhani-500.woff2") format("woff2");
+  font-weight: 500;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Rajdhani";
+  src: url("/fonts/rajdhani-700.woff2") format("woff2");
+  font-weight: 700;
+  font-display: swap;
+}
+
+/* §B tokens as CSS custom properties. */
+:root {
+  --hud-bg-panel: rgba(21, 24, 29, 0.94);
+  --hud-bg-well: rgba(10, 12, 15, 0.85);
+  --hud-bg-chip: rgba(35, 39, 46, 0.95);
+  --hud-edge-light: #3d434e;
+  --hud-edge-dark: #0c0e11;
+  --hud-border: #2b313b;
+  --hud-trim-gold: #f5c518;
+  --hud-trim-gold-dim: rgba(245, 197, 24, 0.35);
+  --hud-text: #e2e8f0;
+  --hud-text-dim: #8b94a3;
+  --hud-text-gold: #f5c518;
+  --hud-good: #22c55e;
+  --hud-bad: #ef4444;
+  --hud-warn: #f59e0b;
+  --hud-energy: #a855f7;
+  --hud-chamfer: 10px;
+  --hud-chamfer-sm: 6px;
+  --hud-pad: 10px;
+  --hud-console-h: 148px;
+  --hud-status-w: 232px;
+  --hud-sidebar-w: 168px;
+  --hud-minimap: 168px;
+  --hud-trim-h: 2px;
+  --hud-display: "Rajdhani", "Segoe UI", system-ui, sans-serif;
+}
+
+/* ── §C.1 the chamfer shape (all 4 corners cut; never border-radius) ────────── */
+.hud-chamfer,
+.hud-chamfer-sm {
+  clip-path: polygon(
+    var(--c) 0, calc(100% - var(--c)) 0, 100% var(--c),
+    100% calc(100% - var(--c)), calc(100% - var(--c)) 100%,
+    var(--c) 100%, 0 calc(100% - var(--c)), 0 var(--c)
+  );
+}
+.hud-chamfer { --c: var(--hud-chamfer); }
+.hud-chamfer-sm { --c: var(--hud-chamfer-sm); }
+
+/* ── §C.2 console bevel (outer dark shell + light-catch + inset surface) ─────── */
+.hud-console {
+  position: relative;
+  background: var(--hud-edge-dark);
+}
+.hud-console::before { /* light edge, top-left */
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, var(--hud-edge-light) 0%, transparent 30%);
+}
+.hud-console-inner { /* actual surface — inset 1px 2px 2px 1px via margins so auto-height works */
+  position: relative;
+  margin: 1px 2px 2px 1px;
+  background: var(--hud-bg-panel);
+}
+
+/* ── §C.3 the gold trim — major consoles + modal cards ONLY ──────────────────── */
+.hud-console-inner::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: calc(var(--c) * 0.7);
+  right: calc(var(--c) * 0.7);
+  height: var(--hud-trim-h, 2px);
+  background: var(--hud-trim-gold);
+}
+
+/* ── §C.4 inset wells ─────────────────────────────────────────────────────────── */
+.hud-well {
+  background: var(--hud-bg-well);
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.6);
+}
+
+/* ── chips (§C.1 small) — no trim ─────────────────────────────────────────────── */
+.hud-chip {
+  background: var(--hud-bg-chip);
+  color: var(--hud-text);
+  font-family: var(--hud-display);
+  font-weight: 700;
+}
+
+/* ── §C.6 eyebrow headers ─────────────────────────────────────────────────────── */
+.hud-header {
+  font-family: var(--hud-display);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  color: var(--hud-text-dim);
+}
+
+/* ═══ §H — STATUS console (top-left, 232px) ═══════════════════════════════════ */
+#console-status {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  width: var(--hud-status-w);
+  z-index: 11;
+  pointer-events: auto;
+}
+#console-status .hud-console-inner {
+  padding: var(--hud-pad);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+/* Row 1: eyebrow — RESOURCES left, match timer right. */
+.status-eyebrow {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding-top: 3px; /* clear the gold trim */
+}
+.status-timer {
+  font-family: var(--hud-display);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--hud-text);
+  font-variant-numeric: tabular-nums;
+}
+/* Row 2: gold. */
+.status-gold {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.status-gold-glyph { /* §E gold glyph: filled TRIM_GOLD circle with a darker inner ring (16px) */
+  width: 16px;
+  height: 16px;
+  align-self: center;
+  background: radial-gradient(circle at 50% 50%, var(--hud-trim-gold) 0 34%, #a8871a 36% 52%, var(--hud-trim-gold) 54% 100%);
+  clip-path: circle(50%);
+  flex: 0 0 auto;
+}
+.status-gold-amount {
+  font-family: var(--hud-display);
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--hud-text-gold);
+  font-variant-numeric: tabular-nums;
+}
+.status-gold-income {
+  font-size: 12px;
+  font-family: var(--hud-display);
+  font-weight: 700;
+  color: var(--hud-good);
+  font-variant-numeric: tabular-nums;
+}
+.status-gold-income.neg { color: var(--hud-bad); }
+/* Row 3: power. */
+.status-power-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 12px;
+  color: var(--hud-text);
+  font-variant-numeric: tabular-nums;
+}
+.status-power-label {
+  font-family: var(--hud-display);
+  font-weight: 700;
+  font-size: 10px;
+  letter-spacing: 1px;
+  color: var(--hud-text-dim);
+  margin-right: 6px;
+}
+.status-power-surplus { color: var(--hud-good); font-variant-numeric: tabular-nums; }
+.status-power-surplus.neg { color: var(--hud-bad); }
+.status-power-bar {
+  height: 6px;
+  margin-top: 4px;
+}
+.status-power-fill {
+  height: 100%;
+  width: 0%;
+  background: var(--hud-good);
+  transition: width 0.15s linear;
+}
+.status-power-fill.low { background: var(--hud-bad); }
+.status-power-head.low, .status-power-head.low .status-power-label { color: var(--hud-bad); }
+/* Row 4: units / cap. */
+.status-units {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.status-units-label {
+  font-family: var(--hud-display);
+  font-weight: 700;
+  font-size: 10px;
+  letter-spacing: 1px;
+  color: var(--hud-text-dim);
+}
+.status-units-nums {
+  font-family: var(--hud-display);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--hud-text);
+  font-variant-numeric: tabular-nums;
+}
+.status-units-nums.warn { color: var(--hud-warn); }
+.status-units-nums.bad { color: var(--hud-bad); }
+/* Row 5: buff strip — 20px chamfer-sm chips, display 11/700 labels. */
+#console-status .hud-buffs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  max-width: none;
+}
+#console-status .hud-buffs:empty { display: none; }
+#console-status .buff {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 20px;
+  padding: 0 7px;
+  border: none;
+  border-radius: 0; /* chamfered via clip-path, never rounded */
+  font-family: var(--hud-display);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  line-height: 20px;
+  background: var(--hud-bg-chip);
+  clip-path: polygon(
+    var(--hud-chamfer-sm) 0, calc(100% - var(--hud-chamfer-sm)) 0, 100% var(--hud-chamfer-sm),
+    100% calc(100% - var(--hud-chamfer-sm)), calc(100% - var(--hud-chamfer-sm)) 100%,
+    var(--hud-chamfer-sm) 100%, 0 calc(100% - var(--hud-chamfer-sm)), 0 var(--hud-chamfer-sm)
+  );
+}
+#console-status .buff.upgrade { color: #9ec9ff; }
+#console-status .buff.unlock { color: var(--hud-good); }
+#console-status .buff.citadel { color: var(--hud-energy); }
+#console-status .buff.power { color: var(--hud-text-gold); }
+#console-status .buff.warning { color: var(--hud-bad); animation: hud-blink 1s steps(2, start) infinite; }
+#console-status .buff-cd { font-variant-numeric: tabular-nums; opacity: 0.9; }
+/* F3 dev line (unchanged raw text, hidden by default). */
+#console-status .hud-dev {
+  border-top: 1px solid var(--hud-border);
+  padding-top: 6px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--hud-text-dim);
+}
+
+@keyframes hud-blink { 50% { opacity: 0.45; } }
+
+/* ═══ §D/§G — BOTTOM console: ONE frame, three sections ═══════════════════════ */
+#console-bottom {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  bottom: 8px;
+  height: var(--hud-console-h);
+  z-index: 12;
+  pointer-events: auto;
+}
+#console-bottom .hud-console-inner {
+  height: calc(100% - 3px); /* inner surface inside the 1/2px bevel */
+  display: flex;
+  align-items: stretch;
+}
+.console-section {
+  padding: calc(var(--hud-pad) - 2px) var(--hud-pad) var(--hud-pad);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.console-section > .hud-header { padding-top: 4px; } /* clear the gold trim */
+.section-armies { flex: 0 0 220px; }
+.section-command { flex: 1 1 auto; }
+.section-tactical { flex: 0 0 192px; align-items: center; }
+.section-tactical > .hud-header { align-self: flex-start; }
+.console-sep {
+  flex: 0 0 1px;
+  background: var(--hud-border);
+  margin: 8px 0; /* §G: separators inset 8px top/bottom */
+}
+
+/* §G.2 ARMIES — 44×44 chips with conic integrity rings. */
+.army-row {
+  display: flex;
+  flex-wrap: wrap; /* max 2 rows fit in the section height */
+  gap: 6px;
+  align-content: flex-start;
+  overflow: hidden;
+}
+.army-chip {
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: none;
+  cursor: pointer;
+  position: relative;
+  /* background = the conic integrity ring, set inline per chip */
+}
+.army-chip:hover { outline: 1px solid var(--hud-trim-gold); outline-offset: -1px; }
+.army-chip.breaking { animation: hud-blink-fast 0.5s steps(2, start) infinite alternate; }
+.army-core {
+  position: absolute;
+  inset: 4px; /* the 4px ring */
+  background: var(--hud-bg-well);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+}
+.army-num {
+  font-family: var(--hud-display);
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--hud-text);
+}
+.army-sub {
+  font-family: var(--hud-display);
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--hud-text-dim);
+  letter-spacing: 0.5px;
+}
+.army-empty {
+  font-family: var(--hud-display);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: var(--hud-text-dim);
+  opacity: 0.6;
+  padding-top: 12px;
+}
+@keyframes hud-blink-fast { 50% { opacity: 0.45; } }
+
+/* §J TACTICAL — the minimap well (bezel + ticks drawn on the canvas itself).
+   Derivation note: a 168px inner square cannot fit inside the fixed 148px console, so the well is a
+   SQUARE sized to the section's remaining height (aspect preserved; the 192px section width and the
+   168 token still bound it horizontally). */
+.tactical-well {
+  flex: 1;
+  aspect-ratio: 1 / 1;
+  max-width: var(--hud-minimap);
+  width: auto;
+  position: relative;
+}
+.minimap-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  cursor: pointer;
+}
+
+/* M2 shim: the legacy command bar rides inside the COMMAND section until M3 rebuilds it into
+   the fixed three-zone card. Strips its floating-panel positioning/chrome. */
+#console-bottom .command-bar {
+  position: static;
+  transform: none;
+  max-width: none;
+  min-width: 0;
+  width: 100%;
+  flex: 1;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  backdrop-filter: none;
+  overflow-y: auto;
+}
+
+/* §D responsive: <980px the Armies section collapses (chips number-only 32px). */
+@media (max-width: 980px) {
+  .section-armies { flex-basis: 120px; }
+  .army-chip { width: 32px; height: 32px; }
+  .army-sub { display: none; }
+  .army-num { font-size: 14px; }
+}
+
+/* ═══ §G.3 — the FIXED command card (portrait 120 / info flex / actions 292) ═══ */
+.command-card {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: stretch;
+  gap: var(--hud-pad);
+}
+/* a) portrait zone — fixed 120px, 96×96 well centered vertically */
+.cc-portrait {
+  flex: 0 0 120px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  min-width: 0;
+}
+.cc-portrait-well {
+  position: relative;
+  width: 96px;
+  height: 96px;
+  flex: 0 0 auto;
+}
+.cc-portrait-well.pulse { animation: cc-pulse 1s ease-in-out infinite; }
+@keyframes cc-pulse { 0%, 100% { opacity: 0.9; } 50% { opacity: 1; } }
+.cc-portrait-canvas { display: block; width: 96px; height: 96px; }
+.cc-badge {
+  position: absolute;
+  right: 3px;
+  bottom: 2px;
+  font-family: var(--hud-display);
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--hud-text-gold);
+  font-variant-numeric: tabular-nums;
+}
+.cc-portrait-name {
+  font-family: var(--hud-display);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--hud-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 116px;
+}
+/* b) info zone — three stacked rows, 8px gaps */
+.cc-info {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 8px;
+}
+.cc-title {
+  height: 16px;
+  font-family: var(--hud-display);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--hud-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cc-title.dim { color: var(--hud-text-dim); font-size: 11px; letter-spacing: 0.5px; }
+.cc-row2 { min-height: 32px; display: flex; align-items: center; gap: 12px; }
+.cc-stat { font-size: 12px; color: var(--hud-text-dim); }
+.cc-stat b {
+  font-family: var(--hud-display);
+  font-weight: 700;
+  color: var(--hud-text);
+  font-variant-numeric: tabular-nums;
+}
+.cc-stat b.good { color: var(--hud-good); }
+.cc-stat b.warn { color: var(--hud-warn); }
+.cc-stat b.bad { color: var(--hud-bad); }
+.cc-row3 { height: 13px; font-size: 11px; color: var(--hud-text-dim); white-space: nowrap; overflow: hidden; }
+/* queue strip */
+.cc-queue { display: flex; align-items: center; gap: 5px; }
+.cc-qchip {
+  position: relative;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: none;
+  cursor: pointer;
+  background: var(--hud-bg-chip);
+  color: var(--hud-text);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.cc-qchip:hover { outline: 1px solid var(--hud-bad); outline-offset: -1px; }
+.cc-qcode { font-family: var(--hud-display); font-size: 10px; font-weight: 700; letter-spacing: 0.5px; }
+.cc-qprog {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 3px;
+  width: 0%;
+  background: var(--hud-trim-gold);
+}
+.cc-qcounter {
+  margin-left: 4px;
+  font-family: var(--hud-display);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--hud-text-dim);
+  font-variant-numeric: tabular-nums;
+}
+/* c) action zone — fixed 292px, 4×2 grid of 64×44 buttons */
+.cc-actions {
+  flex: 0 0 292px;
+  display: grid;
+  grid-template-columns: repeat(4, 64px);
+  grid-template-rows: repeat(2, 44px);
+  gap: 8px 8px;
+  align-content: center;
+  justify-content: end;
+}
+.cc-btn {
+  position: relative;
+  width: 64px;
+  height: 44px;
+  padding: 2px 3px;
+  border: none;
+  cursor: pointer;
+  background: var(--hud-bg-chip);
+  color: var(--hud-text);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  transition: filter 0.08s;
+}
+.cc-btn.empty {
+  background: var(--hud-bg-well);
+  opacity: 0.2;
+  cursor: default;
+}
+.cc-btn:hover:not(.empty):not(:disabled) { outline: 1px solid var(--hud-trim-gold); outline-offset: -1px; filter: brightness(1.08); }
+.cc-btn:active:not(.empty):not(:disabled) { transform: translateY(1px); box-shadow: inset 0 2px 3px rgba(0, 0, 0, 0.5); }
+.cc-btn:disabled:not(.empty) { opacity: 0.4; cursor: not-allowed; }
+.cc-btn-label {
+  font-family: var(--hud-display);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  line-height: 1.1;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  max-width: 60px;
+  padding-bottom: 3px;
+}
+.cc-btn-label.cost { color: var(--hud-text-gold); }
+.cc-btn-hk {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 12px;
+  height: 12px;
+  background: var(--hud-bg-well);
+  color: var(--hud-text-dim);
+  font-family: var(--hud-display);
+  font-size: 9px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.cc-btn-hk:empty { display: none; }
+/* §D responsive: <1180px formation buttons go icon-only (labels hidden) */
+@media (max-width: 1180px) {
+  .cc-actions { flex-basis: 200px; grid-template-columns: repeat(4, 44px); }
+  .cc-btn { width: 44px; }
+  .cc-btn-label { font-size: 8px; }
+}
+
+/* ═══ §E — icon placements (M4) ═══════════════════════════════════════════════ */
+.cc-btn-icon { position: absolute; top: 1px; left: 50%; transform: translateX(-50%); line-height: 0; pointer-events: none; }
+.cc-btn-icon canvas { display: block; }
+.buff-glyph { display: inline-flex; line-height: 0; }
+.hud-toast { display: flex; align-items: center; gap: 7px; }
+.hud-toast canvas { display: block; flex: 0 0 auto; }
+.bp-icon canvas { display: block; }
+.mute-btn { display: inline-flex; align-items: center; justify-content: center; }
+.mute-btn canvas { display: block; }
+.cit-btn-icon { line-height: 0; }
+.cit-btn-icon canvas { display: block; }
+
+/* ═══ §H.4 — left stack: Status + CITADEL UPLINK dock (2px gap) ═══════════════ */
+#hud-left-stack {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  width: var(--hud-status-w);
+  z-index: 11;
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+#console-status { position: static; width: auto; } /* now a stack child */
+.status-glyph { display: inline-flex; align-self: center; line-height: 0; flex: 0 0 auto; }
+.status-glyph canvas { display: block; }
+.status-power-left { display: inline-flex; align-items: baseline; gap: 5px; }
+.status-power-left .status-glyph { align-self: center; }
+#console-citadel .hud-console-inner {
+  padding: var(--hud-pad);
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.citadel-eyebrow { display: flex; align-items: center; gap: 6px; padding-top: 3px; }
+.citadel-energy { display: flex; align-items: center; gap: 7px; }
+.citadel-energy-val {
+  font-family: var(--hud-display);
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--hud-energy);
+  font-variant-numeric: tabular-nums;
+  min-width: 34px;
+}
+.citadel-bar { flex: 1; height: 6px; }
+.citadel-fill { height: 100%; width: 0%; background: var(--hud-energy); transition: width 0.15s linear; }
+.citadel-powers { display: flex; gap: 6px; }
+.citadel-chip {
+  position: relative;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: none;
+  cursor: pointer;
+  background: var(--hud-bg-chip);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.citadel-chip canvas { display: block; }
+.citadel-chip-cost {
+  position: absolute;
+  right: 2px;
+  bottom: 1px;
+  font-family: var(--hud-display);
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--hud-energy);
+  font-variant-numeric: tabular-nums;
+}
+.citadel-chip:disabled { opacity: 0.4; cursor: not-allowed; filter: grayscale(0.6); }
+.citadel-chip.affordable { outline: 1px solid var(--hud-energy); outline-offset: -1px; animation: citadel-pulse 2s ease-in-out infinite; }
+.citadel-chip.affordable:hover { outline-color: var(--hud-trim-gold); animation: none; }
+@keyframes citadel-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.82; } }
+
+/* ═══ §I — BUILD sidebar (CONSTRUCTION, left edge) ════════════════════════════ */
+#sidebar-build {
+  position: absolute;
+  left: 12px;
+  top: 300px;
+  width: var(--hud-sidebar-w);
+  max-height: calc(100vh - 300px - var(--hud-console-h) - 32px);
+  z-index: 11;
+  pointer-events: auto;
+  display: flex;
+}
+#sidebar-build .hud-console-inner {
+  flex: 1;
+  padding: calc(var(--hud-pad) - 2px) 6px var(--hud-pad);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.sb-title { padding: 4px 4px 6px; }
+.sb-body { overflow-y: auto; min-height: 0; display: flex; flex-direction: column; gap: 4px; scrollbar-width: thin; }
+.sb-cat {
+  font-family: var(--hud-display);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: var(--hud-text-dim);
+  border-top: 1px solid var(--hud-border);
+  padding: 5px 4px 1px;
+  margin-top: 3px;
+}
+.sb-cat:first-child { border-top: none; margin-top: 0; }
+.sb-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 148px;
+  height: 44px;
+  padding: 2px 4px;
+  border: none;
+  cursor: pointer;
+  background: var(--hud-bg-chip);
+  color: var(--hud-text);
+  text-align: left;
+  flex: 0 0 auto;
+}
+.sb-row:hover:not(:disabled) { outline: 1px solid var(--hud-trim-gold); outline-offset: -1px; filter: brightness(1.08); }
+.sb-row:active:not(:disabled) { transform: translateY(1px); }
+.sb-row:disabled { opacity: 0.4; cursor: not-allowed; }
+.sb-icon { width: 40px; height: 40px; flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; }
+.sb-icon canvas { display: block; }
+.sb-stack { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.sb-name {
+  font-family: var(--hud-display);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 74px;
+}
+.sb-cost { font-family: var(--hud-display); font-size: 10px; font-weight: 700; color: var(--hud-text-gold); font-variant-numeric: tabular-nums; }
+.sb-max {
+  font-family: var(--hud-display);
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--hud-warn);
+  margin-left: auto;
+}
+.sb-hk {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 12px;
+  height: 12px;
+  background: var(--hud-bg-well);
+  color: var(--hud-text-dim);
+  font-family: var(--hud-display);
+  font-size: 9px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ═══ §K — overlays on the console chrome ═════════════════════════════════════ */
+/* K.1 tech tree modal (overrides the file-18 styles; zero border-radius) */
+.tt-overlay { position: fixed; inset: 0; z-index: 20; display: flex; align-items: center; justify-content: center;
+  background: rgba(0, 0, 0, 0.65); backdrop-filter: none; }
+.tt-overlay[hidden] { display: none; }
+.tt-card { width: min(920px, 95vw); max-height: min(640px, 90vh); border-radius: 0; padding: 0;
+  box-shadow: 0 14px 44px rgba(0, 0, 0, 0.6); display: flex; }
+.tt-inner { flex: 1; display: flex; flex-direction: column; padding: var(--hud-pad); min-height: 0; }
+.tt-head { display: flex; align-items: center; gap: 12px; padding: 4px 2px 8px; }
+.tt-title { font-size: 12px; }
+.tt-gold { margin-left: auto; font-family: var(--hud-display); font-size: 13px; font-weight: 700;
+  color: var(--hud-text-gold); font-variant-numeric: tabular-nums; }
+.tt-close { background: none; border: none; color: var(--hud-text-dim); font-size: 16px; cursor: pointer; padding: 2px 6px; }
+.tt-close:hover { color: var(--hud-text); }
+.tt-body { position: relative; flex: 1; overflow-y: auto; min-height: 0; }
+.tt-arrows { position: absolute; inset: 0; pointer-events: none; }
+.tt-cats { position: relative; display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 12px 22px; }
+.tt-cat-title { display: flex; align-items: center; gap: 6px; margin: 0 0 6px; text-transform: uppercase; }
+.tt-cat-title canvas { display: block; }
+.tt-chain { display: flex; align-items: stretch; gap: 26px; margin-bottom: 8px; flex-wrap: wrap; }
+.tt-node {
+  position: relative; width: 150px; height: 64px; padding: 6px 8px 6px 6px; border: none; border-radius: 0;
+  background: var(--hud-bg-chip); color: var(--hud-text); cursor: default; text-align: left;
+  display: flex; gap: 6px; align-items: flex-start; overflow: hidden; flex: 0 0 auto; opacity: 1;
+  box-shadow: none;
+}
+.tt-node-glyph { flex: 0 0 auto; line-height: 0; margin-top: 2px; }
+.tt-node-glyph canvas { display: block; }
+.tt-node-body { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.tt-node-name { font-family: var(--hud-display); font-size: 12px; font-weight: 700; line-height: 1.1;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tt-node-effect { font-size: 10px; color: var(--hud-text-dim); line-height: 1.15; }
+.tt-node-meta { font-family: var(--hud-display); font-size: 10px; font-weight: 700; color: var(--hud-text-gold);
+  font-variant-numeric: tabular-nums; }
+.tt-node-state { position: absolute; right: 5px; bottom: 4px; display: inline-flex; align-items: center; gap: 3px;
+  font-family: var(--hud-display); font-size: 8px; font-weight: 700; color: var(--hud-text-dim); }
+.tt-node-state canvas { display: block; }
+.tt-node-prog { position: absolute; left: 0; bottom: 0; height: 3px; width: 0%; background: var(--hud-trim-gold); }
+.tt-node.done { border-left: 3px solid var(--hud-good); background: var(--hud-bg-chip); opacity: 1; }
+.tt-node.locked { opacity: 0.4; }
+.tt-node.avail.clickable { cursor: pointer; }
+.tt-node.avail.clickable:hover { outline: 1px solid var(--hud-trim-gold); outline-offset: -1px; filter: brightness(1.08); }
+.tt-node.queued { outline: 1px solid var(--hud-trim-gold-dim); outline-offset: -1px; }
+.tt-node.inprogress .tt-node-prog { transition: width 0.1s linear; }
+
+/* K.2 pause + post-match cards */
+.pause-overlay, .post-overlay { z-index: 20; }
+.pause-card, .post-card { border-radius: 0; padding: 0; background: var(--hud-edge-dark); }
+.pause-card { width: 300px; }
+.post-card { width: min(560px, 94vw); }
+.modal-inner { padding: calc(var(--hud-pad) + 4px); display: flex; flex-direction: column; gap: 10px; }
+.modal-title { font-size: 12px; padding-top: 4px; }
+.pause-stack .ui-btn, .post-actions .ui-btn {
+  border-radius: 0; height: 40px; justify-content: center; width: 100%;
+  clip-path: polygon(var(--hud-chamfer-sm) 0, calc(100% - var(--hud-chamfer-sm)) 0, 100% var(--hud-chamfer-sm),
+    100% calc(100% - var(--hud-chamfer-sm)), calc(100% - var(--hud-chamfer-sm)) 100%, var(--hud-chamfer-sm) 100%,
+    0 calc(100% - var(--hud-chamfer-sm)), 0 var(--hud-chamfer-sm));
+  font-family: var(--hud-display); letter-spacing: 0.5px; text-transform: uppercase;
+}
+.post-actions { display: flex; gap: 10px; }
+.post-actions .ui-btn { width: auto; flex: 1; }
+.post-table th { font-family: var(--hud-display); letter-spacing: 1px; color: var(--hud-text-dim);
+  border-bottom: 1px solid var(--hud-border); }
+.post-table td { border-bottom: 1px solid var(--hud-border); font-family: var(--hud-display); font-weight: 700;
+  font-variant-numeric: tabular-nums; }
+.post-table td.post-name { font-family: var(--hud-display); }
+.post-result { font-family: var(--hud-display); }
+
+/* K.3 MP banners: slim chamfered strip with a 3px WARN left edge */
+.net-stall {
+  border-radius: 0;
+  background: var(--hud-bg-panel);
+  border: 1px solid var(--hud-border);
+  border-left: 3px solid var(--hud-warn);
+  font-family: var(--hud-display);
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  clip-path: polygon(var(--hud-chamfer-sm) 0, calc(100% - var(--hud-chamfer-sm)) 0, 100% var(--hud-chamfer-sm),
+    100% calc(100% - var(--hud-chamfer-sm)), calc(100% - var(--hud-chamfer-sm)) 100%, var(--hud-chamfer-sm) 100%,
+    0 calc(100% - var(--hud-chamfer-sm)), 0 var(--hud-chamfer-sm));
+}
+
+/* K.4 toasts: severity edge, slide-down + fade 200ms, stack max 3 */
+.hud-toast {
+  border-radius: 0;
+  background: var(--hud-bg-panel);
+  border: 1px solid var(--hud-border);
+  color: var(--hud-text);
+  font-family: var(--hud-display);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  padding: 7px 12px;
+  animation: toast-in-21 0.2s ease;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+}
+.hud-toast.warn { border-left: 3px solid var(--hud-warn); }
+.hud-toast.bad { border-left: 3px solid var(--hud-bad); color: #fca5a5; }
+.hud-toast.good { border-left: 3px solid var(--hud-good); color: #86efac; }
+@keyframes toast-in-21 { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: none; } }
+
+/* ═══ §L — micro-interactions + final pass ════════════════════════════════════ */
+/* Console entrance: slide 12px + fade over 250ms, staggered 60ms — once per match. */
+@keyframes hud-enter { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+#hud-left-stack { animation: hud-enter 250ms ease both; }
+#sidebar-build { animation: hud-enter 250ms ease 60ms both; }
+#console-bottom { animation: hud-enter 250ms ease 120ms both; }
+
+/* Income flash (§L): GOOD/BAD blink when the rate jumps by more than ±5. */
+@keyframes income-flash { 0%, 100% { filter: none; } 50% { filter: brightness(1.9); } }
+.status-gold-income.flash-good { color: var(--hud-good); animation: income-flash 300ms ease; }
+.status-gold-income.flash-bad { color: var(--hud-bad); animation: income-flash 300ms ease; }
+
+/* Press states on the remaining interactive chips. */
+.army-chip:active, .citadel-chip:active:not(:disabled), .sb-row:active:not(:disabled) {
+  transform: translateY(1px);
+}
+.tt-node.avail.clickable:active { transform: translateY(1px); }
+
+/* §A roster strip: chamfered 28px chips in the display font (was rounded web pills). */
+.roster-chip {
+  border-radius: 0;
+  height: 28px;
+  padding: 0 10px;
+  background: var(--hud-bg-chip);
+  border: 1px solid var(--hud-border);
+  font-family: var(--hud-display);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  clip-path: polygon(var(--hud-chamfer-sm) 0, calc(100% - var(--hud-chamfer-sm)) 0, 100% var(--hud-chamfer-sm),
+    100% calc(100% - var(--hud-chamfer-sm)), calc(100% - var(--hud-chamfer-sm)) 100%, var(--hud-chamfer-sm) 100%,
+    0 calc(100% - var(--hud-chamfer-sm)), 0 var(--hud-chamfer-sm));
+}
+.roster-chip:hover { border-color: var(--hud-trim-gold); }
+.roster-n { color: var(--hud-text-gold); }
+
+/* §A mute button: chamfered 34px square. */
+.mute-btn {
+  width: 34px;
+  height: 34px;
+  border-radius: 0;
+  background: var(--hud-bg-chip);
+  border: 1px solid var(--hud-border);
+  backdrop-filter: none;
+  clip-path: polygon(var(--hud-chamfer-sm) 0, calc(100% - var(--hud-chamfer-sm)) 0, 100% var(--hud-chamfer-sm),
+    100% calc(100% - var(--hud-chamfer-sm)), calc(100% - var(--hud-chamfer-sm)) 100%, var(--hud-chamfer-sm) 100%,
+    0 calc(100% - var(--hud-chamfer-sm)), 0 var(--hud-chamfer-sm));
+}
+.mute-btn:hover { border-color: var(--hud-trim-gold); }
+
+/* Test-Play exit button: chamfered like everything else in-game. */
+.test-exit-btn {
+  border-radius: 0;
+  font-family: var(--hud-display);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  clip-path: polygon(var(--hud-chamfer-sm) 0, calc(100% - var(--hud-chamfer-sm)) 0, 100% var(--hud-chamfer-sm),
+    100% calc(100% - var(--hud-chamfer-sm)), calc(100% - var(--hud-chamfer-sm)) 100%, var(--hud-chamfer-sm) 100%,
+    0 calc(100% - var(--hud-chamfer-sm)), 0 var(--hud-chamfer-sm));
+}
+
+/* Net-debug (F4) stays raw text; keep it square too. */
+.net-debug { border-radius: 0; }
+
+/* ═══ user pass (2026-07-02): scroll-free left column + bigger queue ══════════ */
+/* The whole left column is one stack: Status → Citadel dock → Construction. The sidebar takes the
+   remaining height down to the bottom console, rows compacted to 40px so all 12 fit without a
+   scrollbar on ≥900px-tall viewports (scroll remains only as a last-resort safety). */
+#hud-left-stack {
+  bottom: calc(var(--hud-console-h) + 16px); /* stop above the bottom console */
+}
+#sidebar-build {
+  position: static; /* stack child now — no fixed top:300px */
+  left: auto;
+  top: auto;
+  width: var(--hud-sidebar-w);
+  max-height: none;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.sb-body { gap: 3px; }
+.sb-row { height: 40px; width: 148px; }
+.sb-icon { width: 36px; height: 36px; }
+.sb-cat { padding: 4px 4px 1px; margin-top: 2px; }
+
+/* Production queue now holds 12 (PRODUCTION_QUEUE_MAX): slimmer chips, wrap allowed, never scroll. */
+.cc-queue { flex-wrap: wrap; row-gap: 3px; max-width: 100%; }
+.cc-qchip { width: 28px; height: 28px; }
+.cc-qcode { font-size: 9px; }
+.cc-row2 { min-height: 32px; max-height: 62px; overflow: visible; }

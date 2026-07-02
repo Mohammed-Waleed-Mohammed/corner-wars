@@ -37,6 +37,15 @@ export interface FormationOption {
 export interface ArmyBarEntry {
   n: number; count: number; formationDefId: FormationId | null; integrity: number | null; breaking: boolean;
 }
+// 21 §G.3: selection detail for the command card's portrait + info zones.
+export interface SelectionDetail {
+  types: { type: UnitType; count: number }[];
+  single: Unit | null; // exactly one unit selected
+  rep: Unit | null; // majority-type representative (real entity, read-only)
+  total: number;
+  inFormation: boolean;
+  traitLine: string;
+}
 import { fogAt } from "../engine/fog";
 import { navPassable } from "../engine/pathfinding";
 import { footprintClear, planWallLine, wallLineTiles, withinBuildRadius } from "../engine/placement";
@@ -90,6 +99,7 @@ export class InputController {
   private customFormations: CustomFormation[] = loadCustomFormations(); // 19 §L: saved pre-match
   private formationPreviewId: FormationId | null = null; // 20 §I hovered card → in-world ghost
   private guardPending = false;
+  private rallyPending = false; // 21 §G.3: Rally button — next left-click sets the selected building's rally
   private rightDownScreen: Vec2 | null = null;
   private rightDownTime = 0;
   private rightPanned = false;
@@ -123,6 +133,8 @@ export class InputController {
       this.placementType = null;
       this.pendingPowerKey = null;
       this.guardPending = false;
+      this.rallyPending = false;
+      this.formationPending = false;
     }
     if (this.input.keys.has("escape")) this.wallDragStart = null;
     this.updateCamera(dt);
@@ -293,7 +305,40 @@ export class InputController {
 
   /** 20 §J: Esc opens pause only when no transient mode is pending (placement/power/guard/menu). */
   hasPendingMode(): boolean {
-    return this.placementType !== null || this.pendingPowerKey !== null || this.guardPending || this.formationPending || this.wallDragStart !== null;
+    return this.placementType !== null || this.pendingPowerKey !== null || this.guardPending || this.formationPending || this.rallyPending || this.wallDragStart !== null;
+  }
+
+  /** 21 §G.3 Rally command button: arm rally mode for the selected production building. */
+  enterRallyMode(): void {
+    if (this.getSelectedBuilding()) { this.clearPendingModes(); this.rallyPending = true; }
+  }
+
+  /** 21 §G.3 command buttons: Fall Back / Break Formation for every formation in the selection. */
+  fallBackSelected(): void {
+    const ids = new Set(this.selectedUnits().map((u) => u.formationId).filter((x): x is number => x != null));
+    for (const fid of ids) this.emit("FALL_BACK", { formationInstanceId: fid });
+  }
+  breakFormationSelected(): void {
+    const ids = new Set(this.selectedUnits().map((u) => u.formationId).filter((x): x is number => x != null));
+    for (const fid of ids) this.emit("BREAK_FORMATION", { formationInstanceId: fid });
+  }
+
+  /** 21 §G.3: what the command card's portrait/info zones need about the current selection. */
+  getSelectionDetail(): SelectionDetail {
+    const units = this.selectedUnits();
+    const counts = new Map<UnitType, number>();
+    for (const u of units) counts.set(u.unitType, (counts.get(u.unitType) ?? 0) + 1);
+    const types = [...counts.entries()].map(([type, count]) => ({ type, count })).sort((a, b) => b.count - a.count);
+    const majority = types[0]?.type ?? null;
+    const rep = majority ? units.find((u) => u.unitType === majority) ?? null : null;
+    // Trait line: the formation the selection belongs to (if any) → its identity trait text.
+    let traitLine = "";
+    const fid = units.find((u) => u.formationId != null)?.formationId;
+    if (fid != null) {
+      const f = this.state.formations.find((ff) => ff.id === fid);
+      if (f) traitLine = traitText(f.formationDefId);
+    }
+    return { types, single: units.length === 1 ? units[0] : null, rep, total: units.length, inFormation: fid != null, traitLine };
   }
 
   /** 20 §I army bar click: select group n (double-click also centers the camera). */
@@ -435,6 +480,19 @@ export class InputController {
           this.guardPending = false;
         } else if (e.type === "down" && e.button === 2) {
           this.guardPending = false;
+        }
+        continue;
+      }
+
+      // 21 §G.3 Rally button: the next left-click sets the selected building's rally point.
+      if (this.rallyPending) {
+        if (e.type === "down" && e.button === 0) {
+          const b = this.getSelectedBuilding();
+          const tile = this.camera.screenToTile(e.x, e.y);
+          if (b) this.emit("SET_RALLY", { buildingId: b.id, x: tile.x, y: tile.y });
+          this.rallyPending = false;
+        } else if (e.type === "down" && e.button === 2) {
+          this.rallyPending = false;
         }
         continue;
       }
@@ -659,6 +717,7 @@ export class InputController {
     this.placementType = null;
     this.pendingPowerKey = null;
     this.guardPending = false;
+    this.rallyPending = false;
     this.wallDragStart = null;
   }
 

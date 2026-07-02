@@ -91,7 +91,7 @@ export function skirmishSetupScreen(services: MenuServices): Screen {
 
         // Match options.
         right.append(el("div", "ui-panel-title", "Options"));
-        right.append(segmented("Starting gold", MATCH_OPTIONS.startingGoldChoices as readonly number[], startingGold, (v) => { startingGold = v; renderRight(); }, String));
+        right.append(segmented("Starting gold", MATCH_OPTIONS.startingGoldChoices as readonly number[], startingGold, (v) => { startingGold = v; renderRight(); }, (v) => `${v / 1000}k`));
         right.append(segmented("Game speed", MATCH_OPTIONS.gameSpeedChoices as readonly number[], gameSpeed, (v) => { gameSpeed = v; renderRight(); }, (v) => `${v}×`));
 
         const anyAI = map ? aiEnabled.slice(1, maxP).some(Boolean) : false;

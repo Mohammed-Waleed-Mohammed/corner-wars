@@ -17,8 +17,10 @@ export interface PauseHandlers {
 
 export function showPauseOverlay(parent: HTMLElement, h: PauseHandlers): HTMLElement {
   const overlay = el("div", "pause-overlay");
-  const card = el("div", "ui-panel pause-card");
-  card.append(el("div", "ui-panel-title", "Paused"));
+  const card = el("div", "pause-card hud-console hud-chamfer");
+  const inner = el("div", "hud-console-inner hud-chamfer modal-inner");
+  card.append(inner);
+  inner.append(el("div", "hud-header modal-title", "Paused"));
   const stack = el("div", "pause-stack");
   stack.append(
     button({ label: "Resume", kind: "primary", onClick: h.onResume }),
@@ -26,8 +28,8 @@ export function showPauseOverlay(parent: HTMLElement, h: PauseHandlers): HTMLEle
     button({ label: "Concede", kind: "secondary", onClick: () => { if (window.confirm("Concede the match?")) h.onConcede(); } }),
     button({ label: "Exit to Menu", kind: "ghost", onClick: () => { if (window.confirm(h.mp ? "Leave the match? Your units fall to the AI." : "Exit to the menu?")) h.onExit(); } }),
   );
-  card.append(stack);
-  if (h.mp) card.append(el("p", "pause-note", "Multiplayer: the simulation stalls for peers waiting on you; they see who paused."));
+  inner.append(stack);
+  if (h.mp) inner.append(el("p", "pause-note", "Multiplayer: the simulation stalls for peers waiting on you; they see who paused."));
   overlay.append(card);
   parent.appendChild(overlay);
   return overlay;
@@ -42,14 +44,16 @@ export interface PostMatchHandlers {
 /** The post-match results screen: winner, duration, and the per-player stats table (20 §J). */
 export function showPostMatch(parent: HTMLElement, state: GameState, localPlayerId: PlayerId, slots: SlotInfo[] | undefined, h: PostMatchHandlers): HTMLElement {
   const overlay = el("div", "post-overlay");
-  const card = el("div", "ui-panel post-card");
+  const card = el("div", "post-card hud-console hud-chamfer");
+  const inner = el("div", "hud-console-inner hud-chamfer modal-inner");
+  card.append(inner);
 
   const won = state.winner === localPlayerId;
   const title = el("div", `post-result ${won ? "win" : "lose"}`, won ? "VICTORY" : "DEFEAT");
-  card.append(title);
+  inner.append(title);
   const winnerName = state.winner !== null ? nameOf(state.winner as PlayerId, slots) : "—";
   const mins = Math.floor(state.time / 60), secs = Math.floor(state.time % 60);
-  card.append(el("div", "post-sub", `${winnerName} wins · ${mins}:${String(secs).padStart(2, "0")}`));
+  inner.append(el("div", "post-sub", `${winnerName} wins · ${mins}:${String(secs).padStart(2, "0")}`));
 
   // Stats table.
   const table = el("table", "post-table");
@@ -71,12 +75,12 @@ export function showPostMatch(parent: HTMLElement, state: GameState, localPlayer
     }
     table.append(tr);
   }
-  card.append(table);
+  inner.append(table);
 
   const actions = el("div", "post-actions");
   const rematch = button({ label: "Rematch", kind: "primary", onClick: h.onRematch, disabled: !h.onRematch, reason: h.rematchReason });
   actions.append(rematch, button({ label: "Back to Menu", kind: "secondary", onClick: h.onExit }));
-  card.append(actions);
+  inner.append(actions);
 
   overlay.append(card);
   parent.appendChild(overlay);
