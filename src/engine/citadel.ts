@@ -3,7 +3,7 @@
 // flip ownership (king-of-the-hill: an enemy in the ring pauses it; abandoning decays it).
 // The holder gains +2 gold/s, Command Energy, and (via productionSpeedMult) +20% production.
 
-import { CITADEL, CITADEL_POS } from "../config/constants";
+import { CITADEL } from "../config/constants";
 import type { AnyEntity, GameState, PlayerId } from "../core/types";
 import { entityHash } from "./spatial";
 
@@ -23,11 +23,11 @@ export function updateCitadel(state: GameState, dt: number): void {
 
   // Which players have a unit inside the capture ring? (broad-phase via the spatial hash)
   const present = new Set<PlayerId>();
-  entityHash.queryInto(CITADEL_POS.x, CITADEL_POS.y, CITADEL.captureRadius, citScratch);
+  entityHash.queryInto(c.x, c.y, CITADEL.captureRadius, citScratch);
   for (let i = 0; i < citScratch.length; i++) {
     const e = citScratch[i];
     if (e.kind !== "unit" || e.owner === "neutral" || e.hp <= 0) continue;
-    if (Math.hypot(e.x - CITADEL_POS.x, e.y - CITADEL_POS.y) <= CITADEL.captureRadius) {
+    if (Math.hypot(e.x - c.x, e.y - c.y) <= CITADEL.captureRadius) {
       present.add(e.owner);
     }
   }
@@ -62,6 +62,7 @@ export function updateCitadel(state: GameState, dt: number): void {
       pl.gold += CITADEL.goldPerSecond * dt;
       pl.commandEnergy = Math.min(CITADEL.maxEnergy, pl.commandEnergy + CITADEL.energyPerSecond * dt);
       pl.citadelHoldTime += dt;
+      pl.stats.citadelSeconds += dt; // 20 §J: total hold time (never reset, unlike the win clock)
     } else {
       pl.citadelHoldTime = 0;
     }

@@ -16,9 +16,7 @@ import {
   BUILDING_STATS,
   CAMERA,
   CITADEL,
-  CITADEL_POS,
   CITADEL_POWERS,
-  GRID,
   INPUT,
   MOVE_LINE,
   PRODUCES,
@@ -29,7 +27,16 @@ import {
   UNIT_STATS,
 } from "../config/constants";
 import { clamp } from "../core/math";
-import type { AnyEntity, Building, BuildingType, GameState, PlayerId, ResearchKey, Unit, UnitType, Vec2 } from "../core/types";
+import type { AnyEntity, Building, BuildingType, Formation, FormationId, FormationSlot, GameState, PlayerId, ResearchKey, Unit, UnitType, Vec2 } from "../core/types";
+
+// 20 §I: one formation-picker card (silhouette from `slots`, trait line, greyed reason).
+export interface FormationOption {
+  id: FormationId; name: string; hotkey: string; ok: boolean; reason?: string; trait: string; slots: FormationSlot[];
+}
+// 20 §I: one army-bar chip (a bound control group).
+export interface ArmyBarEntry {
+  n: number; count: number; formationDefId: FormationId | null; integrity: number | null; breaking: boolean;
+}
 import { fogAt } from "../engine/fog";
 import { navPassable } from "../engine/pathfinding";
 import { footprintClear, planWallLine, wallLineTiles, withinBuildRadius } from "../engine/placement";
@@ -37,6 +44,9 @@ import { canFirePower, powerNeedsTarget } from "../engine/powers";
 import { buildAvailability } from "../state/buildRules";
 import type { Camera } from "../render/camera";
 import { minimapRect } from "../render/draw/minimap";
+import { canForm, checkRequirements, FORMATION_DEFS, generateSlots, PRESET_IDS, roleCounts, roleOf, slotWorld, traitText } from "../sim/formations";
+import { getSettings } from "../ui/settings/settings";
+import { loadCustomFormations, type CustomFormation } from "../ui/settings/customFormations";
 import type { CommandMarker, HoverInfo, MoveMarker, PlacementGhost, PowerReticle, RenderView, WallSegment } from "../render/view";
 import type { CommandType } from "../sim/commands";
 import type { Session } from "../net/session";
@@ -52,6 +62,7 @@ const UNIT_LABELS: Record<UnitType, string> = {
   scoutBuggy: "Scout Buggy",
   heavyTank: "Heavy Tank",
   artillery: "Artillery",
+  medic: "Field Medic",
 };
 
 export class InputController {
@@ -75,6 +86,9 @@ export class InputController {
   private prevKeys = new Set<string>();
   private groups: Record<number, Set<number>> = {};
   private lastGroupTap: Record<number, number> = {};
+  private formationPending = false; // 19 §K: F opened the formation menu; next 1/2/3/4 picks a preset
+  private customFormations: CustomFormation[] = loadCustomFormations(); // 19 §L: saved pre-match
+  private formationPreviewId: FormationId | null = null; // 20 §I hovered card → in-world ghost
   private guardPending = false;
   private rightDownScreen: Vec2 | null = null;
   private rightDownTime = 0;
@@ -128,8 +142,167 @@ export class InputController {
 
   private handleHotkeys(): void {
     if (this.pressed("f3")) this.debugVisible = !this.debugVisible;
-    this.handleGroupKeys();
+    // Formation keys (19 §K) get first crack: when units are selected, F opens the menu and 1/2/3/4
+    // pick a preset — so those digits must NOT also fire control-group select this frame.
+    const formConsumedDigit = this.handleFormationKeys();
+    if (!formConsumedDigit) this.handleGroupKeys();
     this.handleActionKeys();
+  }
+
+  /** 19 §K: F toggles the formation menu for the current unit selection; 1/2/3/4 = Spear/Line/Box/
+   *  Column → emits FORM_UP. Returns true if it consumed a digit (so group-select skips it). */
+  private handleFormationKeys(): boolean {
+    const units = this.selectedUnits();
+    if (units.length === 0) { this.formationPending = false; return false; }
+    // Shift+F (§K) = Break Formation: dissolve every formation the selection belongs to (members go loose).
+    if (this.input.anyKey("shift") && this.pressed("f")) {
+      const ids = new Set(units.map((u) => u.formationId).filter((x): x is number => x != null));
+      for (const fid of ids) this.emit("BREAK_FORMATION", { formationInstanceId: fid });
+      this.formationPending = false;
+      return false;
+    }
+    // V (§K) = Fall Back: order every formation in the selection into a fighting withdrawal. V is the
+    // Missile-Tower build key when nothing is selected — with units selected it means Fall Back.
+    if (this.pressed("v")) {
+      const ids = new Set(units.map((u) => u.formationId).filter((x): x is number => x != null));
+      for (const fid of ids) this.emit("FALL_BACK", { formationInstanceId: fid });
+      return false;
+    }
+    // F (plain): open the formation menu. F is the War-Factory build key when nothing is selected —
+    // with units selected it means "formation menu" instead (context split, like G/Guard).
+    if (this.pressed("f")) { this.formationPending = !this.formationPending; return false; }
+    if (!this.formationPending) return false;
+    const opts = this.getFormationOptions();
+    for (let i = 0; i < opts.length && i < 9; i++) {
+      if (this.pressed(String(i + 1))) {
+        this.formSelection(opts[i].id);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** Form the current selection into `id` (19 §G): only combat units qualify; if requirements are met,
+   *  emit FORM_UP and DROP the non-qualifying units from the selection (they keep prior orders). A
+   *  custom formation (19 §L) carries its placed-token template in the payload. */
+  formSelection(id: FormationId): void {
+    const formable = this.selectedUnits().filter((u) => roleOf(u) !== null);
+    this.formationPending = false;
+    if (formable.length === 0) return;
+    const counts = roleCounts(formable);
+    const custom = this.customFormations.find((c) => c.id === id);
+    if (custom) {
+      if (!checkRequirements(custom.requiredRoles, counts).ok) return;
+      this.emit("FORM_UP", { unitIds: formable.map((u) => u.id), formationId: id, slots: custom.slots });
+    } else {
+      if (!canForm(id, counts).ok) return;
+      this.emit("FORM_UP", { unitIds: formable.map((u) => u.id), formationId: id });
+    }
+    this.selectedIds = new Set(formable.map((u) => u.id)); // drop workers/non-combat from the selection
+  }
+
+  /** 19 §J: which control-group number (if any) each own formation is bound to — a group whose live
+   *  membership exactly matches the formation's units. Local-only (control groups never touch the sim). */
+  private formationGroupMap(): Record<number, number> {
+    const out: Record<number, number> = {};
+    for (const f of this.state.formations) {
+      if (f.owner !== this.local) continue;
+      const fset = f.unitIds;
+      for (let n = 1; n <= 9; n++) {
+        const g = this.groups[n];
+        if (!g) continue;
+        const gl = [...g].filter((id) => this.state.entities.some((e) => e.id === id && e.hp > 0));
+        if (gl.length === fset.length && fset.every((id) => g.has(id))) { out[f.id] = n; break; }
+      }
+    }
+    return out;
+  }
+
+  /** Formation menu state for the HUD (19 §G/§L, 20 §I): presets then customs, each with its
+   *  enabled/greyed reason, its trait one-liner, and the slot layout the CURRENT selection would get
+   *  (for the card silhouette). Empty when no formable units are selected (no menu shown). */
+  getFormationOptions(): FormationOption[] {
+    const formable = this.selectedUnits().filter((u) => roleOf(u) !== null);
+    if (formable.length === 0) return [];
+    const counts = roleCounts(formable);
+    const presets = PRESET_IDS.map((id) => ({
+      id, name: FORMATION_DEFS[id].name, ...canForm(id, counts),
+      trait: traitText(id), slots: generateSlots(id, counts),
+    }));
+    const customs = this.customFormations.map((c) => ({
+      id: c.id, name: c.name, ...checkRequirements(c.requiredRoles, counts),
+      trait: "", slots: c.slots,
+    }));
+    return [...presets, ...customs].map((o, i) => ({
+      id: o.id, name: o.name, hotkey: i < 9 ? String(i + 1) : "", ok: o.ok, reason: o.reason, trait: o.trait, slots: o.slots,
+    }));
+  }
+
+  /** 20 §I hover preview: the HUD sets the hovered card's formation id (null on leave); getView()
+   *  ghosts that layout in the world at the army's position. Local-only. */
+  setFormationPreview(id: FormationId | null): void {
+    this.formationPreviewId = id;
+  }
+
+  /** Compute the hover ghost: the hovered formation's slots at the selection's centroid, facing the
+   *  Citadel (the same defaults createFormation uses), mapped to world points. */
+  private formationPreviewGhost(): { points: Vec2[]; anchor: Vec2; facing: number } | null {
+    if (!this.formationPreviewId) return null;
+    const formable = this.selectedUnits().filter((u) => roleOf(u) !== null);
+    if (formable.length === 0) return null;
+    const counts = roleCounts(formable);
+    const custom = this.customFormations.find((c) => c.id === this.formationPreviewId);
+    const slots = custom ? custom.slots : generateSlots(this.formationPreviewId, counts);
+    if (slots.length === 0) return null;
+    const anchor: Vec2 = {
+      x: formable.reduce((s, u) => s + u.x, 0) / formable.length,
+      y: formable.reduce((s, u) => s + u.y, 0) / formable.length,
+    };
+    const facing = Math.atan2(this.state.citadel.y - anchor.y, this.state.citadel.x - anchor.x);
+    return { points: slots.map((s) => slotWorld(anchor, facing, s.dx, s.dy)), anchor, facing };
+  }
+
+  /** 20 §I army bar: every bound control group with its live count + formation info + integrity. */
+  getArmyBar(): ArmyBarEntry[] {
+    const out: ArmyBarEntry[] = [];
+    for (let n = 1; n <= 9; n++) {
+      const g = this.groups[n];
+      if (!g || g.size === 0) continue;
+      const live = [...g].filter((id) => this.state.entities.some((e) => e.id === id && e.hp > 0));
+      if (live.length === 0) continue;
+      // The group's formation: the one every live formation-member shares (if any).
+      let f: Formation | null = null;
+      for (const fm of this.state.formations) {
+        if (fm.owner === this.local && live.some((id) => fm.unitIds.includes(id))) { f = fm; break; }
+      }
+      out.push({
+        n,
+        count: live.length,
+        formationDefId: f ? f.formationDefId : null,
+        integrity: f && f.slots.length > 0 ? f.unitIds.length / f.slots.length : null,
+        breaking: f?.breaking ?? false,
+      });
+    }
+    return out;
+  }
+
+  /** 20 §J pause menu: surrender (a deterministic sim command — every peer executes it). */
+  concede(): void {
+    this.emit("CONCEDE", {});
+  }
+
+  /** 20 §J: Esc opens pause only when no transient mode is pending (placement/power/guard/menu). */
+  hasPendingMode(): boolean {
+    return this.placementType !== null || this.pendingPowerKey !== null || this.guardPending || this.formationPending || this.wallDragStart !== null;
+  }
+
+  /** 20 §I army bar click: select group n (double-click also centers the camera). */
+  selectGroup(n: number, center = false): void {
+    const g = this.groups[n];
+    if (!g) return;
+    const live = [...g].filter((id) => this.state.entities.some((e) => e.id === id && e.hp > 0));
+    this.selectedIds = new Set(live);
+    if (center) this.centerOnGroup(live);
   }
 
   /** Control groups: Ctrl+1..9 bind, 1..9 reselect (dead ids dropped), double-tap recenters (§8). */
@@ -168,8 +341,11 @@ export class InputController {
       this.enterGuard(); // G guards a selection; otherwise it falls through to the Gate build key
       return;
     }
+    const unitsSelected = this.selectedUnits().length > 0;
     for (const type of Object.keys(BUILD_HOTKEYS) as BuildingType[]) {
       const key = BUILD_HOTKEYS[type];
+      // With units selected, F = formation menu and V = Fall Back (19 §K), not build keys.
+      if ((key === "F" || key === "V") && unitsSelected) continue;
       if (key && this.pressed(key.toLowerCase())) {
         this.pendingPowerKey = null;
         this.enterPlacement(type);
@@ -193,15 +369,28 @@ export class InputController {
 
   private updateCamera(dt: number): void {
     const k = this.input;
+    const settings = getSettings();
+    const speed = settings.cameraScrollSpeed * TILE_SIZE; // tiles/s → screen px/s (§H)
     let dx = 0;
     let dy = 0;
     if (k.anyKey("a", "arrowleft")) dx -= 1;
     if (k.anyKey("d", "arrowright")) dx += 1;
     if (k.anyKey("w", "arrowup")) dy -= 1;
     if (k.anyKey("s", "arrowdown")) dy += 1;
+    // Edge scroll (§H, opt-in): pan toward a viewport edge the cursor is hovering near. Suppressed
+    // during a middle-drag pan and while boxing a selection so it can't fight those gestures.
+    if (settings.edgeScroll && !k.middleDown && !this.isBox) {
+      const b = CAMERA.edgeBand;
+      const mx = k.mouse.x, my = k.mouse.y;
+      const inside = mx >= 0 && my >= 0 && mx <= this.camera.viewportW && my <= this.camera.viewportH;
+      if (inside) {
+        if (mx < b) dx -= 1; else if (mx > this.camera.viewportW - b) dx += 1;
+        if (my < b) dy -= 1; else if (my > this.camera.viewportH - b) dy += 1;
+      }
+    }
     if (dx !== 0 || dy !== 0) {
       const len = Math.hypot(dx, dy);
-      this.camera.panScreen((dx / len) * CAMERA.panSpeed * dt, (dy / len) * CAMERA.panSpeed * dt);
+      this.camera.panScreen((dx / len) * speed * dt, (dy / len) * speed * dt);
     }
 
     if (k.middleDown) {
@@ -332,7 +521,7 @@ export class InputController {
   private panFromMinimap(mx: number, my: number, mm: { x: number; y: number; w: number; h: number }): void {
     const fx = clamp((mx - mm.x) / mm.w, 0, 1);
     const fy = clamp((my - mm.y) / mm.h, 0, 1);
-    this.camera.centerOnTile(fx * GRID.width, fy * GRID.height);
+    this.camera.centerOnTile(fx * this.state.mapWidth, fy * this.state.mapHeight);
   }
 
   // ── Selection ──────────────────────────────────────────────────────────────
@@ -437,8 +626,9 @@ export class InputController {
       return { action: "select", glow: entityGlow(own, "rgba(34,197,94,0.85)") };
     }
 
-    if (Math.abs(tile.x - CITADEL_POS.x) <= CITADEL.visualRadius && Math.abs(tile.y - CITADEL_POS.y) <= CITADEL.visualRadius) {
-      return { action: "capture", glow: { x: CITADEL_POS.x, y: CITADEL_POS.y, r: CITADEL.visualRadius + 0.6, color: "rgba(168,85,247,0.9)" } };
+    const cit = this.state.citadel;
+    if (Math.abs(tile.x - cit.x) <= CITADEL.visualRadius && Math.abs(tile.y - cit.y) <= CITADEL.visualRadius) {
+      return { action: "capture", glow: { x: cit.x, y: cit.y, r: CITADEL.visualRadius + 0.6, color: "rgba(168,85,247,0.9)" } };
     }
 
     const src = goldSourceAtTile(this.state, tile);
@@ -759,6 +949,8 @@ export class InputController {
       hover: this.hover,
       commandMarkers: this.commandMarkers,
       buildDrag,
+      formationGroups: this.formationGroupMap(),
+      formationPreview: this.formationPreviewGhost(),
     };
   }
 }

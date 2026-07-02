@@ -60,4 +60,7 @@ export interface RenderView {
   hover: HoverInfo;
   commandMarkers: CommandMarker[]; // §3 player move/attack-move lines
   buildDrag: WallSegment[] | null; // §1 wall drag-to-build preview
+  formationGroups: Record<number, number>; // 19 §J: formationId → bound control-group number (local)
+  // 20 §I: hovering a formation card ghosts its layout at the army's position (world slot points + facing).
+  formationPreview: { points: Vec2[]; anchor: Vec2; facing: number } | null;
 }

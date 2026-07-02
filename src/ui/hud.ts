@@ -11,7 +11,9 @@ import {
   BUILDING_LABEL,
   BUILDING_STATS,
   CITADEL,
+  COLORS,
   CITADEL_POWERS,
+  POWER_INFO,
   PRODUCES,
   PRODUCTION_QUEUE_MAX,
   RESEARCH,
@@ -22,15 +24,19 @@ import {
   UNIT_STATS,
 } from "../config/constants";
 import type { Building, BuildingType, GameState, PlayerId, ResearchKey, UnitType } from "../core/types";
+import type { ArmyBarEntry, FormationOption } from "../input/controller";
+import { slotsToIcon } from "../sim/formations";
+import { deriveBuffs } from "../state/buffs";
 import { buildAvailability, unitAvailability } from "../state/buildRules";
-import { canEnqueueResearch, unitCap } from "../state/upgrades";
+import { unitCap } from "../state/upgrades";
 import type { Camera } from "../render/camera";
+import { TechTree } from "./techTree";
 
 export type GroupCommand = "stop" | "guard";
 
 // Stable display order for the roster strip (15-logic §8).
 const ROSTER_ORDER: UnitType[] = [
-  "worker", "rifleman", "grenadier", "rocket", "scoutBuggy", "tank", "heavyTank", "artillery",
+  "worker", "rifleman", "grenadier", "rocket", "medic", "scoutBuggy", "tank", "heavyTank", "artillery",
 ];
 
 export interface HudInfo {
@@ -42,6 +48,8 @@ export interface HudInfo {
   builtTypes: Set<BuildingType>;
   placementType: BuildingType | null;
   debugVisible: boolean;
+  formationOptions: FormationOption[]; // 19 §G + 20 §I (cards with silhouettes/traits)
+  armyBar: ArmyBarEntry[]; // 20 §I persistent bound-group roster
 }
 
 const UNIT_LABELS = UNIT_LABEL;
@@ -50,13 +58,11 @@ const HINT =
   "<b>Left-drag</b> select · <b>Right-click</b> move · <b>Ctrl+Right</b> attack-move · " +
   "<b>Build</b> from the left panel or hotkeys · <b>WASD</b> pan · <b>Wheel</b> zoom";
 
-const POWERS: { key: string; label: string }[] = [
-  { key: "artillery", label: "Artillery" },
-  { key: "reinforcements", label: "Reinforce" },
-  { key: "frenzy", label: "Frenzy" },
-  { key: "repair", label: "Repair" },
-  { key: "ion", label: "Ion Strike" },
-];
+// §J: power button order. Icon/label/tooltip come from POWER_INFO (numbers templated from CITADEL_POWERS).
+const POWER_ORDER = ["artillery", "reinforcements", "frenzy", "repair", "ion"] as const;
+
+// §G formation preset display names (order = hotkeys 1..4).
+const FORMATION_LABEL: Record<string, string> = { spear: "Spear", line: "Line", box: "Box", column: "Column" };
 
 interface BuildBtn {
   el: HTMLButtonElement;
@@ -110,8 +116,29 @@ export class Hud {
   private cbProgFill: HTMLElement | null = null;
   private cbButtons: BuildBtn[] = [];
   private cbSelect: HTMLElement | null = null;
+  private cbFormations: HTMLElement | null = null;
+  private formationBtns: { el: HTMLButtonElement; id: string }[] = []; // §G/§L formation menu buttons
+  private formationSig = ""; // rebuild the menu only when the option-id set changes
+  private formationHandler: ((id: string) => void) | null = null;
+  private formationPreviewHandler: ((id: string | null) => void) | null = null; // 20 §I hover ghost
+  private groupHandler: ((n: number, center: boolean) => void) | null = null; // 20 §I army bar clicks
+  private armyBarEl!: HTMLElement; // 20 §I persistent bound-group roster
+  private armySig = "";
+  private readonly techTree: TechTree; // §I: the Lab tech-tree overlay
+  private buffsEl!: HTMLElement;       // §K: status/buff strip
+  private buffsSig = "";               // rebuild only when the buff set changes
+  private buffCountdowns = new Map<string, HTMLElement>(); // per-frame countdown text updates
+  private toastsEl!: HTMLElement;      // 19 §J: transient alerts (e.g. "line breaking")
+  private breakingSeen = new Set<number>(); // formation ids already alerted-on (edge detection)
 
+  private rootEl!: HTMLElement; // for destroy() (20 §H Test Play teardown)
   private readonly local: PlayerId; // whose economy/selection/victory this HUD shows
+
+  /** Remove the HUD (and its body-level tech-tree overlay) — used when a match is torn down in place. */
+  destroy(): void {
+    this.rootEl.remove();
+    this.techTree.destroyOverlay();
+  }
 
   constructor(parent: HTMLElement, localPlayerId: PlayerId = 0) {
     this.local = localPlayerId;
@@ -119,7 +146,7 @@ export class Hud {
     root.className = "hud";
     root.innerHTML = `
       <div class="hud-panel">
-        <div class="hud-eyebrow">Corner Wars · <span data-timer>0:00</span></div>
+        <div class="hud-eyebrow">The Fall of the Citadel · <span data-timer>0:00</span></div>
         <div class="hud-gold"><span class="hud-coin"></span><span data-gold>0</span><span class="hud-income" data-income></span></div>
         <div class="hud-power">
           <div class="hud-power-head">
@@ -128,8 +155,11 @@ export class Hud {
           <div class="hud-bar"><div class="hud-bar-fill" data-power></div></div>
         </div>
         <div class="hud-stat" data-army></div>
+        <div class="hud-buffs" data-buffs></div>
         <div class="hud-dev" data-dev hidden></div>
       </div>
+      <div class="hud-toasts" data-toasts></div>
+      <div class="army-bar" data-armybar style="display:none"></div>
       <div class="roster" data-roster hidden></div>
       <div class="build-panel" data-buildpanel></div>
       <div class="citadel-panel" data-citadel hidden>
@@ -146,6 +176,7 @@ export class Hud {
         </div>
       </div>`;
     parent.appendChild(root);
+    this.rootEl = root;
 
     this.gold = root.querySelector("[data-gold]") as HTMLElement;
     this.income = root.querySelector("[data-income]") as HTMLElement;
@@ -155,6 +186,9 @@ export class Hud {
     this.powerFill = root.querySelector("[data-power]") as HTMLElement;
     this.powerText = root.querySelector("[data-powertext]") as HTMLElement;
     this.army = root.querySelector("[data-army]") as HTMLElement;
+    this.buffsEl = root.querySelector("[data-buffs]") as HTMLElement;
+    this.toastsEl = root.querySelector("[data-toasts]") as HTMLElement;
+    this.armyBarEl = root.querySelector("[data-armybar]") as HTMLElement;
     this.dev = root.querySelector("[data-dev]") as HTMLElement;
     this.bar = root.querySelector("[data-bar]") as HTMLElement;
     this.citadelPanel = root.querySelector("[data-citadel]") as HTMLElement;
@@ -164,14 +198,19 @@ export class Hud {
     this.victoryTitle = root.querySelector("[data-vtitle]") as HTMLElement;
 
     const powersEl = root.querySelector("[data-powers]") as HTMLElement;
-    for (const pw of POWERS) {
-      const cost = CITADEL_POWERS[pw.key].energy;
+    for (const key of POWER_ORDER) {
+      const cost = CITADEL_POWERS[key].energy;
+      const info = POWER_INFO[key];
       const btn = document.createElement("button");
       btn.className = "cit-btn";
-      btn.innerHTML = `<span class="cit-btn-name">${pw.label}</span><span class="cit-btn-cost">${cost}</span>`;
-      btn.addEventListener("click", () => this.powerHandler?.(pw.key));
+      btn.innerHTML =
+        `<span class="cit-btn-icon">${info.icon}</span>` +
+        `<span class="cit-btn-name">${info.label}</span>` +
+        `<span class="cit-btn-cost">${cost}</span>`;
+      btn.title = `${info.label} (${cost} energy) — ${info.tooltip}`; // §J verbatim effect + numbers
+      btn.addEventListener("click", () => this.powerHandler?.(key));
       powersEl.append(btn);
-      this.powerBtns.push({ el: btn, key: pw.key, cost });
+      this.powerBtns.push({ el: btn, key, cost });
     }
     (root.querySelector("[data-restart]") as HTMLButtonElement).addEventListener("click", () =>
       this.restartHandler?.(),
@@ -191,6 +230,9 @@ export class Hud {
       this.buildPanel.append(btn);
       this.panelBtns.push({ el: btn, type });
     }
+
+    // §I: the tech-tree overlay. Clicking an available node routes through the normal research handler.
+    this.techTree = new TechTree((key) => this.researchHandler?.(key));
   }
 
   setBuildHandler(fn: (unitType: UnitType) => void): void {
@@ -198,6 +240,15 @@ export class Hud {
   }
   setPlaceHandler(fn: (buildingType: BuildingType) => void): void {
     this.placeHandler = fn;
+  }
+  setFormationHandler(fn: (id: string) => void): void {
+    this.formationHandler = fn;
+  }
+  setFormationPreviewHandler(fn: (id: string | null) => void): void {
+    this.formationPreviewHandler = fn;
+  }
+  setGroupSelectHandler(fn: (n: number, center: boolean) => void): void {
+    this.groupHandler = fn;
   }
   setResearchHandler(fn: (key: ResearchKey) => void): void {
     this.researchHandler = fn;
@@ -273,14 +324,22 @@ export class Hud {
         `cam ${ct.x.toFixed(0)},${ct.y.toFixed(0)} · ${info.selectedCount} sel`;
     }
 
+    this.updateBuffs(state); // §K status strip
+    this.updateFormationAlerts(state); // §J "line breaking" toasts
+    this.updateArmyBar(info.armyBar); // 20 §I bound-group roster
     this.updateCommandBar(state, info);
-    this.updateCitadelPanel(state);
 
-    if (state.winner !== null && !this.victoryShown) {
-      this.victoryShown = true;
-      this.victoryTitle.textContent = state.winner === this.local ? "You win!" : `Player ${state.winner + 1} wins`;
-      this.victory.hidden = false;
+    // §I tech tree: drive it with the selected Lab (the enqueue target); close if selection leaves it.
+    if (this.techTree.isOpen) {
+      const b = info.selectedBuilding;
+      const lab = b && b.buildingType === "lab" && b.owner === this.local && b.buildProgress >= 1 ? b : null;
+      if (!lab) this.techTree.close();
+      else this.techTree.update(state, lab, this.local);
     }
+    this.updateCitadelPanel(state);
+    // 20 §J: the post-match screen (main.ts) owns the end-of-match display now; the old bare victory
+    // banner stays hidden. (this.victory/victoryTitle/victoryShown retained for the DOM contract.)
+    void this.victoryShown; void this.victory; void this.victoryTitle;
   }
 
   /** Per-type roster strip: click a chip to select all of that type (Shift = map-wide); §8. */
@@ -322,6 +381,60 @@ export class Hud {
     }
   }
 
+  /** §K: rebuild the strip only when the buff SET changes; countdowns + live tooltips update every frame. */
+  private updateBuffs(state: GameState): void {
+    const buffs = deriveBuffs(state, this.local);
+    const sig = buffs.map((b) => b.id).join("|");
+    if (sig !== this.buffsSig) {
+      this.buffsSig = sig;
+      this.buffsEl.replaceChildren();
+      this.buffCountdowns.clear();
+      for (const b of buffs) {
+        const chip = el("span", `buff ${b.kind}`);
+        const label = el("span", "buff-label");
+        label.textContent = b.short;
+        chip.append(label);
+        if (b.countdown !== undefined) {
+          const cd = el("span", "buff-cd");
+          chip.append(cd);
+          this.buffCountdowns.set(b.id, cd);
+        }
+        chip.title = b.tooltip;
+        chip.dataset.buff = b.id;
+        this.buffsEl.append(chip);
+      }
+    }
+    for (const b of buffs) {
+      const cd = this.buffCountdowns.get(b.id);
+      if (cd && b.countdown !== undefined) cd.textContent = `${Math.ceil(b.countdown)}s`;
+      if (b.kind === "citadel") { // live energy number in the tooltip
+        const chip = this.buffsEl.querySelector<HTMLElement>(`[data-buff="${b.id}"]`);
+        if (chip) chip.title = b.tooltip;
+      }
+    }
+  }
+
+  /** §J: fire a toast when one of the local player's formations crosses into "breaking" (edge). */
+  private updateFormationAlerts(state: GameState): void {
+    const breakingNow = new Set<number>();
+    for (const f of state.formations) {
+      if (f.owner !== this.local || !f.breaking) continue;
+      breakingNow.add(f.id);
+      if (!this.breakingSeen.has(f.id)) {
+        const name = FORMATION_LABEL[f.formationDefId] ?? "formation";
+        this.showToast(`⚠ Your ${name} is breaking!`);
+      }
+    }
+    this.breakingSeen = breakingNow; // recovered/dissolved formations can alert again later
+  }
+
+  private showToast(text: string): void {
+    const t = el("div", "hud-toast");
+    t.textContent = text;
+    this.toastsEl.append(t);
+    setTimeout(() => t.remove(), 3500);
+  }
+
   private updateCitadelPanel(state: GameState): void {
     const cit = state.citadel;
     const p0 = state.players[this.local];
@@ -330,13 +443,17 @@ export class Hud {
     if (!show) return;
     this.energyText.textContent = String(Math.floor(p0.commandEnergy));
     this.energyFill.style.width = `${(p0.commandEnergy / CITADEL.maxEnergy) * 100}%`;
-    for (const b of this.powerBtns) b.el.disabled = p0.commandEnergy < b.cost;
+    for (const b of this.powerBtns) {
+      const ok = p0.commandEnergy >= b.cost;
+      b.el.disabled = !ok;
+      b.el.classList.toggle("affordable", ok); // §J: affordable powers highlighted
+    }
   }
 
   private updateCommandBar(state: GameState, info: HudInfo): void {
     const b = info.selectedBuilding;
-    const items = b ? buildItems(b.buildingType) : [];
-    const mode = info.placementType ? "placing" : items.length ? "build" : info.selectionLabel ? "select" : "hint";
+    const canBuild = !!b && (buildItems(b.buildingType).length > 0 || hasResearch(b.buildingType));
+    const mode = info.placementType ? "placing" : canBuild ? "build" : info.selectionLabel ? "select" : "hint";
     const sig =
       mode === "placing" ? `placing:${info.placementType}` : mode === "build" ? `build:${b!.buildingType}` : mode;
 
@@ -369,18 +486,95 @@ export class Hud {
         });
       }
       for (const btn of this.cbButtons) {
-        if (btn.kind === "research") {
-          const ok = canEnqueueResearch(state, b, btn.key as ResearchKey);
-          btn.el.disabled = !ok;
-          btn.el.title = ok ? "" : "Researched, queued, needs a prerequisite, or unaffordable";
-        } else {
-          const av = unitAvailability(state, this.local, b, btn.key as UnitType); // §6 priority + tooltip
-          btn.el.disabled = !av.ok;
-          btn.el.title = av.reason;
-        }
+        const av = unitAvailability(state, this.local, b, btn.key as UnitType); // §6 priority + tooltip
+        btn.el.disabled = !av.ok;
+        btn.el.title = av.reason;
       }
     } else if (mode === "select" && this.cbSelect) {
       this.cbSelect.textContent = info.selectionLabel ?? "";
+      // 20 §I formation CARDS: silhouette + name + trait + hotkey; greyed cards PRINT the missing
+      // requirement. Rebuilt when the option set (or its silhouettes/availability) changes.
+      const opts = info.formationOptions;
+      if (this.cbFormations) this.cbFormations.style.display = opts.length > 0 ? "" : "none";
+      const sig = opts.map((o) => `${o.id}:${o.ok ? 1 : 0}:${o.slots.length}:${o.reason ?? ""}`).join("|");
+      if (this.cbFormations && sig !== this.formationSig) {
+        this.formationSig = sig;
+        for (const fb of this.formationBtns) fb.el.remove();
+        this.formationBtns = [];
+        for (const o of opts) {
+          const btn = this.formationCard(o);
+          this.cbFormations.append(btn);
+          this.formationBtns.push({ el: btn, id: o.id });
+        }
+      }
+    }
+  }
+
+  /** 20 §I: one formation card — silhouette (role-colored dot diagram, forward=up), name, trait
+   *  one-liner, hotkey; when unavailable, the MISSING REQUIREMENT is printed on the card. */
+  private formationCard(o: FormationOption): HTMLButtonElement {
+    const btn = document.createElement("button");
+    btn.className = `fcard${o.ok ? "" : " off"}`;
+    const canvas = document.createElement("canvas");
+    canvas.width = 64; canvas.height = 48; canvas.className = "fcard-icon";
+    const ctx = canvas.getContext("2d");
+    if (ctx) {
+      const ROLE_COLOR: Record<string, string> = {
+        front: COLORS.players[0], flank: COLORS.players[1], rear: COLORS.players[2],
+        artillery: COLORS.players[3], support: "#e5e7eb",
+      };
+      for (const p of slotsToIcon(o.slots)) {
+        ctx.fillStyle = ROLE_COLOR[p.role] ?? "#fff";
+        ctx.beginPath();
+        ctx.arc(6 + p.x * 52, 4 + p.y * 40, 2.4, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    btn.append(canvas);
+    const body = el("div", "fcard-body");
+    const head = el("div", "fcard-head");
+    if (o.hotkey) head.append(Object.assign(el("span", "cb-btn-hk"), { textContent: o.hotkey }));
+    head.append(Object.assign(el("span", "fcard-name"), { textContent: o.name }));
+    body.append(head);
+    const sub = el("div", "fcard-sub");
+    sub.textContent = o.ok ? o.trait : (o.reason ?? "Unavailable"); // requirement printed, no hover needed
+    sub.classList.toggle("req", !o.ok);
+    body.append(sub);
+    btn.append(body);
+    btn.disabled = !o.ok;
+    btn.addEventListener("click", () => this.formationHandler?.(o.id));
+    btn.addEventListener("mouseenter", () => this.formationPreviewHandler?.(o.id)); // 20 §I world ghost
+    btn.addEventListener("mouseleave", () => this.formationPreviewHandler?.(null));
+    return btn;
+  }
+
+  /** 20 §I army bar: bound control groups as chips — number, formation letter, count, integrity ring. */
+  private updateArmyBar(entries: ArmyBarEntry[]): void {
+    const sig = entries.map((e) => `${e.n}:${e.count}:${e.formationDefId ?? ""}:${e.integrity?.toFixed(2) ?? ""}:${e.breaking ? 1 : 0}`).join("|");
+    if (sig === this.armySig) return;
+    this.armySig = sig;
+    this.armyBarEl.replaceChildren();
+    this.armyBarEl.style.display = entries.length ? "" : "none";
+    const ICON: Record<string, string> = { spear: "S", line: "L", box: "B", column: "C" };
+    for (const e of entries) {
+      const chip = el("button", `army-chip${e.breaking ? " breaking" : ""}`);
+      const ring = el("span", "army-ring");
+      if (e.integrity != null) {
+        ring.style.borderColor = e.integrity > 0.66 ? "#22c55e" : e.integrity > 0.33 ? "#eab308" : "#ef4444";
+        ring.textContent = String(e.n);
+      } else {
+        ring.style.borderColor = "#4b5563";
+        ring.textContent = String(e.n);
+      }
+      chip.append(ring);
+      const label = el("span", "army-label");
+      label.textContent = e.formationDefId ? `${ICON[e.formationDefId] ?? "✎"}·${e.count}` : `${e.count}`;
+      chip.append(label);
+      chip.title = e.formationDefId ? `Army ${e.n} — ${e.formationDefId} formation, ${e.count} units${e.breaking ? " — BREAKING!" : ""}` : `Group ${e.n} — ${e.count} units`;
+      // click = select · double-click = select + center (20 §I).
+      chip.addEventListener("click", () => this.groupHandler?.(e.n, false));
+      chip.addEventListener("dblclick", () => this.groupHandler?.(e.n, true));
+      this.armyBarEl.append(chip);
     }
   }
 
@@ -391,6 +585,8 @@ export class Hud {
     this.cbProgFill = null;
     this.cbButtons = [];
     this.cbSelect = null;
+    this.cbFormations = null;
+    this.formationBtns = [];
     this.bar.classList.toggle("active", mode !== "hint");
 
     if (mode === "placing" && placing) {
@@ -416,18 +612,22 @@ export class Hud {
       const btns = el("div", "cb-buttons");
       for (const item of buildItems(b.buildingType)) {
         const btn = document.createElement("button");
-        btn.className = `cb-btn${item.kind === "research" ? " research" : ""}`;
+        btn.className = "cb-btn";
         const hk = item.hotkey ? `<span class="cb-btn-hk">${item.hotkey}</span>` : "";
         btn.innerHTML = `${hk}<span class="cb-btn-name">${item.label}</span><span class="cb-btn-cost">${item.cost}</span>`;
-        if (item.kind === "unit") {
-          const key = item.key as UnitType;
-          btn.addEventListener("click", () => this.buildHandler?.(key));
-        } else {
-          const key = item.key as ResearchKey;
-          btn.addEventListener("click", () => this.researchHandler?.(key));
-        }
+        const key = item.key as UnitType;
+        btn.addEventListener("click", () => this.buildHandler?.(key));
         btns.append(btn);
         this.cbButtons.push({ el: btn, kind: item.kind, key: item.key, cost: item.cost });
+      }
+      // §I: research-capable buildings (the Lab) open the tech-tree overlay instead of a flat list.
+      if (hasResearch(b.buildingType)) {
+        const tt = document.createElement("button");
+        tt.className = "cb-btn research tt-open";
+        tt.innerHTML = `<span class="cb-btn-name">🔬 Tech Tree</span>`;
+        tt.title = "Open the tech tree (research upgrades)";
+        tt.addEventListener("click", () => this.techTree.openTree());
+        btns.append(tt);
       }
       this.bar.append(head, prog, this.cbQueueChips, btns);
       return;
@@ -443,7 +643,15 @@ export class Hud {
         btn.addEventListener("click", () => this.commandHandler?.(c.cmd));
         cmds.append(btn);
       }
-      this.bar.append(this.cbSelect, cmds);
+      // §G/§L formation menu: presets + saved customs, greyed-with-reason. Buttons are (re)built from
+      // the live options in updateCommandBar (so customs appear); states refresh each frame.
+      this.cbFormations = el("div", "cb-formations");
+      this.formationBtns = [];
+      this.formationSig = "";
+      const label = el("span", "cb-form-label");
+      label.textContent = "Form (F):";
+      this.cbFormations.append(label);
+      this.bar.append(this.cbSelect, cmds, this.cbFormations);
       return;
     }
 
@@ -461,17 +669,19 @@ interface Item {
   hotkey?: string;
 }
 
-// Command card (bottom): unit production (positional Q/W/E/R hotkeys) + Lab research. Structures
-// are NOT here — they live in the always-on left build panel (16 §4).
+// Command card (bottom): unit production (positional Q/W/E/R hotkeys). Structures live in the always-on
+// left build panel (16 §4); Lab research now lives in the tech-tree overlay (18 §I), reached via a
+// button appended for research-capable buildings.
 function buildItems(type: BuildingType): Item[] {
   const items: Item[] = [];
   (PRODUCES[type] ?? []).forEach((u, i) => {
     items.push({ kind: "unit", key: u, label: UNIT_LABELS[u], cost: UNIT_STATS[u].gold, hotkey: UNIT_HOTKEY_SLOTS[i] });
   });
-  for (const r of RESEARCHES[type] ?? []) {
-    items.push({ kind: "research", key: r, label: RESEARCH[r].label, cost: RESEARCH[r].gold });
-  }
   return items;
+}
+/** Does this building offer research (→ show the Tech Tree button + queue)? Only the Lab today. */
+function hasResearch(type: BuildingType): boolean {
+  return (RESEARCHES[type]?.length ?? 0) > 0;
 }
 
 function el(tag: string, className: string): HTMLElement {

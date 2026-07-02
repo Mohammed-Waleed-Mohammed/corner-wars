@@ -15,6 +15,8 @@ const FPS_TAU = 0.25; // s — fixed time constant so the readout reacts the sam
 
 export class GameLoop {
   fps = 0;
+  speed = 1; // 20 §D game-speed multiplier on sim-tick accumulation (0.75/1/1.25). Deterministic: it's
+  // fixed match config; in MP it's host-set so every peer feeds the accumulator identically.
   private update: UpdateFn;
   private render: RenderFn;
   private lastTime = 0;
@@ -55,7 +57,7 @@ export class GameLoop {
       this.fps = this.fpsSmooth;
     }
 
-    this.accumulator += dt;
+    this.accumulator += dt * this.speed; // 20 §D: game speed scales sim advancement (SP; MP turn-gated)
     let steps = 0;
     while (this.accumulator >= FIXED_DT && steps < MAX_STEPS) {
       this.update(FIXED_DT);

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-**Corner Wars** is a 2D top-down real-time strategy game (Red Alert 2 / C&C Generals style), 4-player free-for-all, runs fully offline in the browser. Player 0 is human; players 1–3 are AI. The headline mechanic is **The Citadel**, a single neutral capturable structure at map center that makes its holder stronger.
+**The Fall of the Citadel** is a 2D top-down real-time strategy game (Red Alert 2 / C&C Generals style), 4-player free-for-all, runs fully offline in the browser. Player 0 is human; players 1–3 are AI. The headline mechanic is **The Citadel**, a single neutral capturable structure at map center that makes its holder stronger.
 
 **Current state: feature-complete** — all 24 steps of the build order in **`description/14-next-steps.md`** (the consolidated, authoritative spec; it supersedes the older numbered files where they differ) are implemented and each milestone adversarially reviewed. On top of v1 (economy, tech tree, counter-triangle combat, the Citadel + powers, 3 AI, win/lose) the game now has **Wave 2**: travelling projectiles + hitscan tracers, combat feedback (muzzle/hit-flash/lunge/death) + a Web-Audio sound set, build placement radius, fog of war + a working minimap, and terrain + A* pathfinding. `description/14-next-steps.md` is the source of truth for every number.
 

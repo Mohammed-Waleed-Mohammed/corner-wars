@@ -65,7 +65,9 @@ export function updateHarvest(state: GameState, w: Unit, dt: number): void {
       if (navigateTo(state, w, cx, cy, dt, contact)) {
         const bonus = drop.buildingType === "refinery" ? 1 + WORKER.refineryBonus : 1;
         // Improved Mining I/II scales gather income (global multiplier, 15-logic §2).
-        state.players[w.owner].gold += (w.carryingGold ?? 0) * bonus * miningMult(state.players[w.owner]);
+        const mined = (w.carryingGold ?? 0) * bonus * miningMult(state.players[w.owner]);
+        state.players[w.owner].gold += mined;
+        state.players[w.owner].stats.goldMined += mined; // 20 §J
         w.carryingGold = 0;
         w.harvestPhase = "seeking";
       }

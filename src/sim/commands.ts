@@ -11,7 +11,7 @@
 // Spec note: the §2.2 table omits a harvest order, but right-clicking a gold source with a Worker
 // is a real networked player action, so we add HARVEST alongside the listed types.
 
-import { BUILDING_STATS, CONSTRUCTION, FORMATION_SPACING, GRID } from "../config/constants";
+import { BUILDING_STATS, CONSTRUCTION, FORMATION_SPACING } from "../config/constants";
 import { clamp } from "../core/math";
 import type { Building, GameState, PlayerId, Unit } from "../core/types";
 import { assignBuilders } from "../engine/construction";
@@ -21,12 +21,15 @@ import { cancelProduction, enqueueUnit } from "../engine/production";
 import { buildAvailability } from "../state/buildRules";
 import { createBuilding } from "../state/entities";
 import { cancelResearch, enqueueResearch } from "../state/upgrades";
+import { createFormation, dissolveFormation, orderFormationMove, sanitizeFormationSlots } from "./formations";
 import type { BuildingType, ResearchKey, UnitType } from "../core/types";
 
 export type CommandType =
   | "MOVE" | "ATTACK_MOVE" | "ATTACK_TARGET" | "GUARD" | "STOP" | "HOLD"
   | "PLACE_BUILDING" | "PLACE_WALL_LINE" | "ASSIGN_BUILD" | "SET_RALLY"
-  | "QUEUE_UNIT" | "CANCEL_QUEUE" | "RESEARCH" | "REPAIR" | "HARVEST" | "USE_POWER";
+  | "QUEUE_UNIT" | "CANCEL_QUEUE" | "RESEARCH" | "REPAIR" | "HARVEST" | "USE_POWER"
+  | "FORM_UP" | "BREAK_FORMATION" | "FALL_BACK" // 19 formations
+  | "CONCEDE"; // 20 §J pause menu — surrender (deterministic: all peers execute it)
 
 export interface Command {
   type: CommandType;
@@ -184,11 +187,51 @@ export function executeCommand(state: GameState, cmd: Command): void {
       // firePower re-checks Command Energy + target requirement internally (desync-safe).
       firePower(state, pid, pl.powerId, pl.x != null && pl.y != null ? { x: pl.x, y: pl.y } : null);
       break;
+    case "FORM_UP": {
+      // 19: form the owned, live combat units in the selection into the chosen formation. Mixed
+      // selections self-filter (non-combat / disallowed roles simply don't get a slot). A custom
+      // formation carries its placed-token template in the payload (sanitized) so every peer builds
+      // the identical shape without needing the author's localStorage.
+      const units = ownedUnits(state, pid, pl.unitIds);
+      const facing = typeof pl.facing === "number" ? pl.facing : undefined;
+      const slots = pl.slots != null ? sanitizeFormationSlots(pl.slots) : undefined;
+      createFormation(state, pid, units, pl.formationId, facing, slots);
+      break;
+    }
+    case "BREAK_FORMATION":
+      applyBreakFormation(state, pid, pl.formationInstanceId);
+      break;
+    case "FALL_BACK": {
+      const f = state.formations.find((fm) => fm.id === pl.formationInstanceId && fm.owner === pid);
+      if (f) f.fallingBack = true; // §H — withdrawal behavior lands in M6
+      break;
+    }
+    case "CONCEDE":
+      // 20 §J: surrender — everything the player owns dies this tick; removeDead reaps it and the
+      // win check eliminates them (0 Construction Yards). Deterministic on every peer.
+      for (const e of state.entities) if (e.owner === pid) e.hp = 0;
+      break;
   }
 }
 
+/** BREAK_FORMATION: dissolve only if the caller owns it (desync-safe ownership gate). */
+function applyBreakFormation(state: GameState, pid: PlayerId, formationInstanceId: number): void {
+  const f = state.formations.find((fm) => fm.id === formationInstanceId);
+  if (f && f.owner === pid) dissolveFormation(state, formationInstanceId);
+}
+
 function applyMove(state: GameState, pid: PlayerId, ids: number[], x: number, y: number, attackMove: boolean, spread: boolean): void {
-  const units = ownedUnits(state, pid, ids);
+  const all = ownedUnits(state, pid, ids);
+  if (all.length === 0) return;
+  // 19 §I: units in a formation move as a SHAPE — order the formation's anchor, don't scatter them.
+  // Loose units keep the classic per-unit spread move.
+  const formIds = new Set<number>();
+  const units: Unit[] = [];
+  for (const u of all) { if (u.formationId != null) formIds.add(u.formationId); else units.push(u); }
+  for (const fid of formIds) {
+    const f = state.formations.find((ff) => ff.id === fid && ff.owner === pid);
+    if (f) orderFormationMove(f, x, y, attackMove);
+  }
   if (units.length === 0) return;
   const cols = Math.max(1, Math.ceil(Math.sqrt(units.length)));
   const rows = Math.ceil(units.length / cols);
@@ -197,8 +240,8 @@ function applyMove(state: GameState, pid: PlayerId, ids: number[], x: number, y:
     if (spread) {
       const col = i % cols;
       const row = Math.floor(i / cols);
-      tx = clamp(x + (col - (cols - 1) / 2) * FORMATION_SPACING, 0, GRID.width);
-      ty = clamp(y + (row - (rows - 1) / 2) * FORMATION_SPACING, 0, GRID.height);
+      tx = clamp(x + (col - (cols - 1) / 2) * FORMATION_SPACING, 0, state.mapWidth);
+      ty = clamp(y + (row - (rows - 1) / 2) * FORMATION_SPACING, 0, state.mapHeight);
     }
     clearOrder(u);
     u.moveTarget = { x: tx, y: ty };

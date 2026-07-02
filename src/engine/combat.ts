@@ -12,6 +12,7 @@ import {
   COUNTERS,
   DEFENSE_STATS,
   EFFECTS,
+  FORMATIONS,
   GATE,
   GUARD,
   PROJECTILE,
@@ -21,12 +22,14 @@ import {
 } from "../config/constants";
 import type { DefenseStat } from "../config/constants";
 import { clamp } from "../core/math";
-import type { AnyEntity, Building, CombatType, GameState, Owner, Unit, Vec2 } from "../core/types";
+import type { AnyEntity, Building, CombatType, Formation, GameState, Owner, Unit, Vec2 } from "../core/types";
 import { createProjectile, spawnEffect } from "../state/entities";
 import { isLowPower, recomputePower } from "../state/gameState";
 import { weaponDamageMult } from "../state/upgrades";
+import { FORMATION_DEFS } from "../sim/formations";
 import { updateUnitMovement } from "./movement";
 import { navigateTo } from "./navigation";
+import { navPassable } from "./pathfinding";
 import { entityHash } from "./spatial";
 
 const FRENZY_DMG_MULT = 1 + (CITADEL_POWERS.frenzy.damageBonus ?? 0);
@@ -46,9 +49,16 @@ export function findEntityById(state: GameState, id: number): AnyEntity | undefi
   return state.entities.find((e) => e.id === id);
 }
 
-/** Apply damage and the visual feedback (hit-flash + spark). Death is reaped in removeDead. */
-export function dealDamage(state: GameState, target: AnyEntity, dmg: number): void {
+/** Apply damage and the visual feedback (hit-flash + spark). Death is reaped in removeDead.
+ *  §F Brace: a Box member takes −15% damage while its formation is stationary (dug in).
+ *  `attacker` (20 §J) records the last damaging player for the buildings-razed stat. */
+export function dealDamage(state: GameState, target: AnyEntity, dmg: number, attacker?: Owner): void {
+  if (target.kind === "unit" && target.formationId != null) {
+    const f = state.formations.find((ff) => ff.id === target.formationId);
+    if (f && f.moveTarget == null && FORMATION_DEFS[f.formationDefId]?.trait === "brace") dmg *= FORMATIONS.TRAITS.BRACE_TAKEN;
+  }
   target.hp -= dmg;
+  if (attacker !== undefined && attacker !== "neutral") target.lastHitBy = attacker;
   target.hitFlashTimer = EFFECTS.hitFlashTime;
   const c = entityCenter(target);
   spawnEffect(state, "hit", c.x, c.y, EFFECTS.hitLife);
@@ -116,6 +126,74 @@ export function updateCombatUnit(state: GameState, u: Unit, dt: number): void {
   updateUnitMovement(state, u, dt, u.speed * speedMult);
 }
 
+const formScratch: AnyEntity[] = [];
+
+/** §H counter-first targeting for in-formation units: within `reach` of the SLOT, prefer the nearest
+ *  enemy this unit COUNTERS (typeMult > 1 — this also makes Artillery prefer buildings, since siege
+ *  counters buildings); otherwise the nearest enemy. Returns null if nothing is in reach. */
+export function pickFormationTarget(u: Unit, slot: Vec2, reach: number): AnyEntity | null {
+  entityHash.queryInto(slot.x, slot.y, reach + 1, formScratch);
+  let counter: AnyEntity | null = null, counterD = Infinity;
+  let near: AnyEntity | null = null, nearD = Infinity;
+  for (const e of formScratch) {
+    if (e.hp <= 0 || !isEnemy(u.owner, e) || isWallLike(e)) continue;
+    const d = Math.hypot(pointNearest(e, slot).x - slot.x, pointNearest(e, slot).y - slot.y);
+    if (d > reach) continue;
+    if (typeMultFor(u.combatType, e) > 1 && d < counterD) { counterD = d; counter = e; }
+    if (d < nearD) { nearD = d; near = e; }
+  }
+  return counter ?? near;
+}
+
+/** §H in-formation combat: hold the slot on a LEASH — fire at a counter-first target within reach of
+ *  the slot, shifting up to LEASH toward it but never chasing past it. Volley (+dmg while stationary,
+ *  Line) applies here. Returns true if it engaged (fired or repositioned to fire), false if no target
+ *  (caller then walks the unit back to its slot). Charge ends at first shot. */
+export function formationEngage(state: GameState, u: Unit, f: Formation, slot: Vec2, dt: number): boolean {
+  if (u.combatType === undefined || u.owner === "neutral") return false;
+  const leash = FORMATIONS.LEASH;
+  const reach = leash + u.range;
+  const target = pickFormationTarget(u, slot, reach);
+  if (!target) return false;
+
+  let { dmgMult } = combatMults(state, u);
+  const { speedMult } = combatMults(state, u);
+  if (f.moveTarget == null && FORMATION_DEFS[f.formationDefId]?.trait === "volley") dmgMult *= FORMATIONS.TRAITS.VOLLEY_DMG;
+
+  const d = distToEntity(u, target);
+  const minR = u.minRange ?? 0;
+  if (d <= u.range && d >= minR) {
+    u.state = "attacking";
+    u.path = [];
+    if (u.attackTimer <= 0) {
+      fireUnitWeapon(state, u, target, u.damage * dmgMult);
+      u.attackTimer = u.cooldown;
+      f.charging = false; // §F: Spear's Charge is momentum — it ends at first contact
+    }
+    return true;
+  }
+  // Not in range: shift toward the target but stay within LEASH of the slot (never chase off).
+  const c = entityCenter(target);
+  const step = u.speed * speedMult * dt;
+  const ang = Math.atan2(c.y - u.y, c.x - u.x);
+  let nx = u.x + Math.cos(ang) * step;
+  let ny = u.y + Math.sin(ang) * step;
+  const off = Math.hypot(nx - slot.x, ny - slot.y);
+  if (off > leash) { // clamp back onto the leash circle around the slot
+    const a2 = Math.atan2(ny - slot.y, nx - slot.x);
+    nx = slot.x + Math.cos(a2) * leash;
+    ny = slot.y + Math.sin(a2) * leash;
+  }
+  if (navPassable(state, Math.floor(nx), Math.floor(ny))) { u.x = nx; u.y = ny; }
+  u.state = "moving";
+  return true;
+}
+
+/** Nearest enemy to a point within `range` (exported for formation Fall Back to pick a retreat heading). */
+export function nearestEnemyTo(owner: Owner, from: Vec2, range: number): AnyEntity | null {
+  return nearestEnemy(owner, from, range);
+}
+
 /** Guard-area command (15-logic §6): defend a fixed GUARD.radius around the guard point, chasing
  *  no farther than chaseMultiplier×radius from it, then return and hold. Non-combat units just hold. */
 export function updateGuard(state: GameState, u: Unit, dt: number): void {
@@ -164,7 +242,7 @@ function fireUnitWeapon(state: GameState, u: Unit, target: AnyEntity, baseDmg: n
       spawnEffect(state, "tracer", u.x, u.y, EFFECTS.tracerLife, { owner: u.owner, tx: tc.x, ty: tc.y });
       state.soundEvents.push("rifleFire");
     }
-    dealDamage(state, target, baseDmg * typeMultFor(u.combatType, target));
+    dealDamage(state, target, baseDmg * typeMultFor(u.combatType, target), u.owner);
     return;
   }
 
@@ -238,7 +316,7 @@ function fireDefense(state: GameState, b: Building, center: Vec2, target: AnyEnt
   if (stat.weapon === "hitscan") {
     spawnEffect(state, "tracer", center.x, center.y, EFFECTS.tracerLife, { owner: b.owner, tx: tc.x, ty: tc.y });
     state.soundEvents.push("turretShot");
-    dealDamage(state, target, dmg);
+    dealDamage(state, target, dmg, b.owner);
     return;
   }
   const speed = stat.weapon === "rocket" ? PROJECTILE.rocketSpeed : PROJECTILE.shellSpeed;
@@ -259,6 +337,11 @@ export function removeDead(state: GameState): void {
       spawnEffect(state, "death", c.x, c.y, EFFECTS.deathLife, { owner: e.owner, size });
       state.soundEvents.push("explosion");
       if (e.kind === "building") buildingDied = true;
+      // 20 §J match stats: units lost; enemy buildings razed credited to the last damager.
+      if (e.kind === "unit" && e.owner !== "neutral") state.players[e.owner].stats.lost++;
+      if (e.kind === "building" && e.lastHitBy !== undefined && e.lastHitBy !== e.owner) {
+        state.players[e.lastHitBy].stats.buildingsRazed++;
+      }
       state.entities.splice(i, 1);
     }
   }

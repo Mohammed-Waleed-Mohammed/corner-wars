@@ -55,7 +55,7 @@ function areaDamage(state: GameState, owner: PlayerId, center: Vec2, radius: num
     if (e.hp <= 0 || !isEnemy(owner, e)) continue;
     const px = e.kind === "building" ? clamp(center.x, e.x, e.x + e.width) : e.x;
     const py = e.kind === "building" ? clamp(center.y, e.y, e.y + e.height) : e.y;
-    if (Math.hypot(px - center.x, py - center.y) <= radius) dealDamage(state, e, dmg);
+    if (Math.hypot(px - center.x, py - center.y) <= radius) dealDamage(state, e, dmg, owner);
   }
 }
 
@@ -70,6 +70,7 @@ function spawnReinforcements(state: GameState, owner: PlayerId, count: number): 
     const ox = (i - (count - 1) / 2) * 1.0;
     const sp = nearestPassableTile(state, baseX + ox, baseY);
     state.entities.push(createUnit(state, owner, "rifleman", sp.x, sp.y));
+    state.players[owner].stats.produced++; // 20 §J: Reinforcements count as produced
   }
 }
 

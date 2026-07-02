@@ -1,6 +1,6 @@
 # 18 — Multiplayer Implementation (in-code spec)
 
-Implementation-grade specification for adding online multiplayer to the existing Corner Wars project. Hand this to Claude Code. It covers **only in-code changes**; external services (signaling host, STUN/TURN, Netlify) are described in file 17 and referenced here only where code touches them.
+Implementation-grade specification for adding online multiplayer to the existing The Fall of the Citadel project. Hand this to Claude Code. It covers **only in-code changes**; external services (signaling host, STUN/TURN, Netlify) are described in file 17 and referenced here only where code touches them.
 
 **Architecture:** deterministic **lockstep** over **WebRTC data channels** (PeerJS), **star topology** (host relays). Every peer runs the identical simulation; only *commands* travel the network.
 

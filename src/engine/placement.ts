@@ -2,7 +2,7 @@
 // "Clear" = on the map and not overlapping another building, a gold source, or the
 // Citadel. Gold/tech affordability is checked separately by each caller.
 
-import { BUILD_RADIUS, BUILDING_STATS, CITADEL, CITADEL_POS, GRID, STRUCTURE_CAP } from "../config/constants";
+import { BUILD_RADIUS, BUILDING_STATS, CITADEL, STRUCTURE_CAP } from "../config/constants";
 import type { GameState, Owner } from "../core/types";
 import { isGround } from "../state/terrain";
 
@@ -35,7 +35,7 @@ export function rectsOverlap(
 }
 
 export function footprintClear(state: GameState, x: number, y: number, w: number, h: number): boolean {
-  if (x < 0 || y < 0 || x + w > GRID.width || y + h > GRID.height) return false;
+  if (x < 0 || y < 0 || x + w > state.mapWidth || y + h > state.mapHeight) return false;
   for (let ty = y; ty < y + h; ty++) {
     for (let tx = x; tx < x + w; tx++) {
       if (!isGround(state, tx, ty)) return false; // can't build on impassable terrain (§7)
@@ -48,7 +48,8 @@ export function footprintClear(state: GameState, x: number, y: number, w: number
     if (g.x >= x && g.x < x + w && g.y >= y && g.y < y + h) return false;
   }
   const cv = CITADEL.visualRadius;
-  if (rectsOverlap(x, y, w, h, CITADEL_POS.x - cv, CITADEL_POS.y - cv, cv * 2, cv * 2)) return false;
+  const cit = state.citadel;
+  if (rectsOverlap(x, y, w, h, cit.x - cv, cit.y - cv, cv * 2, cv * 2)) return false;
   return true;
 }
 

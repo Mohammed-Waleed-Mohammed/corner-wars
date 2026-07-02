@@ -1,8 +1,9 @@
 // Render orchestrator: reads GameState (+ a RenderView for selection/UI overlays) and
 // draws. It never mutates state — the update step owns all mutation.
 
-import { BUILDING_STATS, COLORS, GUARD } from "../config/constants";
+import { BUILDING_STATS, COLORS, GUARD, ownerColor } from "../config/constants";
 import type { GameState } from "../core/types";
+import { slotWorld } from "../sim/formations";
 import type { Camera } from "./camera";
 import type { HoverInfo, PlacementGhost, PowerReticle, RenderView } from "./view";
 import { drawBackground, drawGrid } from "./draw/grid";
@@ -25,9 +26,9 @@ export function renderGame(
   view: RenderView,
   alpha = 1,
 ): void {
-  drawBackground(ctx, camera);
+  drawBackground(ctx, camera, state);
   drawTerrainLayer(ctx, state, camera); // cached offscreen terrain, blitted
-  drawGrid(ctx, camera);
+  drawGrid(ctx, camera, state);
 
   // Ground decals: destination markers + player movement lines under everything else.
   for (const m of view.moveMarkers) drawMoveMarker(ctx, camera, m, state.viewPlayer);
@@ -62,6 +63,8 @@ export function renderGame(
     drawUnit(ctx, camera, e, view.selectedIds.has(e.id), rx, ry);
   }
 
+  drawHealBeams(ctx, state, camera, alpha); // §D medic beams, above units
+
   // Projectiles and combat effects above the units (hidden in fog inside their fns).
   drawProjectiles(ctx, state, camera, alpha);
   drawEffects(ctx, state, camera);
@@ -73,6 +76,9 @@ export function renderGame(
   // Guard rings: faint at active guard points, dashed preview while issuing the order (§6).
   for (const gp of view.guardPoints) drawGuardCircle(ctx, camera, gp.x, gp.y, false);
   if (view.guardReticle) drawGuardCircle(ctx, camera, view.guardReticle.x, view.guardReticle.y, true);
+
+  drawFormations(ctx, state, camera, view.formationGroups); // 19: anchor + facing + slot ghosts + banner
+  if (view.formationPreview) drawFormationPreview(ctx, camera, view.formationPreview); // 20 §I hover ghost
 
   // Hover glow around the thing under the cursor (§10).
   if (view.hover.glow) drawHoverGlow(ctx, camera, view.hover.glow);
@@ -163,6 +169,133 @@ function drawHoverGlow(ctx: CanvasRenderingContext2D, camera: Camera, glow: NonN
   ctx.beginPath();
   ctx.arc(c.x, c.y, glow.r * camera.tileScreenSize, 0, Math.PI * 2);
   ctx.stroke();
+}
+
+/** 20 §I hover ghost: faint dashed circles where units would stand + a facing arrow at the anchor. */
+function drawFormationPreview(ctx: CanvasRenderingContext2D, camera: Camera, p: { points: { x: number; y: number }[]; anchor: { x: number; y: number }; facing: number }): void {
+  ctx.strokeStyle = COLORS.selection;
+  ctx.globalAlpha = 0.45;
+  ctx.lineWidth = 1.5;
+  ctx.setLineDash([3, 3]);
+  for (const pt of p.points) {
+    if (!camera.isTileVisible(pt.x, pt.y)) continue;
+    const s = camera.tileToScreen(pt.x, pt.y);
+    ctx.beginPath();
+    ctx.arc(s.x, s.y, 0.32 * camera.tileScreenSize, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  ctx.setLineDash([]);
+  // Facing arrow.
+  const a = camera.tileToScreen(p.anchor.x, p.anchor.y);
+  const tip = camera.tileToScreen(p.anchor.x + Math.cos(p.facing) * 2, p.anchor.y + Math.sin(p.facing) * 2);
+  ctx.beginPath();
+  ctx.moveTo(a.x, a.y);
+  ctx.lineTo(tip.x, tip.y);
+  ctx.stroke();
+  const ang = Math.atan2(tip.y - a.y, tip.x - a.x);
+  ctx.beginPath();
+  ctx.moveTo(tip.x, tip.y);
+  ctx.lineTo(tip.x - 8 * Math.cos(ang - 0.4), tip.y - 8 * Math.sin(ang - 0.4));
+  ctx.moveTo(tip.x, tip.y);
+  ctx.lineTo(tip.x - 8 * Math.cos(ang + 0.4), tip.y - 8 * Math.sin(ang + 0.4));
+  ctx.stroke();
+  ctx.globalAlpha = 1;
+}
+
+const FORMATION_ICON: Record<string, string> = { spear: "S", line: "L", box: "B", column: "C" };
+
+/** Own formations (19 §J): faint slot ghosts (the intended shape) + facing tick, plus a BANNER at the
+ *  anchor — control-group number (or formation letter), an integrity ring (green→amber→red = % of
+ *  slots still filled), and a red flash while the formation is "breaking" (>30% lost in 10s). */
+function drawFormations(ctx: CanvasRenderingContext2D, state: GameState, camera: Camera, groups: Record<number, number>): void {
+  for (const f of state.formations) {
+    if (f.owner !== state.viewPlayer) continue; // only the local player's own formations
+    const a = camera.tileToScreen(f.anchor.x, f.anchor.y);
+    // Slot ghosts.
+    ctx.fillStyle = ownerColor(f.owner);
+    ctx.globalAlpha = 0.2;
+    for (const s of f.slots) {
+      const w = slotWorld(f.anchor, f.facing, s.dx, s.dy);
+      if (!camera.isTileVisible(w.x, w.y)) continue;
+      const p = camera.tileToScreen(w.x, w.y);
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 0.26 * camera.tileScreenSize, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    // Facing tick (forward = (cos,sin)).
+    const fwd = camera.tileToScreen(f.anchor.x + Math.cos(f.facing) * 1.3, f.anchor.y + Math.sin(f.facing) * 1.3);
+    ctx.strokeStyle = ownerColor(f.owner);
+    ctx.lineWidth = 2;
+    ctx.globalAlpha = 0.7;
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(fwd.x, fwd.y);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+
+    // Banner: a small badge above the anchor.
+    const by = a.y - 26;
+    const rInt = 13;
+    const integrity = f.slots.length > 0 ? f.unitIds.length / f.slots.length : 1;
+    // Integrity ring (full circle backing + colored arc for the filled fraction).
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = "rgba(0,0,0,0.5)";
+    ctx.beginPath(); ctx.arc(a.x, by, rInt, 0, Math.PI * 2); ctx.stroke();
+    ctx.strokeStyle = integrity > 0.66 ? COLORS.hpFull : integrity > 0.33 ? "#eab308" : COLORS.hpLow;
+    ctx.beginPath(); ctx.arc(a.x, by, rInt, -Math.PI / 2, -Math.PI / 2 + integrity * Math.PI * 2); ctx.stroke();
+    // Badge fill (owner color) + breaking flash.
+    const flash = f.breaking ? 0.5 + 0.5 * Math.sin(state.time * 12) : 0;
+    ctx.beginPath(); ctx.arc(a.x, by, rInt - 3, 0, Math.PI * 2);
+    ctx.fillStyle = ownerColor(f.owner); ctx.fill();
+    if (flash > 0) { ctx.globalAlpha = flash; ctx.fillStyle = COLORS.hpLow; ctx.fill(); ctx.globalAlpha = 1; }
+    // Label: bound control-group number, else the formation letter.
+    ctx.fillStyle = "#fff";
+    ctx.font = "bold 13px sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(groups[f.id] != null ? String(groups[f.id]) : (FORMATION_ICON[f.formationDefId] ?? "?"), a.x, by + 0.5);
+    ctx.textAlign = "left";
+    ctx.textBaseline = "alphabetic";
+  }
+}
+
+/** Field Medic heal beams (19 §D): a soft green pulsing line medic → patient, fog-gated like units. */
+function drawHealBeams(ctx: CanvasRenderingContext2D, state: GameState, camera: Camera, alpha: number): void {
+  const lerp = (e: { x: number; y: number; prevX?: number; prevY?: number }): { x: number; y: number } => ({
+    x: (e.prevX ?? e.x) + (e.x - (e.prevX ?? e.x)) * alpha,
+    y: (e.prevY ?? e.y) + (e.y - (e.prevY ?? e.y)) * alpha,
+  });
+  for (const e of state.entities) {
+    if (e.kind !== "unit" || e.unitType !== "medic" || e.healTarget == null) continue;
+    const target = state.entities.find((t) => t.id === e.healTarget);
+    if (!target || target.kind !== "unit" || target.hp <= 0) continue;
+    const mp = lerp(e);
+    if (!camera.isTileVisible(mp.x, mp.y)) continue;
+    if (e.owner !== state.viewPlayer && fogAt(state, Math.floor(mp.x), Math.floor(mp.y)) !== "visible") continue;
+    const a = camera.tileToScreen(mp.x, mp.y);
+    const tp = lerp(target);
+    const b = camera.tileToScreen(tp.x, tp.y);
+    const pulse = 0.45 + 0.25 * Math.sin(state.time * 8);
+    ctx.strokeStyle = COLORS.hpFull;
+    ctx.globalAlpha = pulse;
+    ctx.lineWidth = 2;
+    ctx.setLineDash([4, 3]);
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.globalAlpha = 1;
+    // Small cross at the patient end.
+    ctx.strokeStyle = COLORS.hpFull;
+    ctx.beginPath();
+    ctx.moveTo(b.x - 4, b.y);
+    ctx.lineTo(b.x + 4, b.y);
+    ctx.moveTo(b.x, b.y - 4);
+    ctx.lineTo(b.x, b.y + 4);
+    ctx.stroke();
+  }
 }
 
 function drawPowerReticle(ctx: CanvasRenderingContext2D, camera: Camera, r: PowerReticle): void {

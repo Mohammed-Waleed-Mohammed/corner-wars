@@ -4,6 +4,8 @@
 
 import {
   BASE_UNIT_CAP,
+  COMBAT_PACE,
+  MEDIC,
   REFUND,
   RESEARCH,
   RESEARCH_QUEUE_MAX,
@@ -20,6 +22,7 @@ export const miningMult = (p: Player): number => 1 + 0.15 * p.upgrades.mining; /
 export const workerBuildMult = (p: Player): number => (p.upgrades.constructionCrews ? 1.25 : 1);
 export const productionUpgradeMult = (p: Player): number => (p.upgrades.streamlinedProduction ? 1.2 : 1);
 export const unitCap = (p: Player): number => BASE_UNIT_CAP + SUPPLY_LINE_CAP_BONUS * p.upgrades.supplyLines;
+export const medicHealPerS = (p: Player): number => (p.upgrades.combatStims ? MEDIC.STIM_HEAL_PER_S : MEDIC.HEAL_PER_S); // 19 §D
 
 // ── Research state ───────────────────────────────────────────────────────────
 export function isResearched(p: Player, key: ResearchKey): boolean {
@@ -40,6 +43,7 @@ export function isResearched(p: Player, key: ResearchKey): boolean {
     case "advancedVehicles": return p.unlocks.advancedVehicles;
     case "siegeDoctrine": return p.unlocks.siegeDoctrine;
     case "advancedDefenses": return p.unlocks.advancedDefenses;
+    case "combatStims": return u.combatStims;
   }
 }
 
@@ -133,6 +137,7 @@ export function applyResearch(state: GameState, owner: PlayerId, key: ResearchKe
     case "advancedVehicles": p.unlocks.advancedVehicles = true; break;
     case "siegeDoctrine": p.unlocks.siegeDoctrine = true; break;
     case "advancedDefenses": p.unlocks.advancedDefenses = true; break;
+    case "combatStims": u.combatStims = true; break;
   }
 }
 
@@ -145,7 +150,7 @@ function rescaleUnits(state: GameState, owner: PlayerId): void {
   for (const e of state.entities) {
     if (e.kind !== "unit" || e.owner !== owner) continue;
     const base = UNIT_STATS[e.unitType];
-    const newMax = base.hp * hpM;
+    const newMax = base.hp * COMBAT_PACE.UNIT_HP_MULT * hpM; // pacing dial (19 §B) baked like createUnit
     const frac = e.maxHp > 0 ? e.hp / e.maxHp : 1;
     e.maxHp = newMax;
     e.hp = newMax * frac;

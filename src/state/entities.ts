@@ -1,6 +1,6 @@
 // Entity factories. They allocate ids from GameState.nextId so every entity is unique.
 
-import { BUILDING_STATS, UNIT_STATS } from "../config/constants";
+import { BUILDING_STATS, COMBAT_PACE, UNIT_STATS } from "../config/constants";
 import type {
   Building,
   BuildingType,
@@ -25,8 +25,9 @@ export function createUnit(
   const s = UNIT_STATS[unitType];
   // Upgrades scale effective stats at creation (global multipliers, 15-logic §2): Armor → max
   // HP, Field Logistics → move speed. Both also rescale existing units on research completion.
+  // 19 §B pacing: base maxHp × COMBAT_PACE.UNIT_HP_MULT for every unit (damage/buildings unchanged).
   const p = owner !== "neutral" ? state.players[owner] : null;
-  const maxHp = s.hp * (p ? maxHpMult(p) : 1);
+  const maxHp = s.hp * COMBAT_PACE.UNIT_HP_MULT * (p ? maxHpMult(p) : 1);
   const unit: Unit = {
     id: state.nextId++,
     kind: "unit",

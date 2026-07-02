@@ -15,10 +15,12 @@ export type UnitType =
   | "grenadier"
   | "scoutBuggy"
   | "heavyTank"
-  | "artillery";
+  | "artillery"
+  | "medic"; // 19 §D — Field Medic (no attack, auto-heals)
 // Counter triangle (05-units.md): infantry→ranged→heavy→infantry. "siege" sits OUTSIDE the
-// triangle (15-logic §4): normal vs units, +100% vs buildings, fragile.
-export type CombatType = "infantry" | "ranged" | "heavy" | "siege";
+// triangle (15-logic §4): normal vs units, +100% vs buildings, fragile. "support" (19 §D) is also
+// outside: no attack at all — the Medic.
+export type CombatType = "infantry" | "ranged" | "heavy" | "siege" | "support";
 export type BuildingType =
   | "constructionYard"
   | "powerPlant"
@@ -41,11 +43,30 @@ export type ResearchKey =
   | "armor1" | "armor2"
   | "fieldLogistics"
   | "supply1" | "supply2" | "supply3"
-  | "advancedVehicles" | "siegeDoctrine" | "advancedDefenses";
+  | "advancedVehicles" | "siegeDoctrine" | "advancedDefenses"
+  | "combatStims"; // 19 §D — Medic heal 4→6 HP/s
 
-export type UnitState = "idle" | "moving" | "attacking" | "gathering" | "guarding" | "repairing";
-export type TerrainType = "ground" | "mountain" | "water" | "rock";
+export type UnitState = "idle" | "moving" | "attacking" | "gathering" | "guarding" | "repairing" | "healing";
+// "void" (18 §A) = outside the playable shape — not rendered as terrain, not pathable; lets maps be
+// non-rectangular. Impassable like mountain/water/rock (isGround only permits "ground").
+export type TerrainType = "ground" | "mountain" | "water" | "rock" | "void";
+export type MapTile = TerrainType; // alias used by the static-map system (18 §A)
 export type FogState = "unexplored" | "explored" | "visible";
+
+// A static, designed map (18 §A) — loaded at match start, no runtime generation. Shared by all peers
+// so terrain/resources are identical everywhere with NO RNG (removes the file-17 map-gen desync risk).
+export interface GameMap {
+  id: string;
+  name: string;
+  author: "official" | string; // "official" or a host username
+  maxPlayers: 2 | 3 | 4;
+  width: number;
+  height: number;
+  terrain: MapTile[][]; // [height][width]
+  startPositions: { slot: number; x: number; y: number }[]; // one per player slot
+  goldMines: { x: number; y: number; amount: number }[]; // home + neutral, all explicit
+  citadel: { x: number; y: number } | null;
+}
 
 /** Sub-phase of the worker harvest loop (engine-only). */
 export type HarvestPhase = "seeking" | "mining" | "returning";
@@ -68,6 +89,16 @@ export interface Entity {
   maxHp: number;
   sightRadius: number; // tiles, for fog of war (§11)
   hitFlashTimer?: number; // engine-only: seconds of white hit-flash remaining (§10)
+  lastHitBy?: PlayerId; // engine-only (20 §J): last damaging player — credits "buildings razed"
+}
+
+// 20 §J: per-player match stats (cheap sim-side counters shown on the post-match screen).
+export interface PlayerStats {
+  produced: number; // units built (production + Reinforcements)
+  lost: number; // units lost
+  goldMined: number; // gold deposited by workers
+  buildingsRazed: number; // enemy buildings destroyed (credited to the last damager)
+  citadelSeconds: number; // total time holding the Citadel
 }
 
 export interface Unit extends Entity {
@@ -104,6 +135,10 @@ export interface Unit extends Entity {
   // Worker-built construction (engine-only, 15-logic §"worker-built construction"):
   buildTargetId?: number | null; // construction site this worker is assigned to build
   repairTarget?: number | null; // engine-only (16 §7): friendly building this worker is repairing
+  healTarget?: number | null; // engine-only (19 §D): unit this Medic is currently healing
+  // Formations (19): the formation this unit belongs to + its slot offset in formation-local space.
+  formationId?: number | null;
+  slotOffset?: { dx: number; dy: number };
   // Expanded units (15-logic §4):
   minRange?: number; // artillery: cannot fire at targets closer than this
   splashRadius?: number; // grenadier/artillery: area damage on the projectile
@@ -206,6 +241,7 @@ export interface AIBrain {
   mode: AIMode;
   decisionTimer: number; // accumulates dt; decides on a slow cadence
   attackClock: number; // throttles re-issuing attack orders
+  difficulty?: "easy" | "medium"; // 20 §D — Skirmish difficulty (default medium)
 }
 
 export interface Player {
@@ -218,6 +254,8 @@ export interface Player {
   citadelHoldTime: number; // seconds held continuously; resets if broken
   eliminated: boolean;
   frenzyTimer?: number; // engine-only: seconds left of Battle Frenzy (+dmg/+speed)
+  // 20 §J match stats — sim-side counters, identical on all peers (never hashed, purely derived).
+  stats: PlayerStats;
   ai?: AIBrain; // engine-only: present for AI players (1-3)
   // Lab research (15-logic §2): unlock gates + per-player upgrade levels (global multipliers).
   unlocks: { advancedVehicles: boolean; siegeDoctrine: boolean; advancedDefenses: boolean };
@@ -229,7 +267,49 @@ export interface Player {
     constructionCrews: boolean; // +25% worker build speed
     streamlinedProduction: boolean; // +20% production speed
     fieldLogistics: boolean; // +15% move speed
+    combatStims: boolean; // 19 §D: Medic heal 4→6 HP/s
   };
+}
+
+// ── Formations (19-formations-v2.md) ─────────────────────────────────────────
+export type FormationRole = "front" | "flank" | "rear" | "artillery" | "support";
+export type FormationId = "spear" | "line" | "box" | "column" | string; // string = custom (19 §L)
+export type FormationTrait = "charge" | "volley" | "brace" | "march";
+
+export interface FormationSlot {
+  role: FormationRole;
+  dx: number; // formation-local: +dx = right of facing
+  dy: number; // formation-local: +dy = forward (toward the enemy/facing)
+}
+
+export interface FormationDef {
+  id: FormationId;
+  name: string;
+  requiredRoles: FormationRole[]; // minimums; unmet → greyed in the menu (19 §G, M3)
+  trait?: FormationTrait; // presets only (19 §F); customs get none in v1
+}
+
+export interface Formation {
+  id: number;
+  formationDefId: FormationId;
+  owner: PlayerId;
+  unitIds: number[];
+  anchor: Vec2; // world position the shape is built around; follows the path when moving (§I)
+  facing: number; // radians; the front faces this direction
+  slotAssignments: { unitId: number; slotIndex: number }[];
+  slots: FormationSlot[]; // the parametric layout generated at form time
+  // Movement (§I): the anchor pathfinds toward moveTarget at the slowest member's speed.
+  moveTarget: Vec2 | null;
+  path: Vec2[];
+  pathGoal: Vec2 | null;
+  attackMove: boolean; // the move order was an attack-move (engage en route; M6)
+  stationarySince: number | null; // engine-only: for Volley/Brace traits (M6)
+  charging: boolean; // engine-only: Spear pre-contact (M6)
+  fallingBack: boolean; // engine-only: Fall Back order active (M6)
+  // §J readability: recent member-death timestamps (trimmed to the alert window) drive the
+  // "line breaking" alert; `breaking` is true while >30% was lost inside BREAK_ALERT.WINDOW_S.
+  lossTimes: number[];
+  breaking: boolean;
 }
 
 export interface GameState {
@@ -237,6 +317,7 @@ export interface GameState {
   time: number; // engine-only: total elapsed seconds
   players: Player[]; // length 4
   entities: AnyEntity[]; // units + buildings
+  formations: Formation[]; // 19 — active formations (sim state, created via FORM_UP)
   projectiles: Projectile[]; // §9
   effects: Effect[]; // §10
   soundEvents: SoundId[]; // engine pushes; the host (main.ts) plays + clears each frame
@@ -251,6 +332,7 @@ export interface GameState {
   mapHeight: number; // 48
   winner: PlayerId | null;
   nextId: number; // engine-only: monotonic id allocator
+  nextFormationId: number; // engine-only: monotonic formation id allocator (19)
   seed: number; // engine-only: RNG seed used to generate this match
   humanLowPower?: boolean; // engine-only: last frame's human low-power state (for the cue)
   fogTimer?: number; // engine-only: accumulator for the periodic fog recompute

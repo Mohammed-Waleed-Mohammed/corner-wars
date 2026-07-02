@@ -113,9 +113,19 @@ export class AudioManager {
   }
 
   toggleMute(): boolean {
-    this.muted = !this.muted;
-    if (this.master) this.master.gain.value = this.muted ? 0 : this.volume;
+    this.setMuted(!this.muted);
     return this.muted;
+  }
+
+  /** Set master volume 0..1 (18 §H settings); applies immediately if the context is live. */
+  setVolume(v: number): void {
+    this.volume = Math.max(0, Math.min(1, v));
+    if (this.master && !this.muted) this.master.gain.value = this.volume;
+  }
+
+  setMuted(m: boolean): void {
+    this.muted = m;
+    if (this.master) this.master.gain.value = m ? 0 : this.volume;
   }
 
   play(id: SoundId): void {

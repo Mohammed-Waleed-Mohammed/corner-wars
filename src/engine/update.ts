@@ -15,7 +15,10 @@ import { updateCombatUnit, updateDefense, updateGates, updateGuard, removeDead }
 import { updateBuilder, updateConstruction, updateRepair, updateRepairer } from "./construction";
 import { DEFENSE_STATS } from "../config/constants";
 import { updateEffects } from "./effects";
+import { updateFormationUnit, updateFormations } from "./formations";
 import { updateHarvest } from "./harvest";
+import { updateMedic } from "./medic";
+import { pruneFormations } from "../sim/formations";
 import { updateUnitMovement } from "./movement";
 import { updateProduction } from "./production";
 import { updateProjectiles } from "./projectiles";
@@ -56,6 +59,7 @@ export function updateGame(state: GameState, dt: number): void {
   // Broad-phase index for this step's targeting + Citadel capture (rebuilt once).
   entityHash.rebuild(state);
   updateGates(state, dt); // open/close gates by friendly proximity (uses the fresh hash)
+  updateFormations(state, dt); // 19 §I: advance each formation's anchor before units chase slots
 
   for (const e of state.entities) {
     if (e.kind !== "unit" || e.hp <= 0) continue;
@@ -70,6 +74,7 @@ export function updateGame(state: GameState, dt: number): void {
 
   updateProjectiles(state, dt); // apply ranged damage on arrival
   removeDead(state); // spawn death explosions (rendered this frame, aged next)
+  pruneFormations(state); // 19: drop the dead from formations (holes stay; empty ones disappear)
   unitHash.rebuild(state, true); // units-only index for separation (post-movement)
   updateSeparation(state); // push overlapping units apart
   updateCitadel(state, dt);
@@ -89,6 +94,15 @@ export function updateGame(state: GameState, dt: number): void {
 }
 
 function dispatchUnit(state: GameState, u: Unit, dt: number): void {
+  // In a formation: hold the slot (19). Handles medics internally (heal + slot). Falls through if
+  // the unit turned out not to be in a live formation.
+  if (u.formationId != null && updateFormationUnit(state, u, dt)) return;
+  // Field Medic (19 §D) routes to its own brain FIRST: it can never attack, so guard/attack
+  // orders degrade to hold/move and it heals wherever it stands.
+  if (u.unitType === "medic") {
+    updateMedic(state, u, dt);
+    return;
+  }
   // Guard order holds a point and defends a radius around it (any unit type).
   if (u.guardPoint != null && u.forcedTargetId == null) {
     updateGuard(state, u, dt);

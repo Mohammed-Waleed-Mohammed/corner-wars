@@ -9,7 +9,7 @@
 // heuristics still read live state (gold, army makeup, build spots); the resulting orders are
 // applied — and their costs/limits enforced — inside executeCommand, so every peer agrees.
 
-import { AI, BUILDING_STATS, CITADEL_POS, CITADEL_POWERS } from "../config/constants";
+import { AI, AI_DIFFICULTY, BUILDING_STATS, CITADEL_POWERS } from "../config/constants";
 import type { AnyEntity, Building, GameState, Player, PlayerId, Unit } from "../core/types";
 import type { Command } from "../sim/commands";
 import { footprintClear, withinBuildRadius } from "./placement";
@@ -28,13 +28,18 @@ const placeBuilding = (pid: PlayerId, buildingType: Building["buildingType"], x:
   ({ type: "PLACE_BUILDING", playerId: pid, seq: 0, payload: { buildingType, x, y } });
 const usePower = (pid: PlayerId, powerId: string, pos: { x: number; y: number } | null): Command =>
   ({ type: "USE_POWER", playerId: pid, seq: 0, payload: { powerId, x: pos?.x ?? null, y: pos?.y ?? null } });
+const formUp = (pid: PlayerId, unitIds: number[], formationId: string): Command =>
+  ({ type: "FORM_UP", playerId: pid, seq: 0, payload: { unitIds, formationId } });
+const fallBack = (pid: PlayerId, formationInstanceId: number): Command =>
+  ({ type: "FALL_BACK", playerId: pid, seq: 0, payload: { formationInstanceId } });
 
 export function runAI(state: GameState, dt: number, submit: Submit): void {
   for (const p of state.players) {
     if (p.isHuman || p.eliminated || !p.ai) continue;
     p.ai.decisionTimer += dt;
     p.ai.attackClock += dt;
-    if (p.ai.decisionTimer >= AI.decisionInterval) {
+    const mult = AI_DIFFICULTY[p.ai.difficulty ?? "medium"].decisionMult; // 20 §D: Easy thinks slower
+    if (p.ai.decisionTimer >= AI.decisionInterval * mult) {
       p.ai.decisionTimer = 0;
       decide(state, p, submit);
     }
@@ -49,12 +54,18 @@ function decide(state: GameState, p: Player, submit: Submit): void {
 
   const workers = unitsOf(state, id).filter((u) => u.unitType === "worker");
   const army = combatUnitsOf(state, id);
+  const tune = AI_DIFFICULTY[p.ai!.difficulty ?? "medium"]; // 20 §D difficulty knobs
 
-  maintainEconomy(state, p, cy, workers.length, submit);
+  maintainEconomy(state, p, cy, workers.length, tune.workerTarget, submit);
+
+  const attackers = army.filter((u) => u.combatType !== "support"); // medics don't count as fighters
+  const myFormation = state.formations.find((f) => f.owner === id) ?? null;
 
   const threatened = enemyCombatWithin(state, id, base, AI.threatRadius);
   if (threatened) {
+    // §M defend: form a Box (answers encirclement, protects fragile units) and hold at base.
     p.ai!.mode = "defend";
+    ensureFormation(state, id, army, "box", submit);
     if (army.length) submit(atkMove(id, army.map((u) => u.id), base.x, base.y));
     // Pull a few Workers to help repel the attack (09-ai.md). keepHarvest leaves autoHarvest on,
     // so they return to mining once their forced target dies.
@@ -63,28 +74,40 @@ function decide(state: GameState, p: Player, submit: Submit): void {
       const helpers = workers.slice(0, 3).map((w) => w.id);
       if (helpers.length) submit(atkTarget(id, helpers, threat.id, true));
     }
-  } else if (army.length >= AI.armyAttackThreshold) {
+  } else if (attackers.length >= tune.armyAttackThreshold) {
     p.ai!.mode = "attack";
-    if (p.ai!.attackClock >= AI.reattackInterval) {
-      p.ai!.attackClock = 0;
-      doAttack(state, id, army, submit);
+    // §M Fall Back when the local strength odds turn against this formation; otherwise Spear-assault.
+    if (myFormation && shouldFallBack(state, id, myFormation)) {
+      submit(fallBack(id, myFormation.id));
+    } else {
+      ensureFormation(state, id, army, "spear", submit); // Spear to punch into a base
+      if (p.ai!.attackClock >= AI.reattackInterval) {
+        p.ai!.attackClock = 0;
+        const target = pickAttackTarget(state, id);
+        submit(atkMove(id, army.map((u) => u.id), target.x, target.y)); // moves the whole shape (M4)
+      }
     }
   } else {
-    p.ai!.mode = workers.length < AI.workerTarget ? "expand" : "buildArmy";
-    // While building up, contest the Citadel rather than idling at base (09-ai.md).
-    if (army.length >= 3) submit(atkMove(id, army.map((u) => u.id), CITADEL_POS.x, CITADEL_POS.y));
+    p.ai!.mode = workers.length < tune.workerTarget ? "expand" : "buildArmy";
+    // While building up, form a Line and contest the Citadel rather than idling at base (09-ai.md).
+    if (army.length >= AI.minFormationSize) {
+      ensureFormation(state, id, army, "line", submit);
+      submit(atkMove(id, army.map((u) => u.id), state.citadel.x, state.citadel.y));
+    } else if (army.length >= 3) {
+      submit(atkMove(id, army.map((u) => u.id), state.citadel.x, state.citadel.y));
+    }
   }
 
-  // Spend Command Energy — banked energy is usable even after losing the Citadel.
-  useCitadelPowers(state, p, army, submit);
+  // Spend Command Energy — banked energy is usable even after losing the Citadel (Easy AI skips powers).
+  if (tune.usePowers) useCitadelPowers(state, p, army, submit);
 }
 
-function maintainEconomy(state: GameState, p: Player, cy: Building, workerCount: number, submit: Submit): void {
+function maintainEconomy(state: GameState, p: Player, cy: Building, workerCount: number, workerTarget: number, submit: Submit): void {
   const id = p.id;
 
   // Ramp workers toward the target, counting those already queued so we don't overshoot.
   const queuedWorkers = cy.productionQueue.filter((t) => t === "worker").length;
-  if (workerCount + queuedWorkers < AI.workerTarget) submit(queueUnit(id, cy.id, "worker"));
+  if (workerCount + queuedWorkers < workerTarget) submit(queueUnit(id, cy.id, "worker"));
 
   // Reactive power safety net (one plant at a time).
   if (isLowPower(state, id) && countInProgress(state, id, "powerPlant") === 0) {
@@ -103,11 +126,20 @@ function maintainEconomy(state: GameState, p: Player, cy: Building, workerCount:
   if (workerCount >= 4 && !anyBuilding(state, id, "barracks")) aiBuild(state, p, "barracks", submit);
 
   const barracks = findBuilding(state, id, "barracks", true);
-  if (barracks) submit(queueUnit(id, barracks.id, chooseInfantry(state, id)));
+  if (barracks) {
+    // §M keep ~1 Field Medic per combatPerMedic fighters (at least one once there's a real army, so
+    // the formation always has a medic to protect); otherwise pump infantry.
+    const medics = unitsOf(state, id).filter((u) => u.unitType === "medic").length;
+    const fighters = combatUnitsOf(state, id).filter((u) => u.combatType !== "support").length;
+    const queuedMedics = barracks.productionQueue.filter((t) => t === "medic").length;
+    const wantMedics = fighters >= AI.minFormationSize ? Math.max(1, Math.round(fighters / AI.combatPerMedic)) : 0;
+    if (medics + queuedMedics < wantMedics) submit(queueUnit(id, barracks.id, "medic"));
+    else submit(queueUnit(id, barracks.id, chooseInfantry(state, id)));
+  }
 
   // War Factory, gated behind a Power Plant (build the plant first if it's missing).
   if (
-    workerCount >= AI.workerTarget &&
+    workerCount >= workerTarget &&
     findBuilding(state, id, "barracks", true) &&
     !anyBuilding(state, id, "warFactory")
   ) {
@@ -134,12 +166,31 @@ function chooseInfantry(state: GameState, id: PlayerId): "rifleman" | "rocket" {
   return heavy > ranged ? "rocket" : "rifleman";
 }
 
-function doAttack(state: GameState, id: PlayerId, army: Unit[], submit: Submit): void {
-  const target = pickAttackTarget(state, id);
-  const contest = army.slice(0, AI.citadelContestCount).map((u) => u.id);
-  const strike = army.slice(AI.citadelContestCount).map((u) => u.id);
-  if (contest.length) submit(atkMove(id, contest, CITADEL_POS.x, CITADEL_POS.y));
-  if (strike.length) submit(atkMove(id, strike, target.x, target.y));
+/** §M (re)form the army into the situation's shape — but only when it's actually needed: no formation
+ *  yet, the wrong shape, or it has bled/gained enough that <reformLossFraction of the army is in it.
+ *  This keeps the AI from spamming FORM_UP (which would reset the anchor) every decision tick. */
+function ensureFormation(state: GameState, id: PlayerId, army: Unit[], desiredId: string, submit: Submit): void {
+  if (army.length < AI.minFormationSize) return;
+  const f = state.formations.find((fm) => fm.owner === id);
+  const need =
+    !f ||
+    f.formationDefId !== desiredId ||
+    f.unitIds.length < army.length * AI.reformLossFraction || // absorb newly-built reinforcements
+    f.unitIds.length < f.slots.length * AI.reformLossFraction; // recompact survivors after losses (holes)
+  if (need) submit(formUp(id, army.map((u) => u.id), desiredId));
+}
+
+/** §M simple strength comparison around the formation: fall back if enemies are present and this
+ *  side is outnumbered below fallBackRatio within battleRadius (medics excluded from both tallies). */
+export function shouldFallBack(state: GameState, id: PlayerId, f: { anchor: { x: number; y: number } }): boolean {
+  let my = 0, en = 0;
+  for (const e of state.entities) {
+    if (e.kind !== "unit" || e.hp <= 0 || e.combatType === undefined || e.combatType === "support") continue;
+    if (Math.hypot(e.x - f.anchor.x, e.y - f.anchor.y) > AI.battleRadius) continue;
+    if (e.owner === id) my++;
+    else if (isEnemyOf(id, e)) en++;
+  }
+  return en > 0 && my / (my + en) < AI.fallBackRatio;
 }
 
 function pickAttackTarget(state: GameState, id: PlayerId): { x: number; y: number } {
@@ -148,7 +199,7 @@ function pickAttackTarget(state: GameState, id: PlayerId): { x: number; y: numbe
     const cy = findBuilding(state, weakest, "constructionYard", false);
     if (cy) return { x: cy.x + cy.width / 2, y: cy.y + cy.height / 2 };
   }
-  return CITADEL_POS;
+  return state.citadel;
 }
 
 function useCitadelPowers(state: GameState, p: Player, army: Unit[], submit: Submit): void {
@@ -167,7 +218,7 @@ function useCitadelPowers(state: GameState, p: Player, army: Unit[], submit: Sub
     return;
   }
   if (energy >= CITADEL_POWERS.artillery.energy) {
-    const cluster = nearestEnemyUnit(state, id, CITADEL_POS);
+    const cluster = nearestEnemyUnit(state, id, state.citadel);
     if (cluster) submit(usePower(id, "artillery", { x: cluster.x, y: cluster.y }));
   }
 }
@@ -273,7 +324,7 @@ function weakestEnemy(state: GameState, id: PlayerId): PlayerId | null {
   const ownCy = findBuilding(state, id, "constructionYard", false);
   const ownBase = ownCy
     ? { x: ownCy.x + ownCy.width / 2, y: ownCy.y + ownCy.height / 2 }
-    : CITADEL_POS;
+    : state.citadel;
 
   let best: PlayerId | null = null;
   let bestScore = Infinity;

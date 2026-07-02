@@ -9,12 +9,27 @@
 // turn on the host's TURN_PACKET — but it reuses this SAME executeCommand + updateGame, so SP is a
 // strict, deterministic subset of MP (which is what makes the replay/desync checks meaningful).
 
+import { NET } from "../config/constants";
 import type { GameState, PlayerId } from "../core/types";
 import { runAI } from "../engine/ai";
 import { updateGame } from "../engine/update";
+import { checksum } from "../sim/checksum";
 import { executeCommand, type Command } from "../sim/commands";
 import { INPUT_DELAY_TURNS, TICKS_PER_TURN, TURN_DT, TurnInbox, sortTurnCommands } from "./lockstep";
 import type { NetMessage, SlotInfo } from "./protocol";
+
+/** Snapshot for the F4 debug overlay (17-multiplayer §6). Cosmetic — never affects the sim. */
+export interface NetDebug {
+  role: "local" | "host" | "client";
+  tick: number;
+  turn: number;
+  checksum: number;
+  stalled: boolean;
+  synced: boolean;
+  desyncTurn: number | null;
+  pingMs: number;
+  peers: number;
+}
 
 export interface Session {
   readonly localPlayerId: PlayerId;
@@ -25,6 +40,8 @@ export interface Session {
   onSimAdvanced?: (state: GameState) => void;
   /** MP only: true while paused waiting on a peer's turn packet (drives the "Waiting…" overlay). */
   isStalled?(): boolean;
+  /** Snapshot for the F4 overlay (recomputed on demand while the overlay is open). */
+  debug?(): NetDebug;
 }
 
 /** The slice of NetPeer that NetworkSession needs — abstracted so a headless test can swap in an
@@ -33,6 +50,8 @@ export interface NetTransport {
   readonly role: "host" | "client";
   broadcast(msg: NetMessage): void;
   sendToHost(msg: NetMessage): void;
+  sendTo(peerId: string, msg: NetMessage): void;
+  peerIds(): string[]; // connected peer ids (host: all clients; client: [hostId])
   onMessage: ((msg: NetMessage, fromPeerId: string) => void) | null;
 }
 
@@ -70,7 +89,17 @@ export class LocalSession implements Session {
     updateGame(this.state, dt);
     this.onSimAdvanced?.(this.state);
   }
+
+  debug(): NetDebug {
+    return {
+      role: "local", tick: this.state.tick, turn: Math.floor(this.state.tick / TICKS_PER_TURN),
+      checksum: checksum(this.state), stalled: false, synced: true, desyncTurn: null, pingMs: 0, peers: 0,
+    };
+  }
 }
+
+const CHECKSUM_INTERVAL = NET.CHECKSUM_INTERVAL; // turns between desync checkpoints (§6)
+const PING_INTERVAL = 10;                        // turns between round-trip pings (~1s at 100ms/turn)
 
 // ── NetworkSession (17-multiplayer §4.2) — deterministic lockstep over a star topology ──────────
 //
@@ -87,6 +116,11 @@ export class NetworkSession implements Session {
   readonly localPlayerId: PlayerId;
   onSimAdvanced?: (state: GameState) => void;
   onCommands?: (turn: number, cmds: Command[]) => void;
+  /** MP disconnects (§9): a dropped client was taken over by host-run AI. */
+  onPlayerLeft?: (playerId: PlayerId, nowAI: boolean) => void;
+  onPauseNotice?: (name: string, on: boolean) => void; // 20 §J: someone paused/resumed (cosmetic)
+  /** MP disconnects: the host dropped — the match ends (no host migration in v1). */
+  onHostLost?: () => void;
 
   private state: GameState;
   private transport: NetTransport;
@@ -106,6 +140,17 @@ export class NetworkSession implements Session {
   private nextBundle = 0;    // host: lowest turn not yet bundled (bundles go out strictly in order)
   private stalled = false;
 
+  // Desync detection (§6). Every CHECKSUM_INTERVAL turns each peer hashes its state; the host compares
+  // all peers' hashes for a turn and clients compare theirs against the host's authoritative hash.
+  private ownHashes = new Map<number, number>();          // this peer's checkpoint hashes
+  private hostHashes = new Map<number, number>();          // client: the host's authoritative hashes
+  private checkpointHashes = new Map<number, Map<PlayerId, number>>(); // host: turn -> player -> hash
+  private desyncTurn: number | null = null;
+  private lastHash = 0;      // most recent checkpoint hash actually computed (for the overlay)
+  private pingMs = 0;
+  private hostGone = false;  // client: the host connection dropped → freeze + surface to main
+  private pingSentAt = new Map<number, number>();          // ping token -> wall-clock send time
+
   constructor(state: GameState, localPlayerId: PlayerId, transport: NetTransport, slots: SlotInfo[]) {
     this.state = state;
     this.localPlayerId = localPlayerId;
@@ -122,6 +167,29 @@ export class NetworkSession implements Session {
 
   isStalled(): boolean {
     return this.stalled;
+  }
+
+  /** A peer connection closed (§9). HOST: convert the departed client's player to host-run AI so the
+   *  match continues in sync — stop waiting on its input, give it an AI brain (only the host runs it),
+   *  and tell everyone via PLAYER_LEFT. CLIENT: its only link is to the host, so this means the host
+   *  dropped → end the match (no host migration in v1). Safe to call more than once. */
+  handlePeerLeave(peerId: string): void {
+    if (this.isHost) {
+      const pid = this.peerToPlayer.get(peerId);
+      if (pid === undefined) return; // unknown or already handled
+      this.peerToPlayer.delete(peerId);
+      this.humanPlayers = this.humanPlayers.filter((p) => p !== pid);
+      if (!this.aiPlayers.includes(pid)) this.aiPlayers.push(pid);
+      const pl = this.state.players[pid];
+      pl.isHuman = false;
+      if (!pl.ai) pl.ai = { mode: "expand", decisionTimer: 0, attackClock: 0 };
+      this.transport.broadcast({ t: "PLAYER_LEFT", playerId: pid, nowAI: true });
+      this.pump(); // no longer waiting on the departed human — unblock any turn stalled on it
+      this.onPlayerLeft?.(pid, true);
+    } else if (!this.hostGone) {
+      this.hostGone = true;
+      this.onHostLost?.();
+    }
   }
 
   /** Controller/AI input for the local player → buffered for the delayed send turn. */
@@ -143,9 +211,14 @@ export class NetworkSession implements Session {
   }
 
   step(_dt: number): void {
-    if (this.state.winner !== null) return; // match over — freeze the sim
+    if (this.state.winner !== null || this.hostGone) return; // match over / host dropped — freeze
 
     if (this.tickInTurn === 0) {
+      // Desync checkpoint (§6): hash the state at the START of a checkpoint turn (identical on every
+      // peer if in sync), once per turn — even while stalled, since the state can't change then.
+      if (this.currentTurn % CHECKSUM_INTERVAL === 0 && !this.ownHashes.has(this.currentTurn)) {
+        this.checkpoint(this.currentTurn);
+      }
       const cmds = this.packets.get(this.currentTurn);
       if (!cmds) {
         // No packet yet → lockstep stall. Keep trying to produce it (host) and let the frame render.
@@ -179,6 +252,13 @@ export class NetworkSession implements Session {
     this.sendTurn++;
     this.currentTurn++;
     if (this.isHost) this.pump();
+    // Round-trip ping for the overlay (client → host → back). Wall-clock is fine here: pings are not
+    // commands and pingMs never touches the sim, so determinism is unaffected.
+    if (!this.isHost && this.currentTurn % PING_INTERVAL === 0) {
+      const token = this.currentTurn;
+      this.pingSentAt.set(token, Date.now());
+      this.transport.sendToHost({ t: "PING", ts: token });
+    }
   }
 
   // Send (client) or locally record (host) this peer's commands for `turn`. Always sends, even empty
@@ -221,9 +301,80 @@ export class NetworkSession implements Session {
         for (const c of cmds) c.playerId = pid;
         this.inboxFor(msg.turn).addHuman(pid, cmds);
         this.pump();
+      } else if (msg.t === "CHECKSUM") {
+        const pid = this.peerToPlayer.get(from);
+        if (pid !== undefined) this.recordHostHash(msg.turn, pid, msg.hash);
+      } else if (msg.t === "PING") {
+        if (this.peerToPlayer.get(from) !== undefined) this.transport.sendTo(from, { t: "PONG", ts: msg.ts });
+      } else if (msg.t === "PAUSED") {
+        // 20 §J cosmetic pause notice from a client: relay to everyone else + surface locally.
+        if (this.peerToPlayer.get(from) === undefined) return;
+        const name = typeof msg.name === "string" ? msg.name.slice(0, 20) : "?";
+        for (const id of this.transport.peerIds()) if (id !== from) this.transport.sendTo(id, { t: "PAUSED", name, on: msg.on === true });
+        this.onPauseNotice?.(name, msg.on === true);
       }
+    } else if (msg.t === "PAUSED") {
+      this.onPauseNotice?.(typeof msg.name === "string" ? msg.name.slice(0, 20) : "?", msg.on === true);
     } else if (msg.t === "TURN_PACKET") {
       this.packets.set(msg.turn, Array.isArray(msg.cmds) ? msg.cmds : []);
+    } else if (msg.t === "CHECKSUM") {
+      // The host's authoritative hash for a checkpoint turn — compare our own against it.
+      this.hostHashes.set(msg.turn, msg.hash);
+      this.compareClient(msg.turn);
+    } else if (msg.t === "PONG") {
+      const sent = this.pingSentAt.get(msg.ts);
+      if (sent !== undefined) { this.pingMs = Date.now() - sent; this.pingSentAt.delete(msg.ts); }
+    } else if (msg.t === "PLAYER_LEFT") {
+      // A peer left and the host took it over with AI. The client keeps executing packets unchanged
+      // (that player's orders now arrive as the host's AI); just reflect the takeover in local state
+      // + notify the UI. isHuman/ai are not hashed, so this stays determinism-safe.
+      const pid = msg.playerId as PlayerId;
+      if (this.state.players[pid]) this.state.players[pid].isHuman = false;
+      this.onPlayerLeft?.(pid, msg.nowAI);
+    }
+  }
+
+  /** 20 §J: tell the other peers we paused/resumed (cosmetic; the sim just stalls/fast-forwards). */
+  sendPauseNotice(name: string, on: boolean): void {
+    if (this.isHost) this.transport.broadcast({ t: "PAUSED", name, on });
+    else this.transport.sendToHost({ t: "PAUSED", name, on });
+  }
+
+  // Compute this peer's checkpoint hash, publish it, and run the comparison for its role.
+  private checkpoint(turn: number): void {
+    const h = checksum(this.state);
+    this.ownHashes.set(turn, h);
+    this.lastHash = h;
+    if (this.isHost) {
+      this.recordHostHash(turn, this.localPlayerId, h);
+      this.transport.broadcast({ t: "CHECKSUM", turn, playerId: this.localPlayerId, hash: h }); // authoritative
+    } else {
+      this.transport.sendToHost({ t: "CHECKSUM", turn, playerId: this.localPlayerId, hash: h });
+      this.compareClient(turn);
+    }
+  }
+
+  // Host: fold a peer's hash into the per-turn set and flag a desync if any two peers disagree.
+  private recordHostHash(turn: number, pid: PlayerId, hash: number): void {
+    let m = this.checkpointHashes.get(turn);
+    if (!m) { m = new Map(); this.checkpointHashes.set(turn, m); }
+    m.set(pid, hash);
+    const vals = [...m.values()];
+    if (vals.length >= 2 && vals.some((v) => v !== vals[0]) && this.desyncTurn === null) {
+      this.desyncTurn = turn;
+      const detail = [...m.entries()].map(([p, hh]) => `p${p}=${(hh >>> 0).toString(16)}`).join(" ");
+      console.error(`[DESYNC] turn ${turn}: ${detail} — peers diverged (a determinism bug). ${JSON.stringify([...m])}`);
+    }
+  }
+
+  // Client: compare our checkpoint hash against the host's authoritative one once both exist.
+  private compareClient(turn: number): void {
+    const mine = this.ownHashes.get(turn);
+    const host = this.hostHashes.get(turn);
+    if (mine === undefined || host === undefined) return;
+    if (mine !== host && this.desyncTurn === null) {
+      this.desyncTurn = turn;
+      console.error(`[DESYNC] turn ${turn}: local=${(mine >>> 0).toString(16)} host=${(host >>> 0).toString(16)} — this client diverged from the host.`);
     }
   }
 
@@ -245,5 +396,19 @@ export class NetworkSession implements Session {
       this.transport.broadcast({ t: "TURN_PACKET", turn: this.nextBundle, cmds: bundle });
       this.nextBundle++;
     }
+  }
+
+  debug(): NetDebug {
+    return {
+      role: this.isHost ? "host" : "client",
+      tick: this.state.tick,
+      turn: this.currentTurn,
+      checksum: this.lastHash,
+      stalled: this.stalled,
+      synced: this.desyncTurn === null,
+      desyncTurn: this.desyncTurn,
+      pingMs: this.pingMs,
+      peers: this.isHost ? this.peerToPlayer.size : 1,
+    };
   }
 }

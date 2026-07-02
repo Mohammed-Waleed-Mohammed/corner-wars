@@ -5,7 +5,6 @@
 
 import {
   CITADEL,
-  GRID,
   LOW_POWER_PRODUCTION_MULT,
   PRODUCES,
   PRODUCTION_QUEUE_MAX,
@@ -83,10 +82,11 @@ export function updateProduction(state: GameState, dt: number): void {
 
 function spawnUnit(state: GameState, building: Building, unitType: UnitType): void {
   if (building.owner === "neutral") return;
-  const sx = clamp(building.x + building.width / 2, 0, GRID.width);
-  const sy = clamp(building.y + building.height + 0.5, 0, GRID.height);
+  const sx = clamp(building.x + building.width / 2, 0, state.mapWidth);
+  const sy = clamp(building.y + building.height + 0.5, 0, state.mapHeight);
   const sp = nearestPassableTile(state, sx, sy); // never spawn inside terrain (§3)
   const u = createUnit(state, building.owner, unitType, sp.x, sp.y);
+  state.players[building.owner as PlayerId].stats.produced++; // 20 §J (production buildings are player-owned)
   if (building.rallyPoint) {
     u.moveTarget = { x: building.rallyPoint.x, y: building.rallyPoint.y };
     u.state = "moving";

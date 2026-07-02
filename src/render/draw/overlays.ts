@@ -1,8 +1,9 @@
 // Shared overlays: HP bars, selection indicators, drag box, move markers.
 
 import { clamp, lerp } from "../../core/math";
-import { COLORS } from "../../config/constants";
+import { COLORS, ownerColor } from "../../config/constants";
 import type { Camera } from "../camera";
+import type { Owner } from "../../core/types";
 import type { MoveMarker } from "../view";
 
 /** Thin HP bar centered horizontally above a point. `frac` is 0..1. */
@@ -75,7 +76,7 @@ export function drawMoveMarker(
   const t = clamp(m.ttl / m.maxTtl, 0, 1); // 1 -> 0 over its life
   const p = camera.tileToScreen(m.x, m.y);
   const r = lerp(2, 14, 1 - t) * camera.zoom;
-  ctx.strokeStyle = COLORS.players[owner]; // the local player's color (move markers are their orders)
+  ctx.strokeStyle = ownerColor(owner as Owner); // the local player's color (move markers are their orders), palette-aware (§H)
   ctx.globalAlpha = t;
   ctx.lineWidth = 2;
   ctx.beginPath();

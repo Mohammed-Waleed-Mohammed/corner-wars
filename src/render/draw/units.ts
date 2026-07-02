@@ -67,6 +67,10 @@ export function drawUnit(
       drawArtillery(ctx, p.x, p.y, z, u);
       selectR = RENDER.artillerySize * 0.6;
       break;
+    case "medic":
+      drawMedic(ctx, p.x, p.y, z, u);
+      selectR = RENDER.workerRadius;
+      break;
   }
 
   // White hit-flash when recently struck (§10).
@@ -103,6 +107,26 @@ function drawWorker(ctx: CanvasRenderingContext2D, x: number, y: number, z: numb
   ctx.arc(x, y, r * 0.38, 0, Math.PI * 2);
   ctx.fillStyle = COLORS.neutralGold;
   ctx.fill();
+}
+
+function drawMedic(ctx: CanvasRenderingContext2D, x: number, y: number, z: number, u: Unit): void {
+  // Owner-colored circle with a white cross — reads "medic" at a glance (19 §D).
+  const r = RENDER.workerRadius * z;
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, Math.PI * 2);
+  ctx.fillStyle = ownerColor(u.owner);
+  ctx.fill();
+  ctx.strokeStyle = COLORS.outline;
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  ctx.strokeStyle = "#ffffff";
+  ctx.lineWidth = Math.max(1.5, r * 0.32);
+  ctx.beginPath();
+  ctx.moveTo(x - r * 0.5, y);
+  ctx.lineTo(x + r * 0.5, y);
+  ctx.moveTo(x, y - r * 0.5);
+  ctx.lineTo(x, y + r * 0.5);
+  ctx.stroke();
 }
 
 function drawRifleman(ctx: CanvasRenderingContext2D, x: number, y: number, z: number, u: Unit): void {

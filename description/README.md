@@ -1,6 +1,6 @@
-# Corner Wars — Design Description
+# The Fall of the Citadel — Design Description
 
-This folder is the full specification for **Corner Wars**, a 2D top-down real-time strategy game (Red Alert 2 / C&C Generals style) with a contested centerpiece, **The Citadel**, that makes its holder stronger.
+This folder is the full specification for **The Fall of the Citadel**, a 2D top-down real-time strategy game (Red Alert 2 / C&C Generals style) with a contested centerpiece, **The Citadel**, that makes its holder stronger.
 
 Each file is the **single source of truth** for its own system and numbers. The game's code should keep a `config/constants` file that mirrors these numbers exactly — when a number changes, change it here first, then in code.
 

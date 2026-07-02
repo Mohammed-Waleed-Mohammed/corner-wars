@@ -1,4 +1,4 @@
-# Corner Wars — Complete Game Design Document
+# The Fall of the Citadel — Complete Game Design Document
 
 A 2D top-down real-time strategy game (Red Alert 2 / C&C Generals style) for 4 players in a free-for-all, with a single contested centerpiece — **The Citadel** — that makes its holder stronger. This is the full specification: every system, every number, the placeholder art, the data model, and the development order.
 

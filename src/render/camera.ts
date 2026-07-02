@@ -12,10 +12,20 @@ export class Camera {
   zoom = 1;
   viewportW = 0; // CSS px
   viewportH = 0;
+  // World extent in pixels — set per-match from the loaded map (18 §M2: maps vary in size).
+  private worldW = WORLD.width;
+  private worldH = WORLD.height;
 
   setViewport(w: number, h: number): void {
     this.viewportW = w;
     this.viewportH = h;
+    this.clampToBounds();
+  }
+
+  /** Set the scroll bounds to the loaded map's dimensions (in tiles). */
+  setBounds(mapWidthTiles: number, mapHeightTiles: number): void {
+    this.worldW = mapWidthTiles * TILE_SIZE;
+    this.worldH = mapHeightTiles * TILE_SIZE;
     this.clampToBounds();
   }
 
@@ -77,12 +87,12 @@ export class Camera {
     // If the world is smaller than the viewport on an axis, center it (negative
     // origin pushes the map inward); otherwise clamp so we can't scroll past an edge.
     this.x =
-      WORLD.width <= viewW
-        ? (WORLD.width - viewW) / 2
-        : clamp(this.x, 0, WORLD.width - viewW);
+      this.worldW <= viewW
+        ? (this.worldW - viewW) / 2
+        : clamp(this.x, 0, this.worldW - viewW);
     this.y =
-      WORLD.height <= viewH
-        ? (WORLD.height - viewH) / 2
-        : clamp(this.y, 0, WORLD.height - viewH);
+      this.worldH <= viewH
+        ? (this.worldH - viewH) / 2
+        : clamp(this.y, 0, this.worldH - viewH);
   }
 }

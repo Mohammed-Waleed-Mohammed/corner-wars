@@ -3,7 +3,7 @@
 // Respects the human's fog (enemy units only while visible; static objects once explored).
 // Click/drag it to move the camera (handled in the input controller via minimapRect).
 
-import { CITADEL_POS, COLORS, FOG_ALPHA, GRID, RENDER, ownerColor } from "../../config/constants";
+import { COLORS, FOG_ALPHA, RENDER, ownerColor } from "../../config/constants";
 import { fogAt } from "../../engine/fog";
 import { isLowPower } from "../../state/gameState";
 import type { GameState } from "../../core/types";
@@ -24,8 +24,8 @@ export function minimapRect(viewportW: number, viewportH: number): Rect {
 
 export function drawMinimap(ctx: CanvasRenderingContext2D, state: GameState, camera: Camera): void {
   const r = minimapRect(camera.viewportW, camera.viewportH);
-  const sx = r.w / GRID.width;
-  const sy = r.h / GRID.height;
+  const sx = r.w / state.mapWidth;
+  const sy = r.h / state.mapHeight;
   const px = (tx: number) => r.x + tx * sx;
   const py = (ty: number) => r.y + ty * sy;
   const fog = (tx: number, ty: number) => fogAt(state, Math.floor(tx), Math.floor(ty));
@@ -58,9 +58,9 @@ export function drawMinimap(ctx: CanvasRenderingContext2D, state: GameState, cam
   ctx.clip();
 
   // Terrain shading.
-  for (let ty = 0; ty < GRID.height; ty++) {
+  for (let ty = 0; ty < state.mapHeight; ty++) {
     const row = state.terrain[ty];
-    for (let tx = 0; tx < GRID.width; tx++) {
+    for (let tx = 0; tx < state.mapWidth; tx++) {
       const t = row[tx];
       if (t === "ground") continue;
       ctx.fillStyle = t === "mountain" ? COLORS.mountain : t === "water" ? COLORS.water : COLORS.rock;
@@ -79,7 +79,7 @@ export function drawMinimap(ctx: CanvasRenderingContext2D, state: GameState, cam
     state.citadel.controllingPlayer === "neutral"
       ? COLORS.citadelNeutral
       : ownerColor(state.citadel.controllingPlayer);
-  ctx.fillRect(px(CITADEL_POS.x) - 3, py(CITADEL_POS.y) - 3, 6, 6);
+  ctx.fillRect(px(state.citadel.x) - 3, py(state.citadel.y) - 3, 6, 6);
 
   // Entities: buildings (once explored) as blocks; enemy units only while visible.
   for (const e of state.entities) {
@@ -95,15 +95,26 @@ export function drawMinimap(ctx: CanvasRenderingContext2D, state: GameState, cam
   }
 
   // Fog overlay (overlap padding only for opaque unexplored, to avoid alpha double-darkening).
-  for (let ty = 0; ty < GRID.height; ty++) {
+  for (let ty = 0; ty < state.mapHeight; ty++) {
     const row = state.fog[ty];
-    for (let tx = 0; tx < GRID.width; tx++) {
+    for (let tx = 0; tx < state.mapWidth; tx++) {
       const st = row[tx];
       if (st === "visible") continue;
       const opaque = st === "unexplored";
       ctx.fillStyle = `rgba(0,0,0,${opaque ? FOG_ALPHA.unexplored : FOG_ALPHA.explored})`;
       ctx.fillRect(px(tx), py(ty), opaque ? sx + 0.6 : sx, opaque ? sy + 0.6 : sy);
     }
+  }
+
+  // 19 §J: ping own "breaking" formations — a pulsing red ring at the anchor draws the eye.
+  for (const f of state.formations) {
+    if (f.owner !== state.viewPlayer || !f.breaking) continue;
+    const pulse = 3 + 2 * Math.sin(state.time * 12);
+    ctx.strokeStyle = COLORS.hpLow;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(px(f.anchor.x), py(f.anchor.y), pulse, 0, Math.PI * 2);
+    ctx.stroke();
   }
 
   // Camera viewport rectangle.

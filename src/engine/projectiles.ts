@@ -30,7 +30,7 @@ export function updateProjectiles(state: GameState, dt: number): void {
         applySplash(state, p.owner, p.tx, p.ty, p.splashRadius, p.damage, p.attackerCombat);
         spawnEffect(state, "death", p.tx, p.ty, EFFECTS.deathLife, { size: p.splashRadius });
       } else if (alive) {
-        dealDamage(state, target, p.damage); // miss (fizzle) if the target is gone
+        dealDamage(state, target, p.damage, p.owner); // miss (fizzle) if the target is gone
       } else {
         spawnEffect(state, "hit", p.tx, p.ty, EFFECTS.hitLife);
       }
@@ -50,6 +50,6 @@ function applySplash(
   for (const e of state.entities) {
     if (e.hp <= 0 || !isEnemy(owner, e)) continue;
     const c = entityCenter(e);
-    if (Math.hypot(c.x - x, c.y - y) <= radius) dealDamage(state, e, baseDmg * typeMultFor(attackerCombat, e));
+    if (Math.hypot(c.x - x, c.y - y) <= radius) dealDamage(state, e, baseDmg * typeMultFor(attackerCombat, e), owner);
   }
 }

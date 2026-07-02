@@ -3,7 +3,6 @@
 import {
   CENTRAL_DEPOSIT_GOLD,
   CITADEL,
-  CITADEL_POS,
   COLORS,
   HOME_MINE_GOLD,
   ownerColor,
@@ -52,7 +51,7 @@ export function drawCitadel(
   camera: Camera,
   citadel: Citadel,
 ): void {
-  const c = camera.tileToScreen(CITADEL_POS.x, CITADEL_POS.y);
+  const c = camera.tileToScreen(citadel.x, citadel.y);
   const r = CITADEL.visualRadius * camera.tileScreenSize;
   const held = citadel.controllingPlayer !== "neutral";
   const fill = held ? ownerColor(citadel.controllingPlayer) : COLORS.citadelNeutral;
