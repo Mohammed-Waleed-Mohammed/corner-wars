@@ -77,6 +77,9 @@ function clearOrder(u: Unit): void {
 
 export function executeCommand(state: GameState, cmd: Command): void {
   const pid = cmd.playerId;
+  // 22 §W3: gameplay commands from an eliminated player are no-ops on every peer — a spectating
+  // client keeps sending (empty) turns for lockstep, but nothing it says can touch the sim.
+  if (state.players[pid]?.eliminated) return;
   const pl = cmd.payload;
   switch (cmd.type) {
     case "MOVE":

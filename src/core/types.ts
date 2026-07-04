@@ -241,7 +241,52 @@ export interface AIBrain {
   mode: AIMode;
   decisionTimer: number; // accumulates dt; decides on a slow cadence
   attackClock: number; // throttles re-issuing attack orders
-  difficulty?: "easy" | "medium"; // 20 §D — Skirmish difficulty (default medium)
+  difficulty?: "easy" | "medium" | "hard"; // 22 §N — easy: old simple AI; medium/hard: the Commander
+  commander?: CommanderState; // 22 — host-only blackboard (never hashed, never on the wire)
+}
+
+// ── 22 §P — the AI Commander's blackboard (engine-only, host-side) ────────────
+export type AIPersonality = "rusher" | "boomer" | "turtle" | "techer" | "opportunist";
+export type AIStance = "BUILD_UP" | "PRESSURE" | "ALL_IN" | "DEFEND" | "RECOVER";
+export type SquadRole = "main" | "homeGuard" | "raid" | "citadel";
+
+export interface AISquad {
+  id: number;
+  role: SquadRole;
+  unitIds: number[];
+  formation: FormationId | null; // the def id last ordered
+  objective: Vec2 | null; // where the squad is being sent (drawn as an intent line in F5)
+  mission: string; // free-form tactical note ("attack", "raid", "hold", …) for logic + overlay
+  timer: number; // role-specific cooldown in ticks (e.g. next raid tick)
+  lastFormTick: number; // throttles FORM_UP so re-forming never becomes a stall loop
+  lastOrderTick: number; // periodic re-issue of the squad order (keeps reinforcements flowing)
+}
+
+export interface AIBasePlan {
+  anchor: Vec2; // main yard center
+  perimeter: Vec2[]; // the wall path (§G.2)
+  gates: Vec2[]; // ≤3 gate tiles on used paths
+  walls: Vec2[]; // planned wall tiles (threat-facing subset for non-Turtles)
+  plannedDefenses: { type: BuildingType; x: number; y: number }[];
+}
+
+export interface AILogEntry { tick: number; layer: "S" | "O" | "T"; msg: string; }
+
+export interface CommanderState {
+  personality: AIPersonality;
+  stance: AIStance;
+  targetPlayer: PlayerId | null;
+  stanceUntilTick: number; // ALL_IN window expiry (0 = none)
+  squads: AISquad[];
+  nextSquadId: number;
+  basePlan: AIBasePlan | null;
+  grudges: Partial<Record<number, number>>; // playerId → tick of their last attack on me
+  rngState: number; // seeded per player from state.seed — ALL AI randomness steps this
+  log: AILogEntry[]; // §O ring buffer (LOG_SIZE)
+  peakArmy: number; // for RECOVER's rebuild-to-80% exit
+  armyHist: { tick: number; v: number }[]; // my ArmyValue samples (strategic cadence)
+  enemyHist: Partial<Record<number, { tick: number; v: number }[]>>; // per-enemy samples
+  intents: string[]; // top operational intents (F5 panel)
 }
 
 export interface Player {

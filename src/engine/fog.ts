@@ -13,6 +13,13 @@ export function updateFog(state: GameState, dt: number): void {
   state.fogTimer = 0;
   state.fogVersion = (state.fogVersion ?? 0) + 1; // invalidate the render-side fog cache
 
+  // 22 §W3: an eliminated local player SPECTATES with full map vision. Fog is local-only (never
+  // hashed), so this may differ per client without touching determinism.
+  if (state.players[state.viewPlayer]?.eliminated) {
+    for (const row of state.fog) row.fill("visible");
+    return;
+  }
+
   // Everything currently visible drops to explored; sight then re-lights what's in range.
   for (let y = 0; y < state.mapHeight; y++) {
     const row = state.fog[y];

@@ -27,6 +27,7 @@ export class InputManager {
       this.keys.add(k);
       // Ctrl/Cmd+1..9 are control-group binds (§8) — stop the browser from switching tabs.
       if ((e.ctrlKey || e.metaKey) && k >= "1" && k <= "9") e.preventDefault();
+      if (k === "f5" || k === "f6") e.preventDefault(); // 22 §O: AI overlay/log keys, not browser refresh
     });
     window.addEventListener("keyup", (e) => this.keys.delete(e.key.toLowerCase()));
     window.addEventListener("blur", () => this.keys.clear());

@@ -59,7 +59,8 @@ interface MatchOpts {
   peer?: NetPeer;
   startingGold?: number; // 20 §D match option (applied to every seated player)
   gameSpeed?: number; // 20 §D 0.75/1/1.25 — sim-tick multiplier (SP; host-set in MP)
-  difficulties?: Partial<Record<PlayerId, "easy" | "medium">>; // 20 §D per-AI difficulty
+  difficulties?: Partial<Record<PlayerId, "easy" | "medium" | "hard">>; // 22 §N per-AI difficulty
+  seed?: number; // 22: shared match seed (MP: host's; SP: random) — drives AI personalities
   onExit?: () => void; // 20 §H Test Play: show an "End Test" button; tear the match down and call this
 }
 
@@ -91,6 +92,7 @@ function bootMatch(opts: MatchOpts): void {
 
   applyPalette(opts); // 18 §H: set player colors before the first frame
   const state = buildFromMap(opts.map);
+  if (opts.seed != null) state.seed = opts.seed >>> 0; // 22: seeded AI randomness (identical on peers)
   state.viewPlayer = opts.localPlayerId; // this peer sees the map through its own player's fog/HUD
   // MP: set player roles from the shared roster so only AI seats are AI-driven (host-run) and human
   // seats — including remote ones — are never auto-played. Identical on every peer, determinism-safe.
@@ -257,7 +259,8 @@ function bootMatch(opts: MatchOpts): void {
         armyBar: controller.getArmyBar(),
         selection: controller.getSelectionDetail(),
       });
-      if (state.winner !== null) onWinner(); // 20 §J: stop + show the post-match screen (once)
+      maybeSpectate(); // 22 §W3: local elimination → spectator banner (match continues)
+      if (state.winner !== null) onWinner(); // 22 §W1: ONLY a last-player-standing winner ends it
     },
   );
 
@@ -344,6 +347,25 @@ function bootMatch(opts: MatchOpts): void {
     endBtn.onclick = exitToMenu;
   }
 
+  // 22 §W3: an eliminated local human becomes a SPECTATOR — the match does NOT end locally. The
+  // client keeps running lockstep (and sending empty turns); we just show a banner with an exit.
+  let spectating = false;
+  const maybeSpectate = (): void => {
+    if (spectating || ended || !state.players[opts.localPlayerId].eliminated) return;
+    spectating = true;
+    const banner = document.createElement("div");
+    banner.className = "spectate-banner hud-chamfer-sm";
+    const label = document.createElement("span");
+    label.textContent = "You were eliminated — spectating";
+    const exit = document.createElement("button");
+    exit.className = "spectate-exit";
+    exit.textContent = "Exit to Menu";
+    exit.onclick = exitToMenu;
+    banner.append(label, exit);
+    app.appendChild(banner);
+    extraNodes.push(banner);
+  };
+
   // 20 §J post-match: when the sim declares a winner, stop and show the results screen.
   const maybeEndMatch = (): void => {
     if (state.winner === null || ended) return;
@@ -380,7 +402,7 @@ const screens = new ScreenManager(app);
 function lobbyHandlers(): ConstructorParameters<typeof Lobby>[1] {
   return {
     onSinglePlayer: () => bootMatch({ map: SP_DEFAULT_MAP, localPlayerId: 0 }),
-    onStartMatch: (r) => bootMatch({ map: r.map, localPlayerId: r.localPlayerId, slots: r.slots, peer: r.peer }),
+    onStartMatch: (r) => bootMatch({ map: r.map, localPlayerId: r.localPlayerId, slots: r.slots, peer: r.peer, seed: r.config.seed }),
     onMapEditor: () => { screens.close(); setAppBackground("editor"); new MapEditor(app, goToMenu, undefined, editorServices()); },
     onExitToMenu: goToMenu,
   };
@@ -404,7 +426,7 @@ function editorServices(): import("./ui/editor/editor").EditorServices {
 const menuServices: MenuServices = {
   version: VERSION,
   playerName: () => getSettings().username,
-  bootSkirmish: (s) => bootMatch({ map: s.map, localPlayerId: 0, slots: s.slots, startingGold: s.startingGold, gameSpeed: s.gameSpeed, difficulties: s.difficulties }),
+  bootSkirmish: (s) => bootMatch({ map: s.map, localPlayerId: 0, slots: s.slots, startingGold: s.startingGold, gameSpeed: s.gameSpeed, difficulties: s.difficulties, seed: Math.floor(Math.random() * 0xffffffff) >>> 0 }),
   editMap: (map) => { screens.close(); setAppBackground("editor"); new MapEditor(app, goToMenu, map, editorServices()); },
   hostMultiplayer: () => { screens.close(); setAppBackground("lobby"); new Lobby(app, lobbyHandlers()).hostGame(); },
   joinMultiplayer: () => { screens.close(); setAppBackground("lobby"); new Lobby(app, lobbyHandlers()).joinGame(); },

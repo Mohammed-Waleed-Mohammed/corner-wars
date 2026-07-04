@@ -107,6 +107,18 @@ export class InputController {
   private lastClickTime = -1;
   private lastClickId = -1;
   private debugVisible = false;
+  private aiDebugVisible = false; // 22 §O
+
+  /** 22 §O: dump every Commander's AI_LOG ring buffer to the console (read-only). */
+  private dumpAILog(): void {
+    for (const p of this.state.players) {
+      const cs = p.ai?.commander;
+      if (!cs) continue;
+      // eslint-disable-next-line no-console
+      console.log(`── AI P${p.id} [${cs.personality}/${cs.stance} → P${cs.targetPlayer}] ──`);
+      for (const l of cs.log) console.log(`  t${l.tick} [${l.layer}] ${l.msg}`);
+    }
+  }
   private hover: HoverInfo = { action: "none" };
   private wallDragStart: Vec2 | null = null; // §1 drag-to-build walls (tile)
   private commandMarkers: CommandMarker[] = []; // §3 player move/attack-move lines
@@ -154,6 +166,8 @@ export class InputController {
 
   private handleHotkeys(): void {
     if (this.pressed("f3")) this.debugVisible = !this.debugVisible;
+    if (this.pressed("f5")) this.aiDebugVisible = !this.aiDebugVisible; // 22 §O AI overlay
+    if (this.pressed("f6")) this.dumpAILog(); // 22 §O: dump the AI_LOG ring buffers to console
     // Formation keys (19 §K) get first crack: when units are selected, F opens the menu and 1/2/3/4
     // pick a preset — so those digits must NOT also fire control-group select this frame.
     const formConsumedDigit = this.handleFormationKeys();
@@ -1010,6 +1024,7 @@ export class InputController {
       buildDrag,
       formationGroups: this.formationGroupMap(),
       formationPreview: this.formationPreviewGhost(),
+      aiDebug: this.aiDebugVisible,
     };
   }
 }

@@ -482,6 +482,7 @@ export class Hud {
 
     this.updateBuffs(state); // §K status strip
     this.updateFormationAlerts(state); // §J "line breaking" toasts
+    this.updateEliminationToasts(state); // 22 §W2.5
     this.updateArmyBar(info.armyBar); // 20 §I bound-group roster
     this.updateCommandBar(state, info);
 
@@ -574,6 +575,19 @@ export class Hud {
         const chip = this.buffsEl.querySelector<HTMLElement>(`[data-buff="${b.id}"]`);
         if (chip) chip.title = b.tooltip;
       }
+    }
+  }
+
+  /** 22 §W2.5: toast when any player is eliminated (edge-detected on the sim flags). */
+  private eliminatedSeen = new Set<number>();
+  private updateEliminationToasts(state: GameState): void {
+    for (const p of state.players) {
+      if (!p.eliminated || this.eliminatedSeen.has(p.id)) continue;
+      this.eliminatedSeen.add(p.id);
+      // Seats eliminated at t=0 are empty chairs, not defeats — don't announce those.
+      if (state.tick < 5) continue;
+      const name = p.isHuman ? `Player ${p.id + 1}` : `Computer ${p.id + 1}`;
+      this.showToast(`${name} has been eliminated`, p.id === this.local ? "bad" : "warn");
     }
   }
 

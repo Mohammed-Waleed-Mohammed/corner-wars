@@ -938,3 +938,13 @@
 .cc-qchip { width: 28px; height: 28px; }
 .cc-qcode { font-size: 9px; }
 .cc-row2 { min-height: 32px; max-height: 62px; overflow: visible; }
+
+/* 22 §W3 — spectator banner */
+.spectate-banner { position: fixed; top: 56px; left: 50%; transform: translateX(-50%); z-index: 14;
+  display: flex; align-items: center; gap: 14px; padding: 8px 16px; background: var(--hud-bg-panel);
+  border: 1px solid var(--hud-border); border-left: 3px solid var(--hud-bad); color: var(--hud-text);
+  font-family: var(--hud-display); font-size: 13px; font-weight: 700; letter-spacing: 0.5px; }
+.spectate-exit { padding: 5px 12px; border: 1px solid var(--hud-border); background: var(--hud-bg-chip);
+  color: var(--hud-text); font-family: var(--hud-display); font-size: 11px; font-weight: 700;
+  text-transform: uppercase; cursor: pointer; }
+.spectate-exit:hover { border-color: var(--hud-trim-gold); }

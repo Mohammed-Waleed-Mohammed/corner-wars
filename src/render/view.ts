@@ -63,4 +63,5 @@ export interface RenderView {
   formationGroups: Record<number, number>; // 19 §J: formationId → bound control-group number (local)
   // 20 §I: hovering a formation card ghosts its layout at the army's position (world slot points + facing).
   formationPreview: { points: Vec2[]; anchor: Vec2; facing: number } | null;
+  aiDebug: boolean; // 22 §O: the F5 AI Commander overlay (local, read-only)
 }

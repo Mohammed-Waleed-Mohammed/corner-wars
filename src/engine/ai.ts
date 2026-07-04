@@ -10,6 +10,7 @@
 // applied — and their costs/limits enforced — inside executeCommand, so every peer agrees.
 
 import { AI, AI_DIFFICULTY, BUILDING_STATS, CITADEL_POWERS } from "../config/constants";
+import { runCommander } from "./commander/commander";
 import type { AnyEntity, Building, GameState, Player, PlayerId, Unit } from "../core/types";
 import type { Command } from "../sim/commands";
 import { footprintClear, withinBuildRadius } from "./placement";
@@ -36,9 +37,15 @@ const fallBack = (pid: PlayerId, formationInstanceId: number): Command =>
 export function runAI(state: GameState, dt: number, submit: Submit): void {
   for (const p of state.players) {
     if (p.isHuman || p.eliminated || !p.ai) continue;
+    // 22 §N: EASY keeps this old simple brain verbatim; Medium/Hard run the Commander (host-side,
+    // cadenced in sim ticks inside runCommander — call-through every tick).
+    if ((p.ai.difficulty ?? "medium") !== "easy") {
+      runCommander(state, p, submit);
+      continue;
+    }
     p.ai.decisionTimer += dt;
     p.ai.attackClock += dt;
-    const mult = AI_DIFFICULTY[p.ai.difficulty ?? "medium"].decisionMult; // 20 §D: Easy thinks slower
+    const mult = AI_DIFFICULTY.easy.decisionMult;
     if (p.ai.decisionTimer >= AI.decisionInterval * mult) {
       p.ai.decisionTimer = 0;
       decide(state, p, submit);
@@ -54,7 +61,7 @@ function decide(state: GameState, p: Player, submit: Submit): void {
 
   const workers = unitsOf(state, id).filter((u) => u.unitType === "worker");
   const army = combatUnitsOf(state, id);
-  const tune = AI_DIFFICULTY[p.ai!.difficulty ?? "medium"]; // 20 §D difficulty knobs
+  const tune = AI_DIFFICULTY.easy; // only the EASY tier reaches this brain (22 §N)
 
   maintainEconomy(state, p, cy, workers.length, tune.workerTarget, submit);
 

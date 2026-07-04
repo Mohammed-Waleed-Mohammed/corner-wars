@@ -15,6 +15,7 @@ import { drawDragBox, drawMoveMarker } from "./draw/overlays";
 import { drawProjectiles } from "./draw/projectiles";
 import { drawEffects } from "./draw/effects";
 import { drawBuildArea } from "./draw/fog";
+import { drawAIOverlay } from "./draw/aiDebug";
 import { drawMinimap } from "./draw/minimap";
 import { fogAt } from "../engine/fog";
 import { isLowPower } from "../state/gameState";
@@ -103,6 +104,8 @@ export function renderGame(
   if (view.dragBox) drawDragBox(ctx, view.dragBox.start, view.dragBox.end);
 
   // Minimap last, anchored to the screen corner.
+  if (view.aiDebug) drawAIOverlay(ctx, state, camera); // 22 §O (F5, local read-only)
+
   // 21 §J: the minimap lives in the bottom console's TACTICAL well (its own canvas); without one
   // (headless/tests) it simply isn't drawn.
   if (minimap) drawMinimap(minimap.ctx, state, camera, minimap.w, minimap.h);

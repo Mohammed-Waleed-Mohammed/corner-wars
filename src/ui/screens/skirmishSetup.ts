@@ -19,7 +19,7 @@ export interface SkirmishStart {
   slots: SlotInfo[];
   startingGold: number;
   gameSpeed: number;
-  difficulties: Partial<Record<PlayerId, "easy" | "medium">>;
+  difficulties: Partial<Record<PlayerId, "easy" | "medium" | "hard">>;
 }
 
 export function skirmishSetupScreen(services: MenuServices): Screen {
@@ -41,7 +41,7 @@ export function skirmishSetupScreen(services: MenuServices): Screen {
       // Local, mutable setup state (never the sim).
       let map: GameMap | null = null;
       const aiEnabled = [false, true, true, true]; // slot 0 is you
-      const aiDifficulty: ("easy" | "medium")[] = ["medium", "medium", "medium", "medium"];
+      const aiDifficulty: ("easy" | "medium" | "hard")[] = ["medium", "medium", "medium", "medium"];
       const colorPref = [colorKeyToIndex(getSettings().preferredColor), 1, 2, 3];
       let startingGold: number = MATCH_OPTIONS.startingGoldDefault;
       let gameSpeed: number = MATCH_OPTIONS.gameSpeedDefault;
@@ -77,8 +77,8 @@ export function skirmishSetupScreen(services: MenuServices): Screen {
             toggle.onclick = () => { aiEnabled[i] = !aiEnabled[i]; renderRight(); };
             row.append(toggle);
             const diff = el("div", "setup-diff");
-            for (const d of ["easy", "medium"] as const) {
-              const b = el("button", `setup-diffbtn${aiDifficulty[i] === d ? " on" : ""}`, d === "easy" ? "Easy" : "Medium");
+            for (const d of ["easy", "medium", "hard"] as const) {
+              const b = el("button", `setup-diffbtn${aiDifficulty[i] === d ? " on" : ""}`, d === "easy" ? "Easy" : d === "medium" ? "Medium" : "Hard");
               if (!aiEnabled[i]) b.classList.add("faded");
               b.onclick = () => { aiDifficulty[i] = d; renderRight(); };
               diff.append(b);
@@ -124,7 +124,7 @@ export function skirmishSetupScreen(services: MenuServices): Screen {
           corner: CORNER_LABELS[i] ?? "",
           peerId: null,
         }));
-        const difficulties: Partial<Record<PlayerId, "easy" | "medium">> = {};
+        const difficulties: Partial<Record<PlayerId, "easy" | "medium" | "hard">> = {};
         for (let i = 1; i < maxP; i++) if (aiEnabled[i]) difficulties[i as PlayerId] = aiDifficulty[i];
         nav.close();
         services.bootSkirmish({ map, slots, startingGold, gameSpeed, difficulties });

@@ -631,13 +631,100 @@ export const AI = {
   battleRadius: 10, // tiles around the formation used to tally the local strength comparison
 } as const;
 
-// 20 §D: AI difficulty presets (Skirmish). Easy = slower decisions, leaner economy, later pushes, no
-// Citadel powers. Medium = the tuned defaults. Deterministic — difficulty is fixed match config.
+// 20 §D: AI difficulty presets for the OLD simple AI — which file 22 §N keeps verbatim as EASY.
 export const AI_DIFFICULTY = {
   easy: { decisionMult: 1.7, workerTarget: 6, armyAttackThreshold: 11, usePowers: false },
   medium: { decisionMult: 1.0, workerTarget: AI.workerTarget, armyAttackThreshold: AI.armyAttackThreshold, usePowers: true },
 } as const;
-export type Difficulty = keyof typeof AI_DIFFICULTY;
+export type Difficulty = "easy" | "medium" | "hard"; // 22 §N: medium/hard = the Commander
+
+// ── 22 — The AI Commander (every §B–§M number is a dial here) ────────────
+export const COMMANDER = {
+  // §A cadences (sim ticks @30Hz), staggered per player by playerId × STAGGER_PER_PLAYER.
+  CADENCE: { STRATEGIC: 150, OPERATIONAL: 60, TACTICAL: 15 },
+  STAGGER_PER_PLAYER: 7,
+  // §E target scoring
+  TARGET_STICKINESS: 1.25,
+  GRUDGE_TICKS: 900,
+  SCORE_W: { WEAKNESS: 2.0, PROXIMITY: 1.5, GRUDGE: 2.5, CITADEL: 1.0, BUSY: 1.5 },
+  // §D adaptation
+  DEFEND_THREAT: 0.6,
+  DEFEND_EXIT: 0.2,
+  RECOVER_LOSS_FRAC: 0.4,
+  RECOVER_WINDOW_TICKS: 900,
+  RECOVER_REBUILD_FRAC: 0.8,
+  ALLIN_ENEMY_DROP: 0.35,
+  ALLIN_DROP_WINDOW_TICKS: 600,
+  ALLIN_WINDOW_TICKS: 1350,
+  // §C assessment
+  THREAT_RADIUS: 14,
+  DEFENSE_SCORE_RADIUS: 10,
+  ECON_WORKER_VALUE: 2.5,
+  // §F economy
+  WORKERS_PER_REFINERY: 2,
+  WORKER_SATURATION: 6,
+  POWER_SURPLUS_MIN: 20,
+  REPAIR_HP_FRAC: 0.6,
+  REPAIR_MAX_WORKERS: 2,
+  REPAIR_ENEMY_RADIUS: 8,
+  SUPPLY_AT_CAP_FRAC: 0.85,
+  SUPPLY_MIN_GOLD: 600,
+  EXPAND_PACKAGE: { workers: 2, pillboxes: 1 },
+  // §G base planning
+  PERIMETER_MARGIN: 3,
+  GATES_MAX: 3,
+  NON_TURTLE_WALL_FRAC: 0.5,
+  DEF_HEAVY_SHARE: 0.35,
+  DEF_BLOB_SHARE: 0.5,
+  REBUILD_PRIORITY: 1.5,
+  // §H tech
+  TECH_INCOME_T1: 20,
+  TECH_INCOME_T2: 35,
+  ADV_VEHICLES_INCOME: 30,
+  SIEGE_DEFSCORE: 40,
+  STIMS_MEDICS: 3,
+  // §I production
+  MIX: { INF_FROM_RANGED: 0.8, INF_BASE: 0.3, RNG_FROM_HEAVY: 1.0, RNG_BASE: 0.2, HVY_FROM_INF: 0.8, HVY_BASE: 0.2 },
+  SIEGE_SHARE_DEFSCORE: 25,
+  MEDIC_PER_COMBAT: 8,
+  SECOND_BARRACKS_FLOAT: 800,
+  DEFAULT_MIX: { rusher: { infantry: 0.7, ranged: 0.3, heavy: 0 }, other: { infantry: 0.5, ranged: 0.3, heavy: 0.2 } },
+  // §J squads
+  HOMEGUARD_FRAC: 0.2,
+  HOMEGUARD_FRAC_TURTLE: 0.4,
+  RAID_SIZE: 4,
+  RAID_INTERVAL_TICKS: [1200, 2100] as const,
+  CITADEL_SQUAD_FRAC: 0.25,
+  // §K attack/defense
+  ATTACK_MIN_UNITS: 8,
+  DEFENSE_IN_ATTACK: 0.7,
+  FIGHT_ODDS: 0.9,
+  RETREAT_ODDS: 0.6,
+  LOCAL_ODDS_RADIUS: 12,
+  WORKER_PULL_THREAT: 1.2,
+  // §L formations
+  FORMATION_COUNTERS: { line: "spear", spear: "box", box: "line", column: "line" } as const,
+  REFORM_HOLES: 0.25,
+  FLANK_DIST: 8,
+  // §M citadel
+  CITADEL_CONTEST: 0.8,
+  POWERS: { ARTY_CLUSTER: 6, ARTY_RADIUS: 3, FRENZY_ODDS: [0.8, 1.2] as const, REPAIR_COUNT: 5, REPAIR_FRAC: 0.5, ION_CLUSTER: 12, ION_RESERVE_AT: 25, ION_GAP: 15 },
+  // §B personalities — parameter sets, not code (firstPush = Infinity: never initiates).
+  PERSONALITIES: {
+    rusher: { workers: 6, firstPush: 600, attackRatio: 1.1, defenseBudget: 0.05, techBudget: 0.05, expandAt: 0.2, raidSquads: 0, citadelWeight: 0.6 },
+    boomer: { workers: 12, firstPush: 1500, attackRatio: 1.4, defenseBudget: 0.1, techBudget: 0.15, expandAt: 0.45, raidSquads: 0, citadelWeight: 0.8 },
+    turtle: { workers: 8, firstPush: Infinity, attackRatio: 1.6, defenseBudget: 0.3, techBudget: 0.15, expandAt: 0.25, raidSquads: 0, citadelWeight: 0.7 },
+    techer: { workers: 9, firstPush: 1200, attackRatio: 1.3, defenseBudget: 0.12, techBudget: 0.35, expandAt: 0.3, raidSquads: 0, citadelWeight: 1.0 },
+    opportunist: { workers: 8, firstPush: 900, attackRatio: 1.2, defenseBudget: 0.1, techBudget: 0.12, expandAt: 0.3, raidSquads: 2, citadelWeight: 1.3 },
+  },
+  // §N difficulty tiers (EASY = the old simple AI, untouched).
+  TIERS: {
+    medium: { cadenceMult: 1.5, personalities: ["boomer", "turtle"] as const, fullAdaptation: false, flanking: false, raids: false },
+    hard: { cadenceMult: 1.0, personalities: ["rusher", "boomer", "turtle", "techer", "opportunist"] as const, fullAdaptation: true, flanking: true, raids: true },
+  },
+  HARD_INCOME_MULT: 1.0, // optional handicap dial — default OFF: smart, not rich
+  LOG_SIZE: 50, // §O AI_LOG ring buffer
+} as const;
 
 // ── Camera (02-map.md) ──────────────────────────────────────────────────────
 export const CAMERA = {
