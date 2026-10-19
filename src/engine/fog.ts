@@ -1,5 +1,5 @@
-// Fog of war (§11), for the LOCAL player (state.viewPlayer) — the AI sees the whole map (a v1
-// simplification). Three states per tile: unexplored (never seen) -> explored (seen before; static
+// Fog of war (§11), for the LOCAL player (state.viewPlayer). AI players have their own fog with the
+// same rules, kept AI-side (engine/aiPerception.ts, 22 §C v3). Three states per tile: unexplored (never seen) -> explored (seen before; static
 // objects shown dimmed, but not live enemy positions) -> visible (currently in a friendly sight
 // radius). Recomputed on a slow timer for performance, not every frame. Fog is cosmetic/local — it
 // is NOT hashed by the checksum, so computing it per-peer-perspective doesn't affect determinism.

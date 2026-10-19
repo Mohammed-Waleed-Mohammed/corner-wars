@@ -5,7 +5,8 @@
 import { COMMANDER } from "../../config/constants";
 import type { PlayerId } from "../../core/types";
 import {
-  armyValue, baseCenter, economyScore, frontDistance, livingEnemies, threatNearBase, biggestThreatPlayer,
+  armyCentroid, armyValue, baseCenter, defenseScore, economyScore, fightOdds, frontDistance, livingEnemies, territoryThreat,
+  threatNearBase, biggestThreatPlayer,
 } from "./assess";
 import { aiLog, type Ctx } from "./commander";
 import { isLowPower } from "../../state/gameState";
@@ -69,12 +70,20 @@ export function runStrategic(ctx: Ctx): void {
       })
     : [];
 
+  // §D v2 Row 1 context: also read the fight at the most-threatened point of my territory (my units +
+  // powered defenses there vs the attackers) — a big army parked at home doesn't need to recall the
+  // push for a poke, but a raid my base can't hold does, even if my total army is large.
+  const tt = territoryThreat(state, pid);
+  const ttOdds = tt ? fightOdds(state, pid, tt.at, COMMANDER.LOCAL_ODDS_RADIUS, undefined, true) : 99;
+  const losingAtHome = tt != null && tt.value >= COMMANDER.DEFEND_MIN_VALUE && ttOdds < COMMANDER.DEFEND_ODDS;
+
   const prev = cs.stance;
   // Row 1 (all tiers): serious threat at home → DEFEND.
-  if (threat > COMMANDER.DEFEND_THREAT * Math.max(1, myArmy)) {
+  if (threat > COMMANDER.DEFEND_THREAT * Math.max(1, myArmy) || losingAtHome) {
     cs.stance = "DEFEND";
-  } else if (cs.stance === "DEFEND" && threat >= COMMANDER.DEFEND_EXIT * Math.max(1, myArmy)) {
-    // stay in DEFEND until the exit threshold (§K)
+  } else if (cs.stance === "DEFEND" && (threat >= COMMANDER.DEFEND_EXIT * Math.max(1, myArmy) ||
+      (tt != null && tt.value >= COMMANDER.DEFEND_MIN_VALUE && ttOdds < COMMANDER.DEFEND_ODDS * 1.5))) {
+    // stay in DEFEND until the exit threshold (§K) — and until the threatened point is held comfortably
   } else if (lostRecently && myArmy < cs.peakArmy * COMMANDER.RECOVER_REBUILD_FRAC) {
     cs.stance = "RECOVER"; // Row 2 (all tiers)
   } else if (cs.stance === "RECOVER" && myArmy < cs.peakArmy * COMMANDER.RECOVER_REBUILD_FRAC) {
@@ -120,11 +129,15 @@ function pickTarget(ctx: Ctx, enemies: PlayerId[], t: number): void {
   const invArmy = enemies.map((e) => 1 / (1 + armyValue(state, e)));
   const invDist = enemies.map((e) => 1 / (1 + frontDistance(state, pid, e)));
   const maxInvArmy = Math.max(...invArmy), maxInvDist = Math.max(...invDist);
+  // §E v2 fortification: a base full of powered turrets is a worse target than the same army in the open.
+  const fort = enemies.map((e) => { const c = baseCenter(state, e); return c ? defenseScore(state, e, c) : 0; });
+  const maxFort = Math.max(1, ...fort);
   const W = COMMANDER.SCORE_W;
   const myBase = baseCenter(state, pid);
   const scores = new Map<PlayerId, number>();
   enemies.forEach((e, i) => {
-    let s = W.WEAKNESS * (invArmy[i] / maxInvArmy) + W.PROXIMITY * (invDist[i] / maxInvDist);
+    let s = W.WEAKNESS * (invArmy[i] / maxInvArmy) + W.PROXIMITY * (invDist[i] / maxInvDist) -
+      W.FORTIFIED * (fort[i] / maxFort);
     if ((cs.grudges[e] ?? -1e9) > t - COMMANDER.GRUDGE_TICKS) s += W.GRUDGE;
     if (state.citadel.controllingPlayer === e) s += W.CITADEL;
     // busy: they recently lost value and it wasn't near my base → someone else is on them.
@@ -133,6 +146,10 @@ function pickTarget(ctx: Ctx, enemies: PlayerId[], t: number): void {
     const nowV = armyValue(state, e);
     const busy = before != null && before > 0 && (before - nowV) / before > 0.1 && cs.grudges[e] !== t;
     if (busy && myBase) s -= W.BUSY;
+    // §E v2 exposed base: their army is far from home (out raiding, fighting someone, sieging me) —
+    // the base is the softest it will ever be.
+    const eb = baseCenter(state, e), ea = armyCentroid(state, e);
+    if (eb && ea && Math.hypot(eb.x - ea.x, eb.y - ea.y) > COMMANDER.EXPOSED_DIST) s += W.EXPOSED;
     scores.set(e, s);
   });
   const best = enemies.reduce((a, b) => ((scores.get(a) ?? 0) >= (scores.get(b) ?? 0) ? a : b));

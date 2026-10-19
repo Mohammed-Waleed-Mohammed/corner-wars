@@ -243,12 +243,30 @@ export interface AIBrain {
   attackClock: number; // throttles re-issuing attack orders
   difficulty?: "easy" | "medium" | "hard"; // 22 §N — easy: old simple AI; medium/hard: the Commander
   commander?: CommanderState; // 22 — host-only blackboard (never hashed, never on the wire)
+  intel?: AIIntel; // 22 §C v3 — this AI's own fog of war + memory (host-only, never hashed)
+}
+
+/** 22 §C v3 — what one AI player knows. Built by aiPerception.ts with the human fog's rules (sight
+ *  circles from sightRadius, explored memory) plus starting map knowledge (every gold mine, every
+ *  enemy's starting yard). Host-only, never hashed, never on the wire. */
+export interface AIIntel {
+  explored: Uint8Array; // per tile (y*W+x): ever seen by this AI
+  visible: Uint8Array; // per tile: in sight at the last perceive()
+  lastSeen: Int32Array; // per tile: tick it was last in sight (-1 = never) — drives scouting
+  units: Map<number, { u: Unit; tick: number }>; // last-seen snapshot of each enemy unit
+  bhp: Map<number, { hp: number; buildProgress: number; type: BuildingType; owner: PlayerId }>; // last-seen enemy buildings
+  wasVisibleB: Set<number>; // enemy building ids in sight at the last perceive() (to see them destroyed)
+  plantKilled: Partial<Record<number, number>>; // owner → tick this AI last SAW one of their Power Plants destroyed
+  goldSeen: Map<number, number>; // last-known goldRemaining per source (starting amounts at match start)
+  knownIds: Set<number>; // enemy entities known without exploring (their starting yards)
+  wasVisible: Set<number>; // enemy unit ids in sight at the last perceive() (to see deaths)
+  tick: number; // tick of the last perceive() (-1 = never)
 }
 
 // ── 22 §P — the AI Commander's blackboard (engine-only, host-side) ────────────
 export type AIPersonality = "rusher" | "boomer" | "turtle" | "techer" | "opportunist";
 export type AIStance = "BUILD_UP" | "PRESSURE" | "ALL_IN" | "DEFEND" | "RECOVER";
-export type SquadRole = "main" | "homeGuard" | "raid" | "citadel";
+export type SquadRole = "main" | "homeGuard" | "raid" | "citadel" | "scout";
 
 export interface AISquad {
   id: number;
@@ -260,6 +278,8 @@ export interface AISquad {
   timer: number; // role-specific cooldown in ticks (e.g. next raid tick)
   lastFormTick: number; // throttles FORM_UP so re-forming never becomes a stall loop
   lastOrderTick: number; // periodic re-issue of the squad order (keeps reinforcements flowing)
+  retreatTick?: number; // 22 §K v2: tick of the last retreat (regroup hysteresis)
+  valueAtRetreat?: number; // 22 §K v2: squad value when it retreated (must regrow before re-pushing)
 }
 
 export interface AIBasePlan {
@@ -287,6 +307,12 @@ export interface CommanderState {
   armyHist: { tick: number; v: number }[]; // my ArmyValue samples (strategic cadence)
   enemyHist: Partial<Record<number, { tick: number; v: number }[]>>; // per-enemy samples
   intents: string[]; // top operational intents (F5 panel)
+  // 22 §A v2: the next sim tick each layer is due. A layer fires on the first call AT OR AFTER it
+  // (never an exact-tick match), so it can't be skipped when the caller doesn't run every tick — the
+  // MP host runs the AI once per 3-tick turn.
+  nextDue?: { S: number; O: number; T: number };
+  // §K v3: "look before you leap" — a push objective the AI hasn't seen lately is scouted first.
+  scoutRequest?: { x: number; y: number; tick: number };
 }
 
 export interface Player {
@@ -382,4 +408,8 @@ export interface GameState {
   humanLowPower?: boolean; // engine-only: last frame's human low-power state (for the cue)
   fogTimer?: number; // engine-only: accumulator for the periodic fog recompute
   fogVersion?: number; // engine-only: bumped when fog changes (render-cache invalidation)
+  // 22 §C v3 — set ONLY on an AI perception view (never on the real state): enemy units this AI
+  // remembers but can't currently see, at their last-seen spot. Strategic estimates (army value,
+  // composition) count them; live tactical reads (contact, fight odds, threats) don't.
+  aiRemembered?: Unit[];
 }

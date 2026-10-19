@@ -3,12 +3,14 @@
 // is COMMANDS into the lockstep stream, so peers stay identical by construction).
 //
 // Determinism: all randomness steps CommanderState.rngState (mulberry32, seeded from state.seed ^
-// playerId) — no Math.random, no Date. Cadences are sim ticks, staggered playerId × 7. The EASY
-// tier never reaches this module (ai.ts keeps the old brain verbatim).
+// playerId) — no Math.random, no Date. Cadences are sim ticks, staggered playerId × 7, and tracked as
+// next-due ticks (§A v2) so they survive callers that skip ticks. The EASY tier never reaches this
+// module (ai.ts keeps the old brain verbatim).
 
 import { COMMANDER } from "../../config/constants";
-import type { AIPersonality, CommanderState, GameState, Player, PlayerId } from "../../core/types";
+import type { AIIntel, AIPersonality, CommanderState, GameState, Player, PlayerId, SquadRole } from "../../core/types";
 import type { Command } from "../../sim/commands";
+import { initIntel, perceive } from "../aiPerception";
 import { runStrategic } from "./strategic";
 import { runOperational } from "./operational";
 import { runTactical } from "./tactical";
@@ -24,6 +26,7 @@ export interface Ctx {
   tier: (typeof COMMANDER.TIERS)["medium" | "hard"];
   pers: (typeof COMMANDER.PERSONALITIES)[AIPersonality];
   rng: () => number; // steps cs.rngState — the ONLY randomness source
+  intel: AIIntel; // §C v3 — this player's fog of war + memory (ctx.state is the view built from it)
 }
 
 /** Seeded, resumable mulberry32 step over cs.rngState. */
@@ -68,36 +71,62 @@ function initCommander(state: GameState, p: Player): CommanderState {
   return cs;
 }
 
-/** Cadence gate: fires when the staggered tick lines up. */
-function due(tick: number, pid: number, base: number, mult: number): boolean {
-  const cad = Math.round(base * mult);
-  return tick % cad === (pid * COMMANDER.STAGGER_PER_PLAYER) % cad;
+type Layer = "S" | "O" | "T";
+const LAYER_BASE: Record<Layer, number> = {
+  S: COMMANDER.CADENCE.STRATEGIC, O: COMMANDER.CADENCE.OPERATIONAL, T: COMMANDER.CADENCE.TACTICAL,
+};
+const cadenceOf = (layer: Layer, mult: number): number => Math.max(1, Math.round(LAYER_BASE[layer] * mult));
+
+/** §A v2 first-due ticks: staggered by playerId × STAGGER_PER_PLAYER (perf smoothing, as before). */
+function initialDue(tick: number, pid: number, mult: number): { S: number; O: number; T: number } {
+  const off = (l: Layer): number => (pid * COMMANDER.STAGGER_PER_PLAYER) % cadenceOf(l, mult);
+  return { S: tick + off("S"), O: tick + off("O"), T: tick + off("T") };
 }
 
-/** Host-side entry — called every sim tick per Commander-driven AI player. */
+/** §A v2 cadence gate: due once `tick` reaches the layer's next-due tick, then re-armed one cadence
+ *  later. The old exact-match gate (`tick % cad === offset`) silently never fired for any player whose
+ *  offset wasn't a multiple of 3 when the MP host calls the AI once per 3-tick turn — AI seats 1 and 2
+ *  sat inert for the whole match. Catch-up never double-fires: one run per call, re-armed from now. */
+function takeDue(cs: CommanderState, layer: Layer, tick: number, mult: number): boolean {
+  const nd = cs.nextDue!;
+  if (tick < nd[layer]) return false;
+  nd[layer] = tick + cadenceOf(layer, mult);
+  return true;
+}
+
+/** Host-side entry — called every sim tick (SP) or once per lockstep turn (MP host) per AI player.
+ *  §C v3: every layer decides from this player's own perception (fog of war + memory), never from the
+ *  real state — `ctx.state` is that view; commands still go to the real sim via `submit`. */
 export function runCommander(state: GameState, p: Player, submit: Submit): void {
   if (!p.ai) return;
   if (!p.ai.commander) p.ai.commander = initCommander(state, p);
   const cs = p.ai.commander;
   const diff = p.ai.difficulty === "hard" ? "hard" : "medium";
   const tier = COMMANDER.TIERS[diff];
+  cs.nextDue ??= initialDue(state.tick, p.id, tier.cadenceMult);
+  const t = state.tick;
+  const dueS = takeDue(cs, "S", t, tier.cadenceMult);
+  const dueO = takeDue(cs, "O", t, tier.cadenceMult);
+  const dueT = takeDue(cs, "T", t, tier.cadenceMult);
+  if (!dueS && !dueO && !dueT) return; // nothing to think about this tick — skip the perception pass
+  p.ai.intel ??= initIntel(state, p.id);
   const ctx: Ctx = {
-    state, p, pid: p.id, cs, submit, tier,
+    state: perceive(state, p.id, p.ai.intel), p, pid: p.id, cs, submit, tier,
     pers: COMMANDER.PERSONALITIES[cs.personality],
     rng: makeRng(cs),
+    intel: p.ai.intel,
   };
-  const t = state.tick;
-  if (due(t, p.id, COMMANDER.CADENCE.STRATEGIC, tier.cadenceMult)) runStrategic(ctx);
-  if (due(t, p.id, COMMANDER.CADENCE.OPERATIONAL, tier.cadenceMult)) runOperational(ctx);
-  if (due(t, p.id, COMMANDER.CADENCE.TACTICAL, tier.cadenceMult)) runTactical(ctx);
+  if (dueS) runStrategic(ctx);
+  if (dueO) runOperational(ctx);
+  if (dueT) runTactical(ctx);
 }
 
 // ── §J squad bookkeeping (shared by layers) ───────────────────────────────────
-export function squad(cs: CommanderState, role: "main" | "homeGuard" | "raid" | "citadel"): CommanderState["squads"][number] | undefined {
+export function squad(cs: CommanderState, role: SquadRole): CommanderState["squads"][number] | undefined {
   return cs.squads.find((s) => s.role === role);
 }
 
-export function ensureSquad(cs: CommanderState, role: "main" | "homeGuard" | "raid" | "citadel"): CommanderState["squads"][number] {
+export function ensureSquad(cs: CommanderState, role: SquadRole): CommanderState["squads"][number] {
   let s = squad(cs, role);
   if (!s) {
     s = { id: cs.nextSquadId++, role, unitIds: [], formation: null, objective: null, mission: "idle", timer: 0, lastFormTick: 0, lastOrderTick: 0 };

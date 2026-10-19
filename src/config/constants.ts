@@ -638,6 +638,16 @@ export const AI_DIFFICULTY = {
 } as const;
 export type Difficulty = "easy" | "medium" | "hard"; // 22 §N: medium/hard = the Commander
 
+// ── 22 §C v3 — AI fog of war: every AI decides from its own perception (engine/aiPerception.ts) ──
+export const AI_INTEL = {
+  UNIT_MEMORY_TICKS: 9000, // forget an enemy unit not seen for 5 min (it may have died out of sight)
+  // An enemy is believed to be in LOW POWER (defenses offline) only if this AI SAW one of their Power
+  // Plants destroyed within this window and the plants it knows of can't cover the consumers it knows
+  // of. Otherwise power is assumed sufficient — plants sit at the back of bases, so "I can't see their
+  // plants" is no evidence at all.
+  LOW_POWER_EVIDENCE_TICKS: 1800,
+} as const;
+
 // ── 22 — The AI Commander (every §B–§M number is a dial here) ────────────
 export const COMMANDER = {
   // §A cadences (sim ticks @30Hz), staggered per player by playerId × STAGGER_PER_PLAYER.
@@ -646,10 +656,13 @@ export const COMMANDER = {
   // §E target scoring
   TARGET_STICKINESS: 1.25,
   GRUDGE_TICKS: 900,
-  SCORE_W: { WEAKNESS: 2.0, PROXIMITY: 1.5, GRUDGE: 2.5, CITADEL: 1.0, BUSY: 1.5 },
+  SCORE_W: { WEAKNESS: 2.0, PROXIMITY: 1.5, GRUDGE: 2.5, CITADEL: 1.0, BUSY: 1.5, EXPOSED: 1.0, FORTIFIED: 1.5 },
+  EXPOSED_DIST: 18, // §E v2: an enemy whose army centroid is this far from its yard has an exposed base
   // §D adaptation
   DEFEND_THREAT: 0.6,
   DEFEND_EXIT: 0.2,
+  DEFEND_ODDS: 1.0, // §D v2: also DEFEND when FightOdds at my base (my units + defenses there) < this…
+  DEFEND_MIN_VALUE: 250, // …and the enemy force near my base is at least this much ArmyValue
   RECOVER_LOSS_FRAC: 0.4,
   RECOVER_WINDOW_TICKS: 900,
   RECOVER_REBUILD_FRAC: 0.8,
@@ -660,6 +673,10 @@ export const COMMANDER = {
   THREAT_RADIUS: 14,
   DEFENSE_SCORE_RADIUS: 10,
   ECON_WORKER_VALUE: 2.5,
+  FIGHT_HORIZON_S: 20, // §C v2 FightOdds: a medic's heal over this many seconds counts as extra HP
+  ENGAGE_RADIUS: 9, // §C v2: a squad unit within this of an enemy fighter/defense is "in contact"
+  DEFENSE_REACH_PAD: 3, // §C v2: a defense joins a fight when the fight point is within its range + this
+  HOME_THREAT_RADIUS: 10, // §C v2: enemy fighters this close to ANY of my structures threaten my territory
   // §F economy
   WORKERS_PER_REFINERY: 2,
   WORKER_SATURATION: 6,
@@ -667,6 +684,16 @@ export const COMMANDER = {
   REPAIR_HP_FRAC: 0.6,
   REPAIR_MAX_WORKERS: 2,
   REPAIR_ENEMY_RADIUS: 8,
+  REPAIR_MAX_TOTAL: 2, // §F v2: never more than this many workers repairing at once (all buildings)
+  REPAIR_MIN_GOLD: 150, // §F v2: start a repair only if this much gold remains after paying for it; below
+  // it, standing repair crews are released back to mining (a repair at 0 gold pauses forever)
+  REPAIR_MIN_MINERS_FRAC: 0.6, // §F v2: repairs never pull the miner count below this share of workers
+  CLAIM_RADIUS: 7, // §F v2: a gold source is "mine" when one of my drop-offs is within this
+  SOURCE_THREAT_RADIUS: 8, // §F v2: don't send workers to a source with enemy fighters this close
+  REBALANCE_MAX: 2, // §F v2: workers moved per operational tick off an over-saturated source
+  // §F v2 repair priority by building type (× missing HP). Walls/gates are never repaired — a 20g
+  // segment is cheaper to rebuild than to crew; the §G plan re-places destroyed ones.
+  REPAIR_PRIORITY: { constructionYard: 5, warFactory: 4, barracks: 4, powerPlant: 4, refinery: 3, lab: 3, defense: 3, other: 2 },
   SUPPLY_AT_CAP_FRAC: 0.85,
   SUPPLY_MIN_GOLD: 600,
   EXPAND_PACKAGE: { workers: 2, pillboxes: 1 },
@@ -702,12 +729,47 @@ export const COMMANDER = {
   RETREAT_ODDS: 0.6,
   LOCAL_ODDS_RADIUS: 12,
   WORKER_PULL_THREAT: 1.2,
+  ROUT_ODDS: 0.35, // §K v2: below this, break formation and run home at full speed
+  REGROUP_TICKS: 450, // §K v2: after a retreat, no new push for 15 s…
+  REGROUP_GAIN: 1.25, // …and not until the squad has regrown to this × its value at the retreat
+  REGROUP_ALLIN_FRAC: 0.5, // ALL_IN regroups for this share of REGROUP_TICKS and skips the regrow check
+  GATHER_DIST: 14, // §K v2: a launched push first gathers this far from the objective (outside turret reach)…
+  GATHER_RADIUS: 7, // …until this share of its value is within this of the gather point…
+  GATHER_FRAC: 0.75,
+  GATHER_TIMEOUT_TICKS: 600, // …or 20 s pass — then it engages as one body instead of a trickle
+  WALLED_RAZE_DIST: 26, // §K v2: vs a walled base, go loose (units chew blocking walls) from this far out
+  RESPONSE_RADIUS: 22, // §K v2: enemy units within this of the push objective can respond in time
+  // §K v2: launch when projected FightOdds ≥ 1 + (personality attackRatio − 1) × this. attackRatio was
+  // tuned for the old gold-value ratio; on the Lanchester scale 1.4 is already a decisive edge.
+  ATTACK_ODDS_SCALE: 0.5,
+  FAR_ARMY_WEIGHT: 0.35, // §K v2: the rest of the target's army counts at this weight (it may come back)
+  FINISH_YARD_FRAC: 0.4, // §K v2 finishing blow: a target yard below this HP fraction…
+  FINISH_RADIUS: 14, // …within this of the squad…
+  FINISH_ODDS: 0.45, // …is pressed home even at local odds down to this (an elimination is worth it)
+  VICTIM_W: { constructionYard: 3, warFactory: 4, barracks: 3.5, powerPlant: 2.5, POWER_CRIPPLE: 3, refinery: 2.5, lab: 2, defense: 1.5, other: 1 },
+  COVER_NORM: 40, // §K v2: victim score ÷ (1 + covering defense DPS / this)
+  DIST_NORM: 25, // §K v2: victim score ÷ (1 + distance from the squad / this)
+  GUARD_RESPOND_ODDS: 0.8, // §J v2: HomeGuard leaves its post for a territory threat only at these odds
+  RAID_RETREAT_ODDS: 1.2, // §J v2: raiders avoid fair fights — flee below these local odds
+  // §J v3 scouting (needed now that the AI has fog of war): one fast unit re-checks the stalest point
+  // of interest — enemy bases, unclaimed mines (expansions), the Citadel.
+  SCOUT_INTERVAL_TICKS: 900, // a new scouting trip at most this often (× the tier's cadenceMult)
+  SCOUT_STALE_TICKS: 1800, // a point is worth a look once unseen for this long (60 s)
+  SCOUT_ARRIVE: 4, // tiles — close enough to count as "looked"
+  SCOUT_FLEE_ODDS: 2.0, // the scout runs from anything but a trivially won fight
+  // §K v3 look before you leap: a push objective unseen for longer than this is scouted first…
+  ATTACK_INTEL_TICKS: 1350,
+  ATTACK_INTEL_WAIT_TICKS: 900, // …waiting up to this long for the look; after that it launches anyway,
+  STALE_INTEL_DISCOUNT: 0.8, // …but with projected odds × this (unknown defenders are assumed to exist)
   // §L formations
   FORMATION_COUNTERS: { line: "spear", spear: "box", box: "line", column: "line" } as const,
   REFORM_HOLES: 0.25,
   FLANK_DIST: 8,
   // §M citadel
   CITADEL_CONTEST: 0.8,
+  CITADEL_ODDS: 1.0, // §M v2: contest only if projected FightOdds at the Citadel × citadelWeight ≥ this
+  CITADEL_RADIUS: 10, // §M v2: radius used to read the fight around the Citadel
+  THREAT_MIX_WEIGHT: 2.0, // §I v2: enemy force near my territory weighs this × into the counter-mix
   POWERS: { ARTY_CLUSTER: 6, ARTY_RADIUS: 3, FRENZY_ODDS: [0.8, 1.2] as const, REPAIR_COUNT: 5, REPAIR_FRAC: 0.5, ION_CLUSTER: 12, ION_RESERVE_AT: 25, ION_GAP: 15 },
   // §B personalities — parameter sets, not code (firstPush = Infinity: never initiates).
   PERSONALITIES: {

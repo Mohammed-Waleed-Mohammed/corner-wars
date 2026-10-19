@@ -388,7 +388,7 @@ Keep one small audio manager; cap simultaneous identical sounds so big battles d
 
 Each frame (or every few frames for performance), compute the visible tile set from all friendly entities' **sight radii** (see §6/§7 tables). Tiles transition unexplored → explored once seen, and explored → visible while in range.
 
-**v1 simplification — only the human gets fog; the AI sees the whole map.** Making the AI play fairly under fog is a separate project; almost every RTS does this early on. (Vision-blocking terrain / true line-of-sight is an optional later refinement.)
+~~**v1 simplification — only the human gets fog; the AI sees the whole map.**~~ **Superseded (file 22 §C v3): every AI now plays under its own fog of war with these same sight rules, plus starting map knowledge (mines, enemy start bases) and a memory of what it has seen.** (Vision-blocking terrain / true line-of-sight is an optional later refinement.)
 
 ### Minimap
 A scaled view of the map in a screen corner:

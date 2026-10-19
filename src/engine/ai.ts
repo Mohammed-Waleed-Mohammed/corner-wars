@@ -11,6 +11,7 @@
 
 import { AI, AI_DIFFICULTY, BUILDING_STATS, CITADEL_POWERS } from "../config/constants";
 import { runCommander } from "./commander/commander";
+import { initIntel, perceive } from "./aiPerception";
 import type { AnyEntity, Building, GameState, Player, PlayerId, Unit } from "../core/types";
 import type { Command } from "../sim/commands";
 import { footprintClear, withinBuildRadius } from "./placement";
@@ -48,7 +49,9 @@ export function runAI(state: GameState, dt: number, submit: Submit): void {
     const mult = AI_DIFFICULTY.easy.decisionMult;
     if (p.ai.decisionTimer >= AI.decisionInterval * mult) {
       p.ai.decisionTimer = 0;
-      decide(state, p, submit);
+      // 22 §C v3: the old brain's logic is untouched (§N), but it decides from its own fog-of-war view.
+      p.ai.intel ??= initIntel(state, p.id);
+      decide(perceive(state, p.id, p.ai.intel), p, submit);
     }
   }
 }

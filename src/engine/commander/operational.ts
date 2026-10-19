@@ -2,15 +2,16 @@
 // gates, defenses), tech, and counter-composition production. Emits only commands; costs and
 // legality are enforced inside executeCommand like any human order.
 
-import { BUILDING_STATS, COMMANDER, PRODUCES, RESEARCH, STRUCTURE_CAP, UNIT_STATS } from "../../config/constants";
-import type { Building, BuildingType, GameState, ResearchKey, UnitType, Vec2 } from "../../core/types";
+import { BUILDING_STATS, COMMANDER, DEFENSE_STATS, PRODUCES, REPAIR, RESEARCH, STRUCTURE_CAP, UNIT_STATS } from "../../config/constants";
+import type { Building, BuildingType, GameState, GoldSource, ResearchKey, Unit, UnitType, Vec2 } from "../../core/types";
 import { footprintClear, withinBuildRadius } from "../placement";
 import { isGround } from "../../state/terrain";
 import { isLowPower } from "../../state/gameState";
 import { isResearched, unitCap } from "../../state/upgrades";
 import {
-  armyValue, baseCenter, buildingsOf, combatUnitsOf, composition, defenseScore, economyScore,
-  enemyValueNear, fightersOf, frontDistance, livingEnemies, mainYard, unitsOf, type Composition,
+  armyValue, baseCenter, buildingsOf, claimedSources, combatUnitsOf, composition, compositionNear, defenseScore,
+  economyScore, enemyValueNear, fightersOf, frontDistance, livingEnemies, mainYard, territoryThreat, unitsOf,
+  type Composition,
 } from "./assess";
 import { aiLog, ensureSquad, pruneSquads, type Ctx } from "./commander";
 
@@ -23,6 +24,9 @@ export function runOperational(ctx: Ctx): void {
   if (!cy) return;
   cs.intents = [];
 
+  // §F v2 FIRST, so its HARVEST orders take the lowest seq this tick: any ASSIGN_BUILD / auto-assigned
+  // builder ordered below executes after it and wins (HARVEST clears a worker's build assignment).
+  manageWorkers(ctx);
   crewSites(ctx); // buildings are worker-built (15-logic): keep every site crewed
   assignSquads(ctx);
   planBase(ctx, cy); // §G (recomputed cheaply; placement uses it)
@@ -65,9 +69,106 @@ function crewSites(ctx: Ctx): void {
   }
 }
 
-/** Placement guard: with ≥2 active sites, stop starting new buildings. */
-function canStartSite(ctx: Ctx): boolean {
-  return sitesOf(ctx).length < 2;
+/** Placement guard: with ≥2 active sites, stop starting new buildings. §F v2 site budget by priority:
+ *  `slack` +1 lets economy-critical placements (power, refinery, expansion) use a 3rd slot; −1 makes
+ *  walls/defenses wait for a free slot so a wall-building spree can never starve the economy. */
+function canStartSite(ctx: Ctx, slack = 0): boolean {
+  return sitesOf(ctx).length < 2 + slack;
+}
+
+// ── §F v2 worker upkeep ───────────────────────────────────────────────────────
+/** Every worker that isn't building, fighting or being relocated is put back to work on the best
+ *  unsaturated, safe gold source. This is load-bearing: REPAIR (and most orders) switch a worker's
+ *  auto-harvest OFF and the engine never turns it back on, so before this sweep every worker the AI
+ *  ever sent to repair was lost to the economy for good — and a repair paused at 0 gold parked its crew
+ *  forever (the 25-minute broke stalemates). Also: releases repair crews when broke, rebalances
+ *  over-saturated sources (expansions get staffed), and runs the gated repair rule. */
+function manageWorkers(ctx: Ctx): void {
+  const { state, cs, p, pid } = ctx;
+  const workers = unitsOf(state, pid).filter((u) => u.unitType === "worker");
+  if (workers.length === 0) return;
+  const SAT = COMMANDER.WORKER_SATURATION;
+  const broke = p.gold < COMMANDER.REPAIR_MIN_GOLD;
+  const safe = (g: GoldSource): boolean =>
+    enemyValueNear(state, pid, { x: g.x + 0.5, y: g.y + 0.5 }, COMMANDER.SOURCE_THREAT_RADIUS) === 0;
+  const claimed = claimedSources(state, pid).filter(safe);
+  const claimedIds = new Set(claimed.map((g) => g.id));
+  const pool = claimed.length ? claimed : state.goldSources.filter((g) => g.goldRemaining > 0 && safe(g));
+  if (pool.length === 0) return;
+
+  const mining = (w: Unit): boolean =>
+    w.autoHarvest === true && w.state === "gathering" && w.gatherSourceId != null && w.buildTargetId == null && w.repairTarget == null;
+  const load = new Map<number, number>();
+  for (const w of workers) if (mining(w)) load.set(w.gatherSourceId!, (load.get(w.gatherSourceId!) ?? 0) + 1);
+
+  const free: Unit[] = [];
+  for (const w of workers) {
+    if (w.buildTargetId != null || w.forcedTargetId != null || w.moveTarget) continue; // busy elsewhere
+    if (w.repairTarget != null) { if (broke) free.push(w); continue; } // a broke repair never finishes
+    if (w.state === "idle" || !w.autoHarvest) free.push(w);
+  }
+  const freed = free.length;
+  // Rebalance: off over-saturated or unclaimed (long-walk) sources onto a claimed one with room.
+  if (claimed.some((g) => (load.get(g.id) ?? 0) < SAT)) {
+    let moved = 0;
+    for (const w of workers) {
+      if (moved >= COMMANDER.REBALANCE_MAX) break;
+      if (!mining(w) || (w.carryingGold ?? 0) > 0 || free.includes(w)) continue;
+      const sid = w.gatherSourceId!;
+      if (claimedIds.has(sid) && (load.get(sid) ?? 0) <= SAT) continue;
+      load.set(sid, (load.get(sid) ?? 1) - 1);
+      free.push(w);
+      moved++;
+    }
+  }
+  // Assign: nearest source, with a steep penalty once a source is saturated.
+  const orders = new Map<number, number[]>();
+  for (const w of free) {
+    let best: GoldSource | null = null, bs = Infinity;
+    for (const g of pool) {
+      const l = load.get(g.id) ?? 0;
+      const s = Math.hypot(g.x + 0.5 - w.x, g.y + 0.5 - w.y) + (l >= SAT ? 40 + 6 * (l - SAT) : 0);
+      if (s < bs) { bs = s; best = g; }
+    }
+    if (!best) continue;
+    load.set(best.id, (load.get(best.id) ?? 0) + 1);
+    const ids = orders.get(best.id) ?? [];
+    ids.push(w.id);
+    orders.set(best.id, ids);
+  }
+  for (const [sourceId, workerIds] of orders) cmd(ctx, "HARVEST", { workerIds, sourceId });
+  if (freed > 0) cs.intents.push(`${freed} idle worker${freed > 1 ? "s" : ""} → mining`);
+
+  // Gated repair: valuable structures only, affordable, a global crew cap, miners kept above a floor.
+  if (broke) return;
+  const assigned = new Set(free.map((w) => w.id));
+  const crews = workers.filter((w) => w.repairTarget != null).length;
+  const miners = workers.filter((w) => mining(w) && !assigned.has(w.id));
+  const spare = miners.length - Math.ceil(workers.length * COMMANDER.REPAIR_MIN_MINERS_FRAC);
+  const room = Math.min(COMMANDER.REPAIR_MAX_WORKERS, COMMANDER.REPAIR_MAX_TOTAL - crews, spare);
+  if (room <= 0) return;
+  const PR = COMMANDER.REPAIR_PRIORITY as Record<string, number>;
+  let target: Building | null = null, ts = 0;
+  for (const b of buildingsOf(state, pid)) {
+    if (b.buildProgress < 1 || b.buildingType === "wall" || b.buildingType === "gate") continue;
+    if (b.hp >= b.maxHp * COMMANDER.REPAIR_HP_FRAC) continue;
+    const c = { x: b.x + b.width / 2, y: b.y + b.height / 2 };
+    if (enemyValueNear(state, pid, c, COMMANDER.REPAIR_ENEMY_RADIUS) > 0) continue;
+    const cost = (b.maxHp - b.hp) * REPAIR.goldPerHp;
+    if (p.gold - cost < COMMANDER.REPAIR_MIN_GOLD) continue; // can't finish it — don't start it
+    const prio = PR[b.buildingType] ?? (DEFENSE_STATS[b.buildingType] ? PR.defense : PR.other);
+    const s = prio * (b.maxHp - b.hp);
+    if (s > ts) { ts = s; target = b; }
+  }
+  if (!target) return;
+  const t = target;
+  const crew = miners
+    .filter((w) => (w.carryingGold ?? 0) === 0)
+    .sort((a, b) => (a.x - t.x) ** 2 + (a.y - t.y) ** 2 - ((b.x - t.x) ** 2 + (b.y - t.y) ** 2))
+    .slice(0, room);
+  if (crew.length === 0) return;
+  cmd(ctx, "REPAIR", { buildingId: t.id, workerIds: crew.map((w) => w.id) });
+  cs.intents.push(`repair ${t.buildingType}`);
 }
 
 // ── §J squad membership upkeep ────────────────────────────────────────────────
@@ -91,9 +192,20 @@ function assignSquads(ctx: Ctx): void {
   const wantRaiders = tier.raids ? pers.raidSquads * COMMANDER.RAID_SIZE : 0;
   const raid = wantRaiders > 0 ? ensureSquad(cs, "raid") : null;
 
+  // §J v3: the first free Scout Buggy becomes the scout (a stand-in scout returns to main).
+  const scout = cs.squads.find((s) => s.role === "scout");
+  let scoutHasBuggy = !!scout && fighters.some((u) => u.unitType === "scoutBuggy" && scout.unitIds.includes(u.id));
   for (const u of fighters) {
     if (assigned.has(u.id)) continue;
     if (raid && u.unitType === "scoutBuggy" && raid.unitIds.length < wantRaiders) { raid.unitIds.push(u.id); continue; }
+    if (u.unitType === "scoutBuggy" && !scoutHasBuggy) {
+      const sq = ensureSquad(cs, "scout");
+      main.unitIds.push(...sq.unitIds);
+      sq.unitIds = [u.id];
+      sq.mission = "idle";
+      scoutHasBuggy = true;
+      continue;
+    }
     if (value(guard.unitIds) < guardTarget * totalValue) { guard.unitIds.push(u.id); continue; }
     main.unitIds.push(u.id);
   }
@@ -105,14 +217,19 @@ function runEconomy(ctx: Ctx, cy: Building): void {
   const { state, cs, p, pid, pers } = ctx;
   const workers = unitsOf(state, pid).filter((u) => u.unitType === "worker");
   const refineries = buildingsOf(state, pid).filter((b) => b.buildingType === "refinery" && b.buildProgress >= 1);
-  const workerTarget = pers.workers + refineries.length * COMMANDER.WORKERS_PER_REFINERY;
+  const claimed = claimedSources(state, pid);
+  // §F saturation cap (v2: actually enforced) — no point training workers no source can absorb.
+  const workerTarget = Math.min(
+    pers.workers + refineries.length * COMMANDER.WORKERS_PER_REFINERY,
+    Math.max(1, claimed.length) * COMMANDER.WORKER_SATURATION + 2,
+  );
 
   // Power first: projected surplus (counting queued/unbuilt plants) must stay ≥ +20.
   const queuedPlants = buildingsOf(state, pid).filter((b) => b.buildingType === "powerPlant" && b.buildProgress < 1).length;
   const projected = p.powerProduced - p.powerUsed + queuedPlants * BUILDING_STATS.powerPlant.power;
   // never more than one plant in the pipeline — projected already counts it, and low power must
   // not stack half-built plants it can't crew.
-  if ((projected < COMMANDER.POWER_SURPLUS_MIN || isLowPower(state, pid)) && queuedPlants === 0) {
+  if ((projected < COMMANDER.POWER_SURPLUS_MIN || isLowPower(state, pid)) && queuedPlants === 0 && canStartSite(ctx, 1)) {
     const spot = findSpot(ctx, cy, "powerPlant");
     if (spot && p.gold >= BUILDING_STATS.powerPlant.gold) {
       cmd(ctx, "PLACE_BUILDING", { buildingType: "powerPlant", x: spot.x, y: spot.y });
@@ -126,23 +243,31 @@ function runEconomy(ctx: Ctx, cy: Building): void {
     cs.intents.push(`worker ${workers.length + 1}/${workerTarget}`);
   }
 
-  // Expansion (§F): main source depleted below the personality trigger → claim the best next source.
-  const home = nearestSource(state, cy);
-  if (home && home.goldRemaining / home.maxGold < pers.expandAt) {
-    expandTo(ctx, cy);
+  const refinerySites = buildingsOf(state, pid).filter((b) => b.buildingType === "refinery" && b.buildProgress < 1).length;
+  // §F v2 home Refinery: once the first Barracks is down, put a drop-off right beside the home mine —
+  // shorter trips AND +25% per deposit. (The Commander previously only built refineries on expansion,
+  // which in practice never fired, so it mined at base rate from the yard all game.)
+  const homeSrc = nearestSource(state, cy);
+  let placedRefinery = false;
+  if (homeSrc && refinerySites === 0 && countAll(ctx, "barracks") > 0 && !hasRefineryAt(ctx, homeSrc) &&
+      p.gold >= BUILDING_STATS.refinery.gold + COMMANDER.REPAIR_MIN_GOLD && canStartSite(ctx, 1)) {
+    const spot = spotNear(ctx, { x: homeSrc.x, y: homeSrc.y }, "refinery");
+    if (spot) {
+      cmd(ctx, "PLACE_BUILDING", { buildingType: "refinery", x: spot.x, y: spot.y });
+      cs.intents.push("home refinery");
+      placedRefinery = true; // the site doesn't exist until the command executes — don't double up below
+    }
   }
 
-  // Repair: up to 2 idle workers on any building < 60% HP with no enemy within 8 tiles.
-  const hurt = buildingsOf(state, pid).find(
-    (b) => b.buildProgress >= 1 && b.hp < b.maxHp * COMMANDER.REPAIR_HP_FRAC &&
-      enemyValueNear(state, pid, { x: b.x + b.width / 2, y: b.y + b.height / 2 }, COMMANDER.REPAIR_ENEMY_RADIUS) === 0,
-  );
-  if (hurt) {
-    const idle = workers.filter((w) => !w.repairTarget && !w.buildTargetId).slice(0, COMMANDER.REPAIR_MAX_WORKERS);
-    if (idle.length) {
-      cmd(ctx, "REPAIR", { buildingId: hurt.id, workerIds: idle.map((w) => w.id) });
-      cs.intents.push(`repair ${hurt.buildingType}`);
-    }
+  // Expansion (§F v2): judged over the sources I actually mine (claimed by a drop-off), not "whatever
+  // source is nearest my yard" — once the home mine emptied, the old trigger read the next, full,
+  // deposit and never fired again. Expand when my claimed gold is running low, when I have none, or
+  // when I have more workers than my claimed sources can absorb.
+  const left = claimed.reduce((a, g) => a + g.goldRemaining, 0);
+  const max = claimed.reduce((a, g) => a + g.maxGold, 0);
+  const oversat = workers.length > claimed.length * COMMANDER.WORKER_SATURATION;
+  if (refinerySites === 0 && !placedRefinery && (claimed.length === 0 || left / Math.max(1, max) < pers.expandAt || oversat)) {
+    expandTo(ctx, cy);
   }
 
   // Cap management: Supply Lines at ≥85% cap with gold banked.
@@ -162,16 +287,25 @@ function nearestSource(state: GameState, cy: Building): GameState["goldSources"]
   return best;
 }
 
+/** A refinery of mine (finished or building) already sits within CLAIM_RADIUS of this source. */
+function hasRefineryAt(ctx: Ctx, g: GoldSource): boolean {
+  return buildingsOf(ctx.state, ctx.pid).some((b) =>
+    b.buildingType === "refinery" && Math.hypot(b.x + b.width / 2 - g.x - 0.5, b.y + b.height / 2 - g.y - 0.5) <= COMMANDER.CLAIM_RADIUS);
+}
+
 function expandTo(ctx: Ctx, cy: Building): void {
   const { state, cs, p, pid } = ctx;
-  const myLead = armyValue(state, pid) >= Math.max(...livingEnemies(state, pid).map((e) => armyValue(state, e)), 1);
+  const myArmy = armyValue(state, pid);
+  const myLead = myArmy >= Math.max(...livingEnemies(state, pid).map((e) => armyValue(state, e)), 1);
   const enemies = livingEnemies(state, pid);
   const myBase = { x: cy.x + cy.width / 2, y: cy.y + cy.height / 2 };
+  const claimedIds = new Set(claimedSources(state, pid).map((g) => g.id));
   let best: Vec2 | null = null, bd = Infinity;
   for (const g of state.goldSources) {
     if (g.goldRemaining < g.maxGold * 0.4) continue;
-    // already claimed by me? (refinery within 6 tiles)
-    if (buildingsOf(state, pid).some((b) => b.buildingType === "refinery" && Math.hypot(b.x - g.x, b.y - g.y) < 6)) continue;
+    if (claimedIds.has(g.id)) continue; // §F v2: already one of mine (a refinery OR my yard is beside it)
+    // §F v2: don't walk workers into a fight — skip sources an enemy force sits on that I can't cover.
+    if (enemyValueNear(state, pid, { x: g.x, y: g.y }, COMMANDER.SOURCE_THREAT_RADIUS + 4) > 0.5 * myArmy) continue;
     const dMe = Math.hypot(g.x - myBase.x, g.y - myBase.y);
     const dEnemy = Math.min(...enemies.map((e) => {
       const c = baseCenter(state, e);
@@ -181,7 +315,7 @@ function expandTo(ctx: Ctx, cy: Building): void {
     if (!(dMe < dEnemy || (central && myLead))) continue; // §F: mine-side or contested-central with a lead
     if (dMe < bd) { bd = dMe; best = { x: g.x, y: g.y } as Vec2; }
   }
-  if (!best || p.gold < BUILDING_STATS.refinery.gold || !canStartSite(ctx)) return;
+  if (!best || p.gold < BUILDING_STATS.refinery.gold || !canStartSite(ctx, 1)) return;
   const spot = spotNear(ctx, best, "refinery");
   if (!spot) return;
   cmd(ctx, "PLACE_BUILDING", { buildingType: "refinery", x: spot.x, y: spot.y });
@@ -292,7 +426,9 @@ function runDefensePlan(ctx: Ctx): void {
     myB.some((b) => b.buildingType === type && Math.abs(b.x - x) <= 2 && Math.abs(b.y - y) <= 2);
 
   let placedDefense = false;
-  if (!canStartSite(ctx)) return;
+  // §F v2: walls/defenses take a site slot only when one is free beyond the economy's — except a Turtle
+  // (walls ARE its plan) or anyone in DEFEND.
+  if (!canStartSite(ctx, cs.stance === "DEFEND" || cs.personality === "turtle" ? 0 : -1)) return;
   for (const d of plan.plannedDefenses) {
     if (has(d.type, d.x, d.y)) continue;
     const stat = BUILDING_STATS[d.type];
@@ -427,10 +563,22 @@ function runProduction(ctx: Ctx): void {
   }
 
   // desired mix: counter the target's composition; personality default with no data (§I).
+  // §I v2: blend in whatever is actually attacking my territory right now (THREAT_MIX_WEIGHT × its
+  // value) — the army in my base matters more than the target's army across the map.
   const target = cs.targetPlayer;
-  const tComp = target != null ? composition(state, target) : null;
+  let tComp: Composition | null = target != null ? composition(state, target) : null;
+  const threat = territoryThreat(state, pid);
+  if (threat) {
+    const near = compositionNear(state, pid, threat.at, COMMANDER.HOME_THREAT_RADIUS + 4);
+    if (near.value > 0) {
+      const wT = target != null ? armyValue(state, target) : 0;
+      const wN = near.value * COMMANDER.THREAT_MIX_WEIGHT;
+      const blend = (k: keyof Composition): number => ((tComp?.[k] ?? 0) * wT + near.comp[k] * wN) / (wT + wN);
+      tComp = { infantry: blend("infantry"), ranged: blend("ranged"), heavy: blend("heavy"), siege: blend("siege"), support: blend("support") };
+    }
+  }
   const hasData = tComp && (tComp.infantry + tComp.ranged + tComp.heavy + tComp.siege) > 0;
-  const mix = hasData
+  const mix = hasData && tComp
     ? counterMix(tComp)
     : cs.personality === "rusher"
       ? COMMANDER.DEFAULT_MIX.rusher
@@ -466,21 +614,29 @@ function runProduction(ctx: Ctx): void {
   // spread production across producers with the shortest queues.
   const sorted = [...producers].sort((a, b) => a.productionQueue.length - b.productionQueue.length);
   const canBuild = (b: Building, u: UnitType): boolean => (PRODUCES[b.buildingType] ?? []).includes(u);
-  const queueAt = (u: UnitType): boolean => {
+  if (unitsOf(state, pid).length >= unitCap(p)) return; // at cap — nothing to queue
+  // §I v2: "queued" | "broke" (a producer could build it but gold is short → SAVE for it) | "none" (no
+  // producer can build it → fall through to the next class). The old code also fell through when merely
+  // short of gold, so a poor AI drifted into cheap riflemen instead of the counter it needed.
+  const queueAt = (u: UnitType): "queued" | "broke" | "none" => {
+    let possible = false;
     for (const b of sorted) {
       if (!canBuild(b, u) || b.productionQueue.length >= 4) continue;
-      if (p.gold < UNIT_STATS[u].gold + 60) return false;
+      possible = true;
+      if (p.gold < UNIT_STATS[u].gold + 60) return "broke";
       cmd(ctx, "QUEUE_UNIT", { buildingId: b.id, unitType: u });
-      return true;
+      return "queued";
     }
-    return false;
+    return possible ? "broke" : "none";
   };
 
   // §J raid squads need Scout Buggies — the Opportunist trains them explicitly.
+  // §J v3: plus one Scout Buggy for scouting — with fog of war the AI has to go and look.
   const wantRaiders = ctx.tier.raids ? ctx.pers.raidSquads * COMMANDER.RAID_SIZE : 0;
-  const buggies = mine.filter((u) => u.unitType === "scoutBuggy").length;
-  if (wantRaiders > 0 && buggies < wantRaiders && queueAt("scoutBuggy")) cs.intents.push("raid buggy");
-  else if (medics < wantMedics && queueAt("medic")) cs.intents.push("medic");
+  const buggies = mine.filter((u) => u.unitType === "scoutBuggy").length +
+    producers.reduce((n, b) => n + b.productionQueue.filter((t) => t === "scoutBuggy").length, 0);
+  if (buggies < wantRaiders + 1 && queueAt("scoutBuggy") === "queued") cs.intents.push(wantRaiders > 0 ? "raid/scout buggy" : "scout buggy");
+  else if (medics < wantMedics && queueAt("medic") === "queued") cs.intents.push("medic");
   else {
     for (const [cls] of want) {
       const options = CLASS_UNIT[cls].filter((u) => {
@@ -489,7 +645,10 @@ function runProduction(ctx: Ctx): void {
       });
       // prefer the stronger unlocked option late (heavyTank over tank when researched)
       const unit = options.length > 1 && isResearched(p, "advancedVehicles") && cls === "heavy" ? options[1] : options[0];
-      if (unit && queueAt(unit)) { cs.intents.push(`train ${unit}`); break; }
+      if (!unit) continue;
+      const r = queueAt(unit);
+      if (r === "queued") { cs.intents.push(`train ${unit}`); break; }
+      if (r === "broke") { cs.intents.push(`saving for ${unit}`); break; }
     }
   }
 
