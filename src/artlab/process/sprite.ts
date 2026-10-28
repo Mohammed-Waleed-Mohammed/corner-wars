@@ -1,7 +1,7 @@
 // 29 §C sprites: magenta key (soft edge + despill) → drop detached specks (e.g. a corner watermark)
 // → bbox at alpha ≥ 0.5 → normalise footprint and anchor → resample to the output size. Pure.
 
-import { cloneImg, resample, rgbDist, rgbToHex } from "../image";
+import { cloneImg, makeImg, resample, rgbDist, rgbToHex } from "../image";
 import type { Img, RGB } from "../image";
 
 const T0 = 48, T1 = 120; // key: colour distance ≤ T0 → transparent, ≥ T1 → opaque, soft in between
@@ -101,7 +101,7 @@ export function dropSpecks(img: Img): { specks: number; speckPx: number } {
 }
 
 /** Bounding box of pixels with alpha ≥ 0.5 (x1/y1 exclusive), or null if empty. */
-export function alphaBox(img: Img): { x0: number; y0: number; x1: number; y1: number } | null {
+export function alphaBox(img: Img): Box | null {
   const W = img.width, H = img.height, d = img.data;
   let x0 = W, y0 = H, x1 = -1, y1 = -1;
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
@@ -134,25 +134,34 @@ export function edgeTouching(img: Img): number {
   return n;
 }
 
-export interface SpriteOptions { footprint: number; out: number; baseAtBottom: boolean }
-export interface SpriteResult {
-  out: Img | null; // null when no subject was found
-  keyed: Img; // full-resolution keyed source (after speck removal)
+/** Cut `trim` × the short side off every edge (e.g. a watermark), 1:1 — no resampling. */
+export function trimEdges(src: Img, trim: number): Img {
+  const t = Math.round(Math.min(src.width, src.height) * trim);
+  if (t <= 0) return src;
+  const W = src.width - 2 * t, H = src.height - 2 * t, out = makeImg(Math.max(1, W), Math.max(1, H));
+  for (let y = 0; y < out.height; y++) {
+    const from = ((y + t) * src.width + t) * 4;
+    out.data.set(src.data.subarray(from, from + out.width * 4), y * out.width * 4);
+  }
+  return out;
+}
+
+/** Everything the keyed-sprite pipeline knows before it normalises (units and buildings share it). */
+export interface KeyedSprite {
+  keyed: Img; // full-resolution keyed source (after trim and speck removal)
   steps: string[];
   key: RGB; cleanBg: number; clippedPx: number; specks: number; speckPx: number;
-  subjectPx: number; magentaPx: number; footprint: number; heightClamped: boolean;
+  subjectPx: number; magentaPx: number;
+  srcW: number; srcH: number; // the dropped image, before any trim
 }
+export type Box = { x0: number; y0: number; x1: number; y1: number };
 
-/** Measured footprint of an output sprite: larger side (tufts: width) ÷ size. */
-export function measureFootprint(img: Img, widthOnly: boolean): number {
-  const b = alphaBox(img);
-  if (!b) return 0;
-  return (widthOnly ? b.x1 - b.x0 : Math.max(b.x1 - b.x0, b.y1 - b.y0)) / img.width;
-}
-
-export function processSprite(src: Img, o: SpriteOptions): SpriteResult {
+/** Trim → magenta key → drop specks → measure; plus the subject's bbox (null: nothing keyed). */
+export function keySprite(src: Img, trim = 0): { base: KeyedSprite; box: Box | null } {
   const steps: string[] = [];
-  const { img: keyed, key } = keyMagenta(src);
+  const cut = trimEdges(src, trim);
+  if (cut !== src) steps.push(`Trimmed ${Math.round(trim * 100)}% off every edge: ${src.width}×${src.height} → ${cut.width}×${cut.height}.`);
+  const { img: keyed, key } = keyMagenta(cut);
   const cleanBg = cleanBorder(keyed);
   steps.push(`Keyed ${rgbToHex(key)} (estimated from the border; distance ≤ ${T0} transparent, ≥ ${T1} opaque), un-mixed edge pixels and capped magenta spill.`);
   const { specks, speckPx } = dropSpecks(keyed);
@@ -165,8 +174,25 @@ export function processSprite(src: Img, o: SpriteOptions): SpriteResult {
     subjectPx++;
     if (d[i] > 150 && d[i + 2] > 150 && Math.min(d[i], d[i + 2]) - d[i + 1] > 90) magentaPx++;
   }
-  const box = alphaBox(keyed);
-  const base = { keyed, steps, key, cleanBg, clippedPx, specks, speckPx, subjectPx, magentaPx };
+  return { base: { keyed, steps, key, cleanBg, clippedPx, specks, speckPx, subjectPx, magentaPx, srcW: src.width, srcH: src.height }, box: alphaBox(keyed) };
+}
+
+export interface SpriteOptions { footprint: number; out: number; baseAtBottom: boolean; trim?: number }
+export interface SpriteResult extends KeyedSprite {
+  out: Img | null; // null when no subject was found
+  footprint: number; heightClamped: boolean;
+}
+
+/** Measured footprint of an output sprite: larger side (tufts: width) ÷ size. */
+export function measureFootprint(img: Img, widthOnly: boolean): number {
+  const b = alphaBox(img);
+  if (!b) return 0;
+  return (widthOnly ? b.x1 - b.x0 : Math.max(b.x1 - b.x0, b.y1 - b.y0)) / img.width;
+}
+
+export function processSprite(src: Img, o: SpriteOptions): SpriteResult {
+  const { base, box } = keySprite(src, o.trim ?? 0);
+  const { keyed, steps } = base;
   if (!box) return { ...base, out: null, footprint: 0, heightClamped: false };
   const bw = box.x1 - box.x0, bh = box.y1 - box.y0, S = o.out;
   let scale = (o.footprint * S) / (o.baseAtBottom ? bw : Math.max(bw, bh));

@@ -10,11 +10,10 @@ import { dirname, posix, resolve, sep } from "node:path";
 import { defineConfig } from "vite";
 import type { Plugin } from "vite";
 
-/** Where the Art Lab may write: terrain art per biome, and portraits. Lower-case snake_case PNGs only. */
-export const ARTLAB_SAVE_PATH = /^src\/assets\/(terrain\/(verdant|saltglass|frostmarch|cinder|mire|scar)|portraits)\/[a-z0-9_]+\.png$/;
+/** Where the Art Lab may write: terrain art per biome, portraits, and unit / building art per faction. Lower-case snake_case PNGs only. */
+export const ARTLAB_SAVE_PATH = /^src\/assets\/(terrain\/(verdant|saltglass|frostmarch|cinder|mire|scar)|portraits|(units|buildings)\/(concord|halcyon|cantons|choir))\/[a-z0-9_]+\.png$/;
 const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 const MAX_BODY = 40 * 1024 * 1024; // a 1024² PNG as base64 is < 6 MB; this only stops runaway uploads
-
 /** Validate a save request. Returns the absolute target and the PNG bytes, or an error message. */
 export function validateSave(root: string, body: unknown): { file: string; png: Uint8Array } | { error: string } {
   if (!body || typeof body !== "object") return { error: "body must be a JSON object { path, dataUrl }" };

@@ -3,7 +3,10 @@
 
 import { COLORS, EFFECTS, ownerColor, RENDER } from "../../config/constants";
 import type { Unit } from "../../core/types";
+import { UNIT_ART } from "../../content/factionArt";
 import type { Camera } from "../camera";
+import { ownerFaction } from "../ownerFaction";
+import { unitSprite } from "../unitArt";
 import { drawHpBar, drawSelectionRing } from "./overlays";
 
 /** Travel/attack facing in radians; defaults to "up" when stationary. */
@@ -34,7 +37,22 @@ export function drawUnit(
   const z = camera.zoom;
   let selectR = RENDER.workerRadius;
 
-  switch (u.unitType) {
+  // 27 §H: real faction art (once the file exists) replaces the role shape; the owner's colour shows
+  // as a ring under the unit. Without real art the readable role shapes below are kept.
+  const faction = ownerFaction(u.owner);
+  const art = faction ? unitSprite(faction, u.unitType) : null;
+  if (art) {
+    const spec = UNIT_ART[u.unitType];
+    selectR = spec.gamePx * 0.5;
+    ctx.fillStyle = ownerColor(u.owner);
+    ctx.globalAlpha = 0.55;
+    ctx.beginPath();
+    ctx.ellipse(p.x, p.y, spec.gamePx * 0.46 * z, spec.gamePx * 0.4 * z, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    const D = (spec.gamePx / spec.footprint) * z; // the sprite's subject spans footprint × D = gamePx
+    withFacing(ctx, p.x, p.y, facing(u) + Math.PI / 2, () => ctx.drawImage(art, -D / 2, -D / 2, D, D)); // art faces UP
+  } else switch (u.unitType) {
     case "worker":
       drawWorker(ctx, p.x, p.y, z, u);
       selectR = RENDER.workerRadius;

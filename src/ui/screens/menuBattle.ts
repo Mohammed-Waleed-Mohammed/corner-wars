@@ -19,7 +19,8 @@ import { drawGoldSource, drawCitadel } from "../../render/draw/world";
 import { drawTerrainLayer } from "../../render/draw/worldLayers";
 import { drawUnit } from "../../render/draw/units";
 import { executeCommand, type Command } from "../../sim/commands";
-import { buildFromMap, configurePlayers } from "../../state/gameState";
+import { applyCommanders, buildFromMap, configurePlayers } from "../../state/gameState";
+import { setFactionSource } from "../../render/ownerFaction";
 import { MAP_BY_ID, OFFICIAL_MAPS } from "../../state/officialMaps";
 import { createUnit } from "../../state/entities";
 
@@ -32,6 +33,7 @@ export function createMenuBattleState(): GameState {
   const map = MAP_BY_ID.get("duel") ?? OFFICIAL_MAPS[0];
   const state = buildFromMap(map);
   configurePlayers(state, [], [0, 1]); // two AI players, no human
+  applyCommanders(state, ["varga", "penitent", null, null]); // 27: Concord vs Choir — shows both faction looks
   for (const p of state.players) if (!p.eliminated) p.gold = MATCH_OPTIONS.startingGoldChoices[3]; // rich → fast build-up
   // Pre-seeded armies flanking the Citadel so the demo opens mid-action.
   const c = state.citadel;
@@ -117,6 +119,7 @@ export class MenuBattle {
     ctx.fillRect(0, 0, cam.viewportW, cam.viewportH);
     // A trimmed renderer: terrain + landmarks + entities + projectiles + effects. No fog, no minimap,
     // no HUD/overlays — the veil on top keeps the menu legible.
+    setFactionSource(s); // 27 §H: the demo armies show their faction art
     drawTerrainLayer(ctx, s, cam);
     for (const src of s.goldSources) if (cam.isTileVisible(src.x, src.y)) drawGoldSource(ctx, cam, src, true);
     drawCitadel(ctx, cam, s.citadel);

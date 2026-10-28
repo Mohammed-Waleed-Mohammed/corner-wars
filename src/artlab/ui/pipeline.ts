@@ -1,12 +1,13 @@
 // Art Lab — run a dropped Gemini output through processing (29 §C) and QA (29 §D) for an asset.
 
+import { BUILDING_FILL, UNIT_OUT } from "../../content/factionArt";
 import { characterInfo } from "../../content/factions";
-import { PORTRAIT_OUT, SPRITE_FOOTPRINT, SPRITE_OUT, assetTone } from "../catalog";
+import { PORTRAIT_OUT, SPRITE_FOOTPRINT, SPRITE_OUT, assetTone, buildingTiles, isBiomeAsset, unitSpec } from "../catalog";
 import type { Asset } from "../catalog";
 import { hexToRgb, resample } from "../image";
 import type { RGB } from "../image";
-import { processPortrait, processSprite, processTexture } from "../process";
-import { qaPortrait, qaSprite, qaTexture } from "../qa";
+import { processBuilding, processPortrait, processSprite, processTexture } from "../process";
+import { qaBuilding, qaPortrait, qaSprite, qaTexture } from "../qa";
 import { canvasToImg, fileToImg, imgToCanvas } from "./dom";
 import { guideCanvas } from "./sources";
 import { persisted } from "./state";
@@ -21,7 +22,7 @@ export async function sessionFromFile(file: File): Promise<Session> {
 }
 
 export function textureTarget(a: Asset): RGB {
-  return a.kind === "portrait" ? [0, 0, 0] : [...assetTone(a).mid] as RGB;
+  return isBiomeAsset(a) ? [...assetTone(a).mid] as RGB : [0, 0, 0];
 }
 
 /** (Re)process the session's source with the current Palette lock / Trim settings. */
@@ -41,6 +42,18 @@ export function runPipeline(a: Asset, s: Session): void {
       const r = processSprite(s.source, o);
       s.result = { kind: "sprite", r };
       s.report = qaSprite(r, o);
+      s.out = r.out ? imgToCanvas(r.out) : null;
+    } else if (a.kind === "unit") {
+      const o = { footprint: unitSpec(a.unitType).footprint, out: UNIT_OUT, baseAtBottom: false, trim: persisted.trim };
+      const r = processSprite(s.source, o);
+      s.result = { kind: "unit", r };
+      s.report = qaSprite(r, o);
+      s.out = r.out ? imgToCanvas(r.out) : null;
+    } else if (a.kind === "building") {
+      const { w, h } = buildingTiles(a.buildingType);
+      const r = processBuilding(s.source, { outW: a.outW, outH: a.outH, fill: BUILDING_FILL, trim: persisted.trim });
+      s.result = { kind: "building", r };
+      s.report = qaBuilding(r, { tilesW: w, tilesH: h, outW: a.outW, outH: a.outH, fill: BUILDING_FILL });
       s.out = r.out ? imgToCanvas(r.out) : null;
     } else {
       const backdrop = hexToRgb(characterInfo(a.charId)!.portrait.bg);

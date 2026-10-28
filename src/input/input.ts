@@ -20,8 +20,30 @@ export class InputManager {
   rightDown = false;
   private wheel = 0;
   private events: PointerEvt[] = [];
+  private el: HTMLElement | null = null;
+
+  /** Route presses on a HUD element that sits over the canvas (the TACTICAL minimap) into the same
+   *  queue, in canvas-local px — the canvas itself never sees them. */
+  forward(overlay: HTMLElement): void {
+    overlay.addEventListener("mousedown", (e) => this.down(e));
+    overlay.addEventListener("mousemove", (e) => { if (this.el) this.mouse = this.local(this.el, e); });
+    overlay.addEventListener("contextmenu", (e) => e.preventDefault());
+  }
+
+  private down(e: MouseEvent): void {
+    if (!this.el) return;
+    const p = this.local(this.el, e);
+    this.mouse = p;
+    if (e.button === 0) this.leftDown = true;
+    else if (e.button === 1) {
+      this.middleDown = true;
+      e.preventDefault();
+    } else if (e.button === 2) this.rightDown = true;
+    this.events.push({ type: "down", button: e.button, x: p.x, y: p.y, shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey });
+  }
 
   attach(el: HTMLElement): void {
+    this.el = el;
     window.addEventListener("keydown", (e) => {
       const k = e.key.toLowerCase();
       this.keys.add(k);
@@ -36,16 +58,7 @@ export class InputManager {
       this.mouse = this.local(el, e);
     });
 
-    el.addEventListener("mousedown", (e) => {
-      const p = this.local(el, e);
-      this.mouse = p;
-      if (e.button === 0) this.leftDown = true;
-      else if (e.button === 1) {
-        this.middleDown = true;
-        e.preventDefault();
-      } else if (e.button === 2) this.rightDown = true;
-      this.events.push({ type: "down", button: e.button, x: p.x, y: p.y, shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey });
-    });
+    el.addEventListener("mousedown", (e) => this.down(e));
 
     // Listen on window for mouseup so drags that end off-canvas still register.
     window.addEventListener("mouseup", (e) => {

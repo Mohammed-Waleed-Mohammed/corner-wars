@@ -108,3 +108,21 @@ Medium and hard AIs use abilities from the tactical layer, every 15 ticks. Easy 
 
 - `Player.commander`, `Player.abilityCooldown`, `Player.abilityBuff`, `GameState.fields` and `GameState.strikes` are sim state. The checksum hashes the commander index, the cooldown (centiseconds), and each field's and strike's position, radius and expiry.
 - Every effect uses only `state.time`, plain arithmetic and `Math.hypot`, the same primitives the existing powers use.
+
+## H. Visual identity (units and buildings)
+
+Every faction builds the same roster, but each one **looks** different. A player can tell whose base it is from the shapes and materials alone. The **player colour** stays the ownership signal, so two players on the same faction are still told apart.
+
+| Faction | Palette (base · mid · dark · light · accent · glass) | Shape language | Materials and motifs |
+|---|---|---|---|
+| Concord | `#c9d2dc` `#5b6b80` `#2b3442` `#eef3ff` `#3b82f6` `#7fb4e8` | chamfered plates, symmetric, orderly | white-grey armour, blue hazard stripes, rivets, the Custody Bar emblem |
+| Halcyon | `#2f3036` `#4a4a52` `#18181c` `#d8c48a` `#eab308` `#f5d77a` | rounded corners, hexagons, clean | graphite composite, gold trim, hex panels, amber glass |
+| Cantons | `#6b7046` `#8a6a44` `#3a3a24` `#b8b48a` `#22c55e` `#9ccf9a` | irregular, patched, bolted | olive paint over rust, sandbags, salvaged plates, green chevrons |
+| Choir | `#4a1c22` `#2a1a1c` `#120a0c` `#d8c8b8` `#ef4444` `#8a6cf0` | pointed, spiked, tall | oxblood and black iron, red banners, glowing blue-violet crystals |
+
+- **Source of truth:** `src/content/factionArt.ts` (`FACTION_LOOK`, `UNIT_ART`, `BUILDING_ART`). It feeds the procedural art, the Art Lab guides and the Gemini prompts.
+- **Buildings:** each building draws its faction's art, a real file if one exists (file 29 §G), otherwise the procedural version (`render/art/factionBuildings.ts`). A thin **trim in the owner's colour** runs around the footprint; the Construction Yard's is thicker. Under construction, the sprite is drawn at half opacity with a yellow scaffold hatch.
+- **Units:** a unit draws its faction sprite once a real file exists: an **owner-colour ring** sits under it and the sprite turns to face its heading. Until then it keeps its role shape. At 18–40 px, procedural detail would only blur the silhouette that counters depend on.
+- **Walls and gates** are shared: stone with an owner-colour cap.
+- **HUD icons** are drawn by the same functions, so the build menu shows the player's own faction buildings.
+- Render-only: the art never touches the sim, so lockstep and the checksum are unaffected.

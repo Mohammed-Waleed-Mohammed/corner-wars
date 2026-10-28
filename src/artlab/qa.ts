@@ -3,7 +3,7 @@
 
 import { meanRGB, rgbToHex } from "./image";
 import type { Img, RGB } from "./image";
-import type { PortraitResult, SpriteResult, TextureResult } from "./process";
+import type { BuildingResult, KeyedSprite, PortraitResult, SpriteResult, TextureResult } from "./process";
 import { cornerArtefact, lightingSpread, paletteDistance, repetition, seamRatio } from "./qa/metrics";
 
 export type Verdict = "PASS" | "WARN" | "FAIL";
@@ -18,6 +18,7 @@ export const QA = {
   palette: { pass: 28, fail: 60 },
   cleanBg: { pass: 0.98, fail: 0.9 },
   footprintTol: 0.03,
+  aspect: { pass: 0.06, fail: 0.15 }, // buildings: relative error of the bbox aspect vs the footprint's
 } as const;
 
 const RANK: Record<Verdict, number> = { PASS: 0, WARN: 1, FAIL: 2 };
@@ -80,11 +81,12 @@ export function qaTexture(r: TextureResult, o: TextureQAOptions): QAReport {
 }
 
 
-// ── sprites ─────────────────────────────────────────────────────────────────────────────────────
-export function qaSprite(r: SpriteResult, o: { footprint: number; baseAtBottom: boolean }): QAReport {
+// ── keyed sprites (terrain sprites, units, buildings) ───────────────────────────────────────────
+/** Subject found, clean background, clipped: the checks before the footprint. */
+function keyHeadChecks(r: KeyedSprite, hasOut: boolean): { found: boolean; ms: Metric[] } {
   const ms: Metric[] = [];
   const total = r.keyed.width * r.keyed.height;
-  const found = r.out !== null && r.subjectPx >= total * 0.002;
+  const found = hasOut && r.subjectPx >= total * 0.002;
   ms.push({ label: "Subject found", value: `${pct(r.subjectPx / total)} of the image opaque`, threshold: "≥ 0.2%", verdict: found ? "PASS" : "FAIL",
     note: found ? "" : "Nothing was keyed as the object: the background is not #FF00FF, or the object is magenta. Regenerate with the guide attached as Image 1." });
 
@@ -95,14 +97,14 @@ export function qaSprite(r: SpriteResult, o: { footprint: number; baseAtBottom: 
   v = r.clippedPx === 0 ? "PASS" : "FAIL";
   ms.push({ label: "Clipped (opaque pixels on the image edge)", value: `${r.clippedPx} px`, threshold: "none", verdict: v,
     note: v === "PASS" ? "" : "The object touches the image edge, so part of it is cut off. Regenerate: keep the guide's footprint with at least a 4% magenta margin on every side." });
+  return { found, ms };
+}
 
-  const err = Math.abs(r.footprint - o.footprint);
-  v = found && err <= QA.footprintTol ? "PASS" : "WARN";
-  ms.push({ label: `Footprint after normalising (${o.baseAtBottom ? "width" : "larger side"})`, value: pct(r.footprint), threshold: `${pct(o.footprint, 0)} ± ${pct(QA.footprintTol, 0)}`, verdict: v,
-    note: v === "PASS" ? "" : r.heightClamped ? "The tuft is too tall for its width, so it was shrunk to fit the height. Regenerate with a wider, shorter tuft like the guide." : "The normalised size is off-spec; check the keyed result for stray pixels." });
-
+/** Magenta left, specks, source resolution: the checks after the footprint. */
+function keyTailChecks(r: KeyedSprite): Metric[] {
+  const ms: Metric[] = [];
   const mag = r.subjectPx ? r.magentaPx / r.subjectPx : 0;
-  v = mag <= 0.005 ? "PASS" : "WARN";
+  let v: Verdict = mag <= 0.005 ? "PASS" : "WARN";
   ms.push({ label: "Magenta left in the object", value: pct(mag, 2), threshold: "≤ 0.5% (info)", verdict: v,
     note: v === "PASS" ? "" : "A magenta fringe or halo, or pink colours inside the object, survived the key. Look at the result on the ground; regenerate if a pink edge shows." });
 
@@ -110,8 +112,35 @@ export function qaSprite(r: SpriteResult, o: { footprint: number; baseAtBottom: 
   ms.push({ label: "Detached specks removed", value: `${r.specks}${r.specks ? ` (${r.speckPx} px)` : ""}`, threshold: "0 (info)", verdict: v,
     note: v === "PASS" ? "" : "Small detached pieces were deleted (a watermark, particles or floating leaves). Make sure nothing that belongs to the object was lost." });
 
-  ms.push(...sourceChecks(r.keyed.width, r.keyed.height, 1 - Math.min(r.keyed.width, r.keyed.height) ** 2 / total, 1024).slice(1));
-  return report(ms);
+  ms.push(...sourceChecks(r.srcW, r.srcH, 0, 1024).slice(1)); // sprites needn't be square: resolution only
+  return ms;
+}
+
+export function qaSprite(r: SpriteResult, o: { footprint: number; baseAtBottom: boolean }): QAReport {
+  const { found, ms } = keyHeadChecks(r, r.out !== null);
+  const err = Math.abs(r.footprint - o.footprint);
+  const v: Verdict = found && err <= QA.footprintTol ? "PASS" : "WARN";
+  ms.push({ label: `Footprint after normalising (${o.baseAtBottom ? "width" : "larger side"})`, value: pct(r.footprint), threshold: `${pct(o.footprint, 0)} ± ${pct(QA.footprintTol, 0)}`, verdict: v,
+    note: v === "PASS" ? "" : r.heightClamped ? "The tuft is too tall for its width, so it was shrunk to fit the height. Regenerate with a wider, shorter tuft like the guide." : "The normalised size is off-spec; check the keyed result for stray pixels." });
+  return report([...ms, ...keyTailChecks(r)]);
+}
+
+// ── faction buildings: the sprite checks, with the footprint measured against the target rectangle,
+// plus the aspect check (Gemini must keep the guide's rectangle) ──────────────────────────────────
+export function qaBuilding(r: BuildingResult, o: { tilesW: number; tilesH: number; outW: number; outH: number; fill: number }): QAReport {
+  const { found, ms } = keyHeadChecks(r, r.out !== null);
+  const tw = Math.round(o.outW * o.fill), th = Math.round(o.outH * o.fill);
+  const big = Math.max(r.fillX, r.fillY), err = Math.abs(big - 1);
+  let v: Verdict = found && err <= QA.footprintTol ? "PASS" : "WARN";
+  ms.push({ label: "Footprint after normalising (bbox ÷ the target rectangle)", value: `${pct(r.fillX)} × ${pct(r.fillY)} of ${tw}×${th} (area ${pct(r.fillX * r.fillY)})`, threshold: `fuller axis 100% ± ${pct(QA.footprintTol, 0)}`, verdict: v,
+    note: v === "PASS" ? (big - Math.min(r.fillX, r.fillY) > 0.005 ? "The other axis falls short by the aspect error below." : "") : "The normalised size is off-spec; check the keyed result for stray pixels or a detached part." });
+
+  const ratio = r.targetAspect > 0 && r.aspect > 0 ? r.aspect / r.targetAspect : 0;
+  const rel = ratio > 0 ? Math.max(ratio, 1 / ratio) - 1 : Infinity;
+  v = found ? grade(rel, QA.aspect.pass, QA.aspect.fail) : "FAIL";
+  ms.push({ label: `Aspect (bbox width ÷ height vs the ${o.tilesW} × ${o.tilesH} footprint)`, value: found ? `${r.aspect.toFixed(3)} vs ${r.targetAspect.toFixed(3)} (off by ${pct(rel)})` : "—", threshold: `≤ ${pct(QA.aspect.pass, 0)} pass · > ${pct(QA.aspect.fail, 0)} fail`, verdict: v,
+    note: v === "FAIL" ? "Gemini changed the building's proportions — regenerate keeping the guide's rectangle." : v === "WARN" ? "The proportions drifted from the footprint, so the building leaves a gap on one side of its tiles. Check the preview; regenerate if it looks undersized." : "" });
+  return report([...ms, ...keyTailChecks(r)]);
 }
 
 // ── portraits (29 §D sets no hard thresholds: these are WARN-only checks) ──────────────────────

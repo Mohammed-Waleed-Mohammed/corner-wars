@@ -89,5 +89,6 @@ Key rules:
   - Hotkey `Z`.
 - **Biomes (26):** `GameState.biome` (from `GameMap.biome`, the official default, or a match override). Terrain helpers in `state/terrain.ts` take the biome into account: speed, cover, sight, and A* admissibility via `fastestFactor`.
 - **Campaign (28):** `engine/campaign/director.ts` (`setupMission` at boot, `updateMission` inside `updateGame`) runs objectives and events, and pushes dialogue to `state.storyEvents`. The UI is in `src/ui/campaign/` and `src/ui/codex/`.
-- **Art (29):** real art drops into `src/assets/terrain/<biome>/` and `src/assets/portraits/`. Make it with the dev-only Art Lab (`/artlab.html`).
+- **Art (29):** real art drops into `src/assets/terrain/<biome>/`, `src/assets/portraits/`, `src/assets/buildings/<faction>/` and `src/assets/units/<faction>/`. Make it with the dev-only Art Lab (`/artlab.html`).
+- **Faction looks (27 §H):** palette, shapes and per-type descriptions live in `src/content/factionArt.ts`. The procedural faction art is in `src/render/art/faction*.ts`, loaded via `render/unitArt.ts`. `render/ownerFaction.ts` maps an owner to its faction for the draw functions.
 - **Determinism:** commanders, fields and strikes are hashed in `sim/checksum.ts`. A "Random" commander resolves via `randomCommander(seed, seat)` identically on every peer.

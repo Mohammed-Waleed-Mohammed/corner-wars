@@ -79,12 +79,20 @@ function drawField(ctx: CanvasRenderingContext2D, state: GameState, camera: Came
       }
       break;
     }
-    case "cloak": {
-      ctx.strokeStyle = "rgba(140,230,160,0.45)";
-      ctx.lineWidth = 1.5;
-      ctx.setLineDash([3, 7]);
+    case "cloak": { // pale mist + a dashed rim with a dark under-stroke, so it reads on grass, sand or snow
+      const g = ctx.createRadialGradient(p.x, p.y, R * 0.3, p.x, p.y, R);
+      g.addColorStop(0, "rgba(210,235,225,0.05)");
+      g.addColorStop(1, "rgba(210,235,225,0.2)");
+      ctx.fillStyle = g;
+      ctx.beginPath(); ctx.arc(p.x, p.y, R, 0, Math.PI * 2); ctx.fill();
+      ctx.setLineDash([6, 8]);
       ctx.lineDashOffset = t * 10;
+      ctx.strokeStyle = "rgba(10,20,14,0.45)";
+      ctx.lineWidth = 3.5;
       ctx.beginPath(); ctx.arc(p.x, p.y, R, 0, Math.PI * 2); ctx.stroke();
+      ctx.strokeStyle = "rgba(190,255,210,0.9)";
+      ctx.lineWidth = 2;
+      ctx.stroke();
       break;
     }
   }

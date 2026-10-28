@@ -10,6 +10,7 @@ import { drawBackground, drawGrid } from "./draw/grid";
 import { drawTerrainAnim, drawTerrainLayer, drawFogLayer } from "./draw/worldLayers";
 import { drawBuilding, setBuildTimeResolver } from "./draw/buildings";
 import { unitBuildTime } from "../state/doctrine";
+import { setFactionSource } from "./ownerFaction";
 import { drawUnit } from "./draw/units";
 import { drawCitadel, drawGoldSource } from "./draw/world";
 import { drawDragBox, drawMoveMarker } from "./draw/overlays";
@@ -33,6 +34,7 @@ export function renderGame(
   minimap?: { ctx: CanvasRenderingContext2D; w: number; h: number } | null, // 21 §J: TACTICAL well canvas
 ): void {
   setBuildTimeResolver((o, t) => unitBuildTime(o === "neutral" ? null : state.players[o], t)); // 27 §B
+  setFactionSource(state); // 27 §H: faction art per owner
   drawBackground(ctx, camera, state);
   drawTerrainLayer(ctx, state, camera); // cached offscreen terrain, blitted
   drawTerrainAnim(ctx, state, camera, performance.now()); // 24 §D: water, swaying grass + trees (cosmetic)

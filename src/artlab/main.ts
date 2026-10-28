@@ -4,8 +4,8 @@
 
 import "./styles.css";
 import { BIOMES } from "../content/biomes";
-import type { BiomeId } from "../core/types";
-import { ASSETS, assetById } from "./catalog";
+import type { BiomeId, FactionId } from "../core/types";
+import { ASSETS, assetById, isBiomeAsset, isFactionAsset } from "./catalog";
 import type { Asset } from "./catalog";
 import { exportAllPrompts } from "./prompts";
 import { openBiomeSheet } from "./ui/biomeSheet";
@@ -25,9 +25,15 @@ const flash = el("div.flash", { hidden: true });
 
 function current(): Asset { return assetById(persisted.selected) ?? ASSETS[0]; }
 
+/** Keep the catalog selectors on the asset's biome / faction (portraits change neither). */
+function followSelectors(a: Asset): void {
+  if (isBiomeAsset(a)) persisted.biome = a.biome;
+  if (isFactionAsset(a)) persisted.faction = a.faction;
+}
+
 function select(a: Asset): void {
   persisted.selected = a.id;
-  if (a.kind !== "portrait") persisted.biome = a.biome;
+  followSelectors(a);
   save();
   history.replaceState(null, "", `#${a.id}`);
   renderAll();
@@ -37,7 +43,16 @@ function select(a: Asset): void {
 function setBiome(b: BiomeId): void {
   persisted.biome = b;
   const a = current();
-  if (a.kind !== "portrait" && a.biome !== b) { select(assetById(`${b}/${a.name}`) ?? assetById(`${b}/ground`)!); return; }
+  if (isBiomeAsset(a) && a.biome !== b) { select(assetById(`${b}/${a.name}`) ?? assetById(`${b}/ground`)!); return; }
+  save();
+  renderAll();
+}
+
+/** Switch the faction groups; a selected unit / building jumps to the same type of the new faction. */
+function setFaction(f: FactionId): void {
+  persisted.faction = f;
+  const a = current();
+  if (isFactionAsset(a) && a.faction !== f) { select(assetById(`${a.kind}s/${f}/${a.name}`) ?? assetById(`buildings/${f}/construction_yard`)!); return; }
   save();
   renderAll();
 }
@@ -68,7 +83,7 @@ function renderCentre(a: Asset): void {
 
 function renderAll(): void {
   const a = current();
-  renderCatalog(left, { select, biome: setBiome });
+  renderCatalog(left, { select, biome: setBiome, faction: setFaction });
   renderCentre(a);
   renderPreviewSafe(a);
 }
@@ -87,8 +102,7 @@ function header(): HTMLElement {
 function boot(): void {
   const fromHash = decodeURIComponent(location.hash.slice(1));
   if (fromHash && assetById(fromHash)) persisted.selected = fromHash;
-  const a = current();
-  if (a.kind !== "portrait") persisted.biome = a.biome;
+  followSelectors(current());
   app.replaceChildren(header(), flash, el("div.cols", {}, left, centre, right));
   const msg = takeFlash();
   if (msg) { flash.textContent = msg; flash.hidden = false; setTimeout(() => (flash.hidden = true), 9000); }
@@ -96,7 +110,7 @@ function boot(): void {
 }
 
 boot();
-// Deep links stay live: #verdant/mountain, #portraits/varga… switch the selected asset without a reload.
+// Deep links stay live: #verdant/mountain, #portraits/varga, #units/choir/tank… switch the selected asset without a reload.
 window.addEventListener("hashchange", () => {
   const id = decodeURIComponent(location.hash.slice(1));
   const a = id ? assetById(id) : undefined;

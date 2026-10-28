@@ -6,8 +6,10 @@ import type { Img, RGB } from "./image";
 
 export { LOCK_DEFAULT, TEX_OUT_PX, WORK, flattenLighting, makeSeamless, paletteLock, processTexture } from "./process/texture";
 export type { TextureOptions, TextureResult } from "./process/texture";
-export { alphaBox, keyMagenta, measureFootprint, processSprite } from "./process/sprite";
-export type { SpriteOptions, SpriteResult } from "./process/sprite";
+export { alphaBox, keyMagenta, keySprite, measureFootprint, processSprite, trimEdges } from "./process/sprite";
+export type { Box, KeyedSprite, SpriteOptions, SpriteResult } from "./process/sprite";
+export { measureFill, processBuilding } from "./process/building";
+export type { BuildingOptions, BuildingResult } from "./process/building";
 
 // ── portraits: centre-crop to a square, resample, no keying ─────────────────────────────────────
 export interface PortraitResult { out: Img; steps: string[]; srcW: number; srcH: number; cropLoss: number; backdrop: RGB; backdropDist: number }

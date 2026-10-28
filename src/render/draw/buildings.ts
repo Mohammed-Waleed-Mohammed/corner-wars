@@ -11,7 +11,10 @@ import {
   UNIT_STATS,
 } from "../../config/constants";
 import type { Building, Owner, UnitType } from "../../core/types";
+import type { ArtBuildingType } from "../../content/factionArt";
 import type { Camera } from "../camera";
+import { ownerFaction } from "../ownerFaction";
+import { buildingSprite, isArtBuilding } from "../unitArt";
 import { drawHpBar, drawSelectionRect } from "./overlays";
 import { roundRectPath } from "./shapes";
 
@@ -41,38 +44,55 @@ export function drawBuilding(
   const radius = Math.min(6, w * 0.15);
   const underConstruction = b.buildProgress < 1;
 
-  ctx.globalAlpha = underConstruction ? 0.45 : 1;
+  // 27 §H: a faction owner gets its faction's building art (real file, else procedural); the owner's
+  // colour stays readable as a trim around the footprint. No faction → the classic labelled block.
+  const faction = isArtBuilding(b.buildingType) ? ownerFaction(b.owner) : null;
+  if (faction) {
+    ctx.globalAlpha = underConstruction ? 0.5 : 1;
+    const prevQ = ctx.imageSmoothingQuality;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(buildingSprite(faction, b.buildingType as ArtBuildingType), tl.x, tl.y, w, h);
+    ctx.imageSmoothingQuality = prevQ;
+    ctx.globalAlpha = 1;
+    if (underConstruction) drawScaffold(ctx, tl.x, tl.y, w, h, radius);
+    roundRectPath(ctx, tl.x + 0.75, tl.y + 0.75, w - 1.5, h - 1.5, radius);
+    ctx.strokeStyle = ownerColor(b.owner);
+    ctx.lineWidth = b.buildingType === "constructionYard" ? 2.5 : 1.5;
+    ctx.stroke();
+  } else {
+    ctx.globalAlpha = underConstruction ? 0.45 : 1;
 
-  // Body.
-  roundRectPath(ctx, tl.x, tl.y, w, h, radius);
-  ctx.fillStyle = ownerColor(b.owner);
-  ctx.fill();
+    // Body.
+    roundRectPath(ctx, tl.x, tl.y, w, h, radius);
+    ctx.fillStyle = ownerColor(b.owner);
+    ctx.fill();
 
-  // Type accent stripe across the top.
-  ctx.save();
-  roundRectPath(ctx, tl.x, tl.y, w, h, radius);
-  ctx.clip();
-  ctx.fillStyle = BUILDING_ACCENT[b.buildingType];
-  ctx.fillRect(tl.x, tl.y, w, Math.max(3, h * 0.18));
-  ctx.restore();
+    // Type accent stripe across the top.
+    ctx.save();
+    roundRectPath(ctx, tl.x, tl.y, w, h, radius);
+    ctx.clip();
+    ctx.fillStyle = BUILDING_ACCENT[b.buildingType];
+    ctx.fillRect(tl.x, tl.y, w, Math.max(3, h * 0.18));
+    ctx.restore();
 
-  // Border (thicker for the Construction Yard — it's the base).
-  roundRectPath(ctx, tl.x, tl.y, w, h, radius);
-  ctx.strokeStyle = b.buildingType === "constructionYard" ? ownerColor(b.owner) : COLORS.outline;
-  ctx.lineWidth = b.buildingType === "constructionYard" ? 3 : 1.5;
-  ctx.stroke();
+    // Border (thicker for the Construction Yard — it's the base).
+    roundRectPath(ctx, tl.x, tl.y, w, h, radius);
+    ctx.strokeStyle = b.buildingType === "constructionYard" ? ownerColor(b.owner) : COLORS.outline;
+    ctx.lineWidth = b.buildingType === "constructionYard" ? 3 : 1.5;
+    ctx.stroke();
 
-  // Letter label.
-  if (camera.zoom > 0.45) {
-    ctx.fillStyle = COLORS.outline;
-    const fontPx = Math.min(w, h) * 0.5;
-    ctx.font = `bold ${fontPx}px ui-sans-serif, system-ui, sans-serif`;
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText(stat.letter, tl.x + w / 2, tl.y + h / 2 + h * 0.05);
+    // Letter label.
+    if (camera.zoom > 0.45) {
+      ctx.fillStyle = COLORS.outline;
+      const fontPx = Math.min(w, h) * 0.5;
+      ctx.font = `bold ${fontPx}px ui-sans-serif, system-ui, sans-serif`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(stat.letter, tl.x + w / 2, tl.y + h / 2 + h * 0.05);
+    }
+
+    ctx.globalAlpha = 1;
   }
-
-  ctx.globalAlpha = 1;
 
   // Low-power overlay over the body (under HUD bars).
   if (lowPower) drawLowPowerTint(ctx, tl.x, tl.y, w, h, radius, time);
@@ -134,6 +154,20 @@ export function drawBuilding(
   }
 
   if (selected) drawSelectionRect(ctx, tl.x, tl.y, w, h);
+}
+
+/** Under construction (faction art): yellow-and-black scaffold hatching over the half-built sprite. */
+function drawScaffold(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, radius: number): void {
+  ctx.save();
+  roundRectPath(ctx, x, y, w, h, radius);
+  ctx.clip();
+  ctx.strokeStyle = "rgba(245,197,24,0.38)";
+  ctx.lineWidth = Math.max(1, Math.min(w, h) * 0.04);
+  const step = Math.max(6, Math.min(w, h) * 0.18);
+  ctx.beginPath();
+  for (let d = -h; d < w + h; d += step) { ctx.moveTo(x + d, y); ctx.lineTo(x + d + h, y + h); }
+  ctx.stroke();
+  ctx.restore();
 }
 
 /** Red tint + dim + slow pulse marking a building whose owner is in power deficit (§5). */

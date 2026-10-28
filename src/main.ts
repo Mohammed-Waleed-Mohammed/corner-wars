@@ -27,6 +27,7 @@ import type { NetPeer } from "./net/peer";
 import type { SlotInfo } from "./net/protocol";
 import { LocalSession, NetworkSession, type Session } from "./net/session";
 import { Camera } from "./render/camera";
+import { setFactionSource } from "./render/ownerFaction";
 import { renderGame } from "./render/renderer";
 import { buildFromMap, configurePlayers } from "./state/gameState";
 import { MAP_BY_ID, OFFICIAL_MAPS } from "./state/officialMaps";
@@ -151,7 +152,9 @@ function bootMatch(opts: MatchOpts): void {
   const net = opts.peer ? new NetworkSession(state, opts.localPlayerId, opts.peer, opts.slots ?? []) : null;
   const session: Session = net ?? new LocalSession(state, opts.localPlayerId);
   const controller = new InputController(state, camera, input, session);
+  setFactionSource(state); // 27 §H: before the HUD renders its build icons, so they show the faction's buildings
   const hud = new Hud(app, opts.localPlayerId);
+  input.forward(hud.minimapCanvas); // 21 §J: the TACTICAL minimap sits over the canvas — click/drag to pan
   hud.setBuildHandler((unitType) => controller.buildFromSelected(unitType));
   hud.setPlaceHandler((buildingType) => controller.enterPlacement(buildingType));
   hud.setResearchHandler((key) => controller.researchFromSelected(key));

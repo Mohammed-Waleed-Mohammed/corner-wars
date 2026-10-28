@@ -3,12 +3,15 @@
 // number. DOM-free, so the "Export all prompts" Markdown can also be produced from Node.
 
 import { BIOMES } from "../content/biomes";
+import { FACTIONS } from "../content/factions";
 import { ASSETS, planAttachments } from "./catalog";
 import type { Asset, AttachPlan, Attachment } from "./catalog";
+import { buildingPrompt } from "./prompts/building";
 import { anchorFile } from "./prompts/common";
 import { portraitPrompt } from "./prompts/portrait";
 import { spritePrompt } from "./prompts/sprite";
 import { texturePrompt } from "./prompts/texture";
+import { unitPrompt } from "./prompts/unit";
 
 export { anchorFile } from "./prompts/common";
 
@@ -17,13 +20,24 @@ export function buildPrompt(a: Asset, plan: AttachPlan): string {
     case "texture": return texturePrompt(a, plan);
     case "sprite": return spritePrompt(a, plan);
     case "portrait": return portraitPrompt(a, plan);
+    case "unit": return unitPrompt(a, plan);
+    case "building": return buildingPrompt(a, plan);
+  }
+}
+
+/** File stem for downloads: "verdant_ground", "portrait_varga", "unit_concord_rifleman", "building_choir_lab". */
+function downloadStem(a: Asset): string {
+  switch (a.kind) {
+    case "portrait": return `portrait_${a.name}`;
+    case "unit": return `unit_${a.faction}_${a.name}`;
+    case "building": return `building_${a.faction}_${a.name}`;
+    default: return `${a.biome}_${a.name}`;
   }
 }
 
 /** Download name for an attachment, prefixed with its image number so they attach in order. */
 export function attachmentFileName(att: Attachment): string {
-  const a = att.asset;
-  const stem = a.kind === "portrait" ? `portrait_${a.name}` : `${a.biome}_${a.name}`;
+  const stem = downloadStem(att.asset);
   return att.role === "guide" ? `${att.n}_guide_${stem}.png` : `${att.n}_${stem}.png`;
 }
 
@@ -33,12 +47,15 @@ const ROLE_TEXT: Record<Attachment["role"], string> = {
   ground: "this biome's ground",
   family: "first sprite of the family",
   portrait: "first portrait (style anchor)",
+  style: "the Concord's matching asset, for painting style only",
+  faction: "this faction's Construction Yard",
 };
 
 /** One line of the attach list: "Image 2 — verdant/ground.png (master style anchor)". */
 export function attachmentLine(att: Attachment): string {
   const what = att.role === "guide" ? `guide for ${att.asset.id}` : anchorFile(att.asset);
-  return `Image ${att.n} — ${what} (${ROLE_TEXT[att.role]})`;
+  const role = att.role === "family" && att.asset.kind === "unit" ? "this faction's Rifleman" : ROLE_TEXT[att.role];
+  return `Image ${att.n} — ${what} (${role})`;
 }
 
 const STEP_TEXT: Record<Asset["step"], string> = {
@@ -47,8 +64,22 @@ const STEP_TEXT: Record<Asset["step"], string> = {
   3: "Step 3 — the other textures of a biome",
   4: "Step 4 — sprites",
   5: "Step 5 — portraits",
+  6: "Step 6 — faction buildings",
+  7: "Step 7 — faction units",
 };
 export function stepText(a: Asset): string { return STEP_TEXT[a.step]; }
+
+/** "512×512", or "288×192" for a building. */
+export function outSizeText(a: Asset): string {
+  return a.kind === "building" ? `${a.outW}×${a.outH}` : `${a.outSize}×${a.outSize}`;
+}
+
+/** Export heading: biome steps and faction steps are split per biome / faction. */
+function exportHeading(a: Asset): string {
+  if (a.kind === "unit" || a.kind === "building") return `${FACTIONS[a.faction].name}: ${STEP_TEXT[a.step]}`;
+  if ((a.kind === "texture" || a.kind === "sprite") && a.step >= 3) return `${BIOMES[a.biome].name}: ${STEP_TEXT[a.step]}`;
+  return STEP_TEXT[a.step];
+}
 
 /**
  * Every prompt with its attach list, in generation order, as Markdown. `exists` defaults to "every
@@ -65,10 +96,10 @@ export function exportAllPrompts(exists: (a: Asset) => boolean = () => true): st
   ];
   let heading = "";
   for (const a of ASSETS) {
-    const h = a.kind !== "portrait" && a.step >= 3 ? `${BIOMES[a.biome].name}: ${STEP_TEXT[a.step]}` : STEP_TEXT[a.step];
+    const h = exportHeading(a);
     if (h !== heading) { heading = h; out.push(`## ${h}`, ""); }
     const plan = planAttachments(a, exists);
-    out.push(`### ${a.order}. \`${a.id}\` — ${a.title}`, "", `Save as \`${a.path}\` (${a.outSize}×${a.outSize} after processing).`, "", "**Attach, in this order:**", "");
+    out.push(`### ${a.order}. \`${a.id}\` — ${a.title}`, "", `Save as \`${a.path}\` (${outSizeText(a)} after processing).`, "", "**Attach, in this order:**", "");
     for (const att of plan.list) out.push(`${att.n}. ${attachmentLine(att)}`);
     out.push("", "```text", buildPrompt(a, plan).trimEnd(), "```", "");
   }

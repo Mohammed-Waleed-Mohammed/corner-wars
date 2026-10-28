@@ -1,12 +1,14 @@
 // Art Lab — right column: the asset in game context. Textures tiled 3×3 at game scale (one repeat =
-// TEX_WORLD px); sprites on their biome's ground at in-game sizes with the game's shadows; portraits
-// at card sizes. A toggle compares the new result with the current (procedural or real) version.
+// TEX_WORLD px); sprites on their biome's ground at in-game sizes with the game's shadows; faction
+// units and buildings on verdant/ground (ui/previewFaction.ts); portraits at card sizes. A toggle
+// compares the new result with the current (procedural or real) version.
 
 import { SPRITE_COUNT } from "../../content/biomes";
 import { SPRITE_GAME_PX, assetById } from "../catalog";
 import type { Asset, SpriteAsset } from "../catalog";
 import { characterInfo, fullName } from "../../content/factions";
 import { button, canvas, ctx2d, el } from "./dom";
+import { buildingPreview, unitPreview } from "./previewFaction";
 import { TEX_WORLD, currentImage, currentLabel, currentTexture } from "./sources";
 import { session } from "./state";
 
@@ -79,9 +81,17 @@ export async function renderPreview(root: HTMLElement, a: Asset, rerender: () =>
   const tools: HTMLElement[] = [seg];
   if (a.kind !== "portrait") tools.push(button(`Zoom ${previewOpts.zoom}×`, () => { previewOpts.zoom = previewOpts.zoom === 1 ? 2 : 1; rerender(); }, "btn small"));
   if (a.kind === "texture") tools.push(button(previewOpts.grid ? "Hide repeat grid" : "Show repeat grid", () => { previewOpts.grid = !previewOpts.grid; rerender(); }, "btn small"));
-  const view = a.kind === "texture" ? texturePreview(src) : a.kind === "sprite" ? await spritePreview(a, src) : portraitPreview(a, src);
-  const caption = a.kind === "texture" ? `3×3 repeats at game scale: one repeat = ${TEX_WORLD} px = 8 tiles${previewOpts.zoom === 2 ? " (2× zoom)" : ""}. Look for seams, stripes and copied patches.`
-    : a.kind === "sprite" ? "On this biome's ground at in-game size, with the game's shadow." : "At briefing, dialogue and command-card sizes.";
+  const view = a.kind === "texture" ? texturePreview(src)
+    : a.kind === "sprite" ? await spritePreview(a, src)
+    : a.kind === "unit" ? await unitPreview(a, src, previewOpts.zoom)
+    : a.kind === "building" ? await buildingPreview(a, src, previewOpts.zoom)
+    : portraitPreview(a, src);
+  const zoomNote = previewOpts.zoom === 2 ? " (2× zoom)" : "";
+  const caption = a.kind === "texture" ? `3×3 repeats at game scale: one repeat = ${TEX_WORLD} px = 8 tiles${zoomNote}. Look for seams, stripes and copied patches.`
+    : a.kind === "sprite" ? "On this biome's ground at in-game size, with the game's shadow."
+    : a.kind === "unit" ? `On verdant/ground at in-game size${zoomNote}, turned to 4 headings as the game rotates it, over the owner-colour disc. Check the facing and that the silhouette reads. Units without a real file show the guide's procedural sprite here (the game draws its role shape).`
+    : a.kind === "building" ? `On verdant/ground at game scale, 32 px per tile${zoomNote}, with the owner-colour trim the game draws around the footprint. Check the proportions and that the set reads as one faction.`
+    : "At briefing, dialogue and command-card sizes.";
   root.replaceChildren(
     el("div.pv-head", {}, el("h3", {}, "Game context"), ...tools),
     el("div.pv-view", {}, view),

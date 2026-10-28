@@ -3,12 +3,12 @@
 // needs afterwards — selection, verdicts, "saved" notice — survives a reload.
 
 import { BIOME_IDS } from "../../config/biomes";
-import type { BiomeId } from "../../core/types";
-import { ASSETS, assetById } from "../catalog";
+import type { BiomeId, FactionId } from "../../core/types";
+import { ART_FACTIONS, ASSETS, assetById } from "../catalog";
 import type { Asset } from "../catalog";
 import type { Img } from "../image";
 import { LOCK_DEFAULT } from "../process";
-import type { PortraitResult, SpriteResult, TextureResult } from "../process";
+import type { BuildingResult, PortraitResult, SpriteResult, TextureResult } from "../process";
 import type { QAReport, Verdict } from "../qa";
 
 const KEY = "artlab.v1";
@@ -17,18 +17,20 @@ const FLASH = "artlab.flash";
 export interface Persisted {
   selected: string;
   biome: BiomeId;
+  faction: FactionId; // the faction shown in the Buildings / Units groups
   verdicts: Record<string, { verdict: Verdict; at: number; saved?: boolean }>;
   lock: number;
   trim: number;
 }
 
 function load(): Persisted {
-  const def: Persisted = { selected: ASSETS[0].id, biome: "verdant", verdicts: {}, lock: LOCK_DEFAULT, trim: 0 };
+  const def: Persisted = { selected: ASSETS[0].id, biome: "verdant", faction: "concord", verdicts: {}, lock: LOCK_DEFAULT, trim: 0 };
   try {
     const raw = JSON.parse(localStorage.getItem(KEY) ?? "{}") as Partial<Persisted>;
     const p = { ...def, ...raw };
     if (!assetById(p.selected)) p.selected = def.selected;
     if (!BIOME_IDS.includes(p.biome)) p.biome = def.biome;
+    if (!ART_FACTIONS.includes(p.faction)) p.faction = def.faction;
     return p;
   } catch { return def; }
 }
@@ -54,7 +56,9 @@ export function takeFlash(): string | null {
 export type Result =
   | { kind: "texture"; r: TextureResult }
   | { kind: "sprite"; r: SpriteResult }
-  | { kind: "portrait"; r: PortraitResult };
+  | { kind: "portrait"; r: PortraitResult }
+  | { kind: "unit"; r: SpriteResult }
+  | { kind: "building"; r: BuildingResult };
 
 export interface Session {
   file: string; // dropped file name

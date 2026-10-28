@@ -57,6 +57,7 @@ export function dropStep(a: Asset, h: ResultHandlers): HTMLElement {
   };
   const opts: HTMLElement[] = [];
   if (a.kind === "texture") opts.push(slider("Palette lock", persisted.lock, 0, 1, 0.05, (v) => `${Math.round(v * 100)}%`, (v) => { persisted.lock = v; save(); reprocess(); }));
+  // Terrain sprites keep their fixed pipeline; textures, portraits, units and buildings can trim a watermark.
   if (a.kind !== "sprite") opts.push(slider("Trim edges", persisted.trim, 0, 0.1, 0.01, (v) => `${Math.round(v * 100)}%`, (v) => { persisted.trim = v; save(); reprocess(); }));
   return el("section.card.step", {},
     stepHead("4", "Drop result", s ? `current: ${s.file}` : "Gemini's output, any size"),
@@ -77,8 +78,11 @@ function beforeAfter(s: Session): HTMLElement {
   const src = imgToCanvas(s.source);
   const before = toCanvas(src, Math.min(256, src.width), Math.round(Math.min(256, src.width) * (src.height / src.width)));
   before.className = "thumb";
-  const after = s.out ? toCanvas(s.out, 256, 256) : el("div.thumb.empty", {}, "no output");
-  if (after instanceof HTMLCanvasElement) after.className = `thumb${s.result?.kind === "sprite" ? " checker" : ""}`;
+  // Keep the output's proportions (a building is outW × outH): its larger side is 256.
+  const k = s.out ? 256 / Math.max(s.out.width, s.out.height) : 1;
+  const after = s.out ? toCanvas(s.out, Math.round(s.out.width * k), Math.round(s.out.height * k)) : el("div.thumb.empty", {}, "no output");
+  const keyed = s.result?.kind === "sprite" || s.result?.kind === "unit" || s.result?.kind === "building";
+  if (after instanceof HTMLCanvasElement) after.className = `thumb${keyed ? " checker" : ""}`;
   return el("div.ba", {},
     el("figure", {}, before, el("figcaption", {}, `Before · ${s.source.width}×${s.source.height}`)),
     el("figure", {}, after, el("figcaption", {}, `After · ${s.out ? `${s.out.width}×${s.out.height}` : "—"}`)));

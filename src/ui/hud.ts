@@ -377,6 +377,12 @@ export class Hud {
     // 21 §J: wire the TACTICAL minimap canvas + keep its screen rect current for the controller.
     this.minimapCanvas = root.querySelector("[data-minimap]") as HTMLCanvasElement;
     this.tacWell = root.querySelector("[data-tacwell]") as HTMLElement;
+    // The well can shift after the first layout (web fonts, the commander card), so re-measure the
+    // hit-test rect on every press, before the forwarded press reaches the controller (main.ts).
+    this.minimapCanvas.addEventListener("mousedown", () => {
+      const r = this.tacWell.getBoundingClientRect();
+      if (r.width > 0) setMinimapScreenRect({ x: r.left, y: r.top, w: r.width, h: r.height });
+    });
     window.addEventListener("resize", this.hudResize);
     requestAnimationFrame(() => this.layoutMinimap()); // after first layout
   }

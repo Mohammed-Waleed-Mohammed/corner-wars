@@ -9,6 +9,8 @@ import type { Building, BuildingType, FormationRole, PlayerId, Unit, UnitType } 
 import { Camera } from "../render/camera";
 import { drawBuilding } from "../render/draw/buildings";
 import { drawUnit } from "../render/draw/units";
+import { ownerFaction } from "../render/ownerFaction";
+import { unitArtVersion } from "../render/unitArt";
 import { generateSlots, slotsToIcon } from "../sim/formations";
 
 export type IconKind =
@@ -44,7 +46,7 @@ const scratchCam = new Camera();
 
 export function renderIcon(kind: IconKind, size: number, color?: string): HTMLCanvasElement {
   const col = color ?? (UNIT_KINDS.has(kind) || BUILDING_KINDS.has(kind) ? ownerColor(iconOwner) : HUD.TEXT);
-  const key = `${kind}:${size}:${col}`;
+  const key = `${kind}:${size}:${col}:${ownerFaction(iconOwner) ?? ""}:${unitArtVersion()}`; // faction art changes the look
   const hit = cache.get(key);
   if (hit) return hit;
 
