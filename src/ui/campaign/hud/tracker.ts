@@ -63,6 +63,8 @@ export class ObjectiveTracker {
     this.el = el("section", "mh-tracker");
     const head = el("div", "mh-tracker-head");
     head.append(el("span", "mh-tracker-label", "Objectives"), el("span", "mh-tracker-title", `${String(mission.number).padStart(2, "0")} · ${mission.title}`));
+    head.title = "Click to collapse / expand";
+    head.addEventListener("click", () => this.el.classList.toggle("is-collapsed")); // 30 §A
     this.list = el("div", "mh-tracker-list");
     this.el.append(head, this.list);
   }

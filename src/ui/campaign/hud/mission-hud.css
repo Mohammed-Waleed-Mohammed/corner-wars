@@ -1,12 +1,17 @@
 /* ═══ 28 §A.3 — in-mission story overlay ═══════════════════════════════════════════════════
    Above the HUD consoles (z 11–12), below the mute button (15), toasts (30) and pause/post (45).
-   Never takes pointer events: every click still reaches the battlefield. Top-right column starts
-   under the mute button; the dialogue bar sits above the bottom console, clear of the left stack. */
+   Takes no pointer events except the tracker header (collapse). 30 §A: objectives sit top-LEFT under
+   the top bar, the dialogue top-CENTRE under the commander dock — nothing covers the battlefield's
+   centre or the bottom console. */
 
 .mh-root { position: fixed; inset: 0; z-index: 13; pointer-events: none; font-family: var(--st-display); }
 
 /* ── tracker ──────────────────────────────────────────────────────────────── */
-.mh-right { position: absolute; top: 60px; right: 14px; width: 276px; display: flex; flex-direction: column; gap: 8px; }
+.mh-right { position: absolute; top: calc(var(--hud-top-h, 40px) + 8px); left: 10px; width: 276px; display: flex; flex-direction: column; gap: 8px;
+  transform: scale(var(--hud-scale, 1)); transform-origin: 0 0; }
+.mh-tracker-head { pointer-events: auto; cursor: pointer; }
+.mh-tracker.is-collapsed .mh-tracker-list { display: none; }
+.mh-tracker.is-collapsed .mh-tracker-head { border-bottom: none; margin-bottom: 0; padding-bottom: 2px; }
 .mh-tracker { position: relative; padding: 8px 10px 9px; background: var(--hud-bg-panel, rgba(21, 24, 29, 0.94));
   border: 1px solid var(--hud-border, #2b313b); clip-path: var(--st-chamfer); box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
   animation: mh-in 0.3s ease both; }
@@ -66,8 +71,8 @@
 @keyframes mh-toast-in { from { opacity: 0; transform: translateX(24px); } to { opacity: 1; transform: none; } }
 
 /* ── dialogue bar ─────────────────────────────────────────────────────────── */
-.mh-dlg { position: absolute; left: 50%; bottom: calc(var(--hud-console-h, 148px) + 22px);
-  width: min(700px, calc(100vw - 580px)); min-width: 440px; transform: translate(-50%, 10px); opacity: 0;
+.mh-dlg { position: absolute; left: 50%; top: calc(var(--hud-top-h, 40px) + 10px);
+  width: min(640px, calc(100vw - 640px)); min-width: 420px; transform: translate(-50%, -10px); opacity: 0;
   display: grid; grid-template-columns: 70px minmax(0, 1fr); gap: 12px; padding: 10px 14px 12px 10px;
   background: linear-gradient(90deg, color-mix(in srgb, var(--fc, #9aa4b2) 16%, rgba(12, 14, 18, 0.95)), rgba(12, 14, 18, 0.92) 45%);
   border: 1px solid var(--hud-border, #2b313b); border-left: 3px solid var(--fc, #9aa4b2); clip-path: var(--st-chamfer);

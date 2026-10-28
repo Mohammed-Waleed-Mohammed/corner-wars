@@ -27,6 +27,7 @@ Each file is the **single source of truth** for its own system and numbers. The 
 | `27-factions-and-commanders.md` | Four factions, eight commanders: doctrines, abilities, unit names, AI use, HUD, visual identity |
 | `28-campaign.md` | The 12-mission campaign: flow, difficulty, objective and event types, every mission |
 | `29-art-pipeline.md` | The Art Lab: guide images, exact prompts, automatic fixing and QA thresholds for terrain, portraits, faction buildings and units |
+| `30-command-hud.md` | The Command HUD: two bands (top bar + bottom console), the 5×3 grid command card and its hotkeys, selection panel, production tabs, alerts (replaces file 21's layout) |
 
 ## Conventions used everywhere
 

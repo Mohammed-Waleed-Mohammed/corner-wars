@@ -13,17 +13,14 @@
 
 import { researchCost, unitCost } from "../state/doctrine";
 import {
-  BUILD_HOTKEYS,
   BUILDING_STATS,
   CAMERA,
   CITADEL,
   CITADEL_POWERS,
   INPUT,
   MOVE_LINE,
-  PRODUCES,
   RENDER,
   TILE_SIZE,
-  UNIT_HOTKEY_SLOTS,
 } from "../config/constants";
 import { clamp } from "../core/math";
 import type { AnyEntity, Building, BuildingType, Formation, FormationId, FormationSlot, GameState, PlayerId, ResearchKey, Unit, UnitType, Vec2 } from "../core/types";
@@ -44,6 +41,7 @@ export interface SelectionDetail {
   total: number;
   inFormation: boolean;
   traitLine: string;
+  units: Unit[]; // 30 §C: every selected own unit (the multi-selection grid)
 }
 import { fogAt } from "../engine/fog";
 import { navPassable } from "../engine/pathfinding";
@@ -96,10 +94,11 @@ export class InputController {
   private prevKeys = new Set<string>();
   private groups: Record<number, Set<number>> = {};
   private lastGroupTap: Record<number, number> = {};
-  private formationPending = false; // 19 §K: F opened the formation menu; next 1/2/3/4 picks a preset
   private customFormations: CustomFormation[] = loadCustomFormations(); // 19 §L: saved pre-match
   private formationPreviewId: FormationId | null = null; // 20 §I hovered card → in-world ghost
   private guardPending = false;
+  private attackPending = false; // 30 §B: Attack-move button — next left-click attack-moves the selection
+  private idleCursor = -1; // 30 §A: last idle worker / building cycled to (by entity id)
   private rallyPending = false; // 21 §G.3: Rally button — next left-click sets the selected building's rally
   private rightDownScreen: Vec2 | null = null;
   private rightDownTime = 0;
@@ -148,7 +147,7 @@ export class InputController {
       this.pendingPowerKey = null;
       this.guardPending = false;
       this.rallyPending = false;
-      this.formationPending = false;
+      this.attackPending = false;
     }
     if (this.input.keys.has("escape")) this.wallDragStart = null;
     this.updateCamera(dt);
@@ -166,49 +165,14 @@ export class InputController {
     return this.input.keys.has(key) && !this.prevKeys.has(key);
   }
 
+  // 30 §B: every order, build and power key is a command-card grid slot (QWERT/ASDFG/ZXCVB), handled by
+  // the HUD's card so the key shown on a button is the key that fires it. The controller keeps only
+  // the debug toggles, control groups and the camera here.
   private handleHotkeys(): void {
     if (this.pressed("f3")) this.debugVisible = !this.debugVisible;
     if (this.pressed("f5")) this.aiDebugVisible = !this.aiDebugVisible; // 22 §O AI overlay
     if (this.pressed("f6")) this.dumpAILog(); // 22 §O: dump the AI_LOG ring buffers to console
-    if (this.pressed("z")) this.activateAbility(); // 27 §F commander ability hotkey
-    // Formation keys (19 §K) get first crack: when units are selected, F opens the menu and 1/2/3/4
-    // pick a preset — so those digits must NOT also fire control-group select this frame.
-    const formConsumedDigit = this.handleFormationKeys();
-    if (!formConsumedDigit) this.handleGroupKeys();
-    this.handleActionKeys();
-  }
-
-  /** 19 §K: F toggles the formation menu for the current unit selection; 1/2/3/4 = Spear/Line/Box/
-   *  Column → emits FORM_UP. Returns true if it consumed a digit (so group-select skips it). */
-  private handleFormationKeys(): boolean {
-    const units = this.selectedUnits();
-    if (units.length === 0) { this.formationPending = false; return false; }
-    // Shift+F (§K) = Break Formation: dissolve every formation the selection belongs to (members go loose).
-    if (this.input.anyKey("shift") && this.pressed("f")) {
-      const ids = new Set(units.map((u) => u.formationId).filter((x): x is number => x != null));
-      for (const fid of ids) this.emit("BREAK_FORMATION", { formationInstanceId: fid });
-      this.formationPending = false;
-      return false;
-    }
-    // V (§K) = Fall Back: order every formation in the selection into a fighting withdrawal. V is the
-    // Missile-Tower build key when nothing is selected — with units selected it means Fall Back.
-    if (this.pressed("v")) {
-      const ids = new Set(units.map((u) => u.formationId).filter((x): x is number => x != null));
-      for (const fid of ids) this.emit("FALL_BACK", { formationInstanceId: fid });
-      return false;
-    }
-    // F (plain): open the formation menu. F is the War-Factory build key when nothing is selected —
-    // with units selected it means "formation menu" instead (context split, like G/Guard).
-    if (this.pressed("f")) { this.formationPending = !this.formationPending; return false; }
-    if (!this.formationPending) return false;
-    const opts = this.getFormationOptions();
-    for (let i = 0; i < opts.length && i < 9; i++) {
-      if (this.pressed(String(i + 1))) {
-        this.formSelection(opts[i].id);
-        return true;
-      }
-    }
-    return false;
+    if (!this.input.anyKey("alt")) this.handleGroupKeys();
   }
 
   /** Form the current selection into `id` (19 §G): only combat units qualify; if requirements are met,
@@ -216,7 +180,6 @@ export class InputController {
    *  custom formation (19 §L) carries its placed-token template in the payload. */
   formSelection(id: FormationId): void {
     const formable = this.selectedUnits().filter((u) => roleOf(u) !== null);
-    this.formationPending = false;
     if (formable.length === 0) return;
     const counts = roleCounts(formable);
     const custom = this.customFormations.find((c) => c.id === id);
@@ -322,7 +285,7 @@ export class InputController {
 
   /** 20 §J: Esc opens pause only when no transient mode is pending (placement/power/guard/menu). */
   hasPendingMode(): boolean {
-    return this.placementType !== null || this.pendingPowerKey !== null || this.pendingAbility || this.guardPending || this.formationPending || this.rallyPending || this.wallDragStart !== null;
+    return this.placementType !== null || this.pendingPowerKey !== null || this.pendingAbility || this.guardPending || this.attackPending || this.rallyPending || this.wallDragStart !== null;
   }
 
   /** 21 §G.3 Rally command button: arm rally mode for the selected production building. */
@@ -355,7 +318,7 @@ export class InputController {
       const f = this.state.formations.find((ff) => ff.id === fid);
       if (f) traitLine = traitText(f.formationDefId);
     }
-    return { types, single: units.length === 1 ? units[0] : null, rep, total: units.length, inFormation: fid != null, traitLine };
+    return { types, single: units.length === 1 ? units[0] : null, rep, total: units.length, inFormation: fid != null, traitLine, units };
   }
 
   /** 20 §I army bar click: select group n (double-click also centers the camera). */
@@ -388,34 +351,6 @@ export class InputController {
 
   /** Contextual hotkeys (§1): unit production (Q/W/E/R at a selected production building) > Guard
    *  (G with units selected) > build-panel placement (mnemonic letters, always available). */
-  private handleActionKeys(): void {
-    const sel = this.getSelectedBuilding();
-    const prod = sel ? PRODUCES[sel.buildingType] : undefined;
-    if (sel && prod) {
-      for (let i = 0; i < UNIT_HOTKEY_SLOTS.length && i < prod.length; i++) {
-        if (this.pressed(UNIT_HOTKEY_SLOTS[i].toLowerCase())) {
-          this.buildFromSelected(prod[i]);
-          return;
-        }
-      }
-    }
-    if (this.pressed("g") && this.selectedUnits().length > 0) {
-      this.enterGuard(); // G guards a selection; otherwise it falls through to the Gate build key
-      return;
-    }
-    const unitsSelected = this.selectedUnits().length > 0;
-    for (const type of Object.keys(BUILD_HOTKEYS) as BuildingType[]) {
-      const key = BUILD_HOTKEYS[type];
-      // With units selected, F = formation menu and V = Fall Back (19 §K), not build keys.
-      if ((key === "F" || key === "V") && unitsSelected) continue;
-      if (key && this.pressed(key.toLowerCase())) {
-        this.pendingPowerKey = null;
-        this.enterPlacement(type);
-        return;
-      }
-    }
-  }
-
   private centerOnGroup(ids: number[]): void {
     let sx = 0;
     let sy = 0;
@@ -435,10 +370,11 @@ export class InputController {
     const speed = settings.cameraScrollSpeed * TILE_SIZE; // tiles/s → screen px/s (§H)
     let dx = 0;
     let dy = 0;
-    if (k.anyKey("a", "arrowleft")) dx -= 1;
-    if (k.anyKey("d", "arrowright")) dx += 1;
-    if (k.anyKey("w", "arrowup")) dy -= 1;
-    if (k.anyKey("s", "arrowdown")) dy += 1;
+    // 30 §B: arrows only — W/A/S/D are command-grid slots now.
+    if (k.anyKey("arrowleft")) dx -= 1;
+    if (k.anyKey("arrowright")) dx += 1;
+    if (k.anyKey("arrowup")) dy -= 1;
+    if (k.anyKey("arrowdown")) dy += 1;
     // Edge scroll (§H, opt-in): pan toward a viewport edge the cursor is hovering near. Suppressed
     // during a middle-drag pan and while boxing a selection so it can't fight those gestures.
     if (settings.edgeScroll && !k.middleDown && !this.isBox) {
@@ -497,6 +433,23 @@ export class InputController {
           this.guardPending = false;
         } else if (e.type === "down" && e.button === 2) {
           this.guardPending = false;
+        }
+        continue;
+      }
+
+      // 30 §B Attack-move button: the next left-click attack-moves the selection there (as Ctrl+right-click).
+      if (this.attackPending) {
+        if (e.type === "down" && e.button === 0) {
+          const units = this.selectedUnits();
+          const tile = this.camera.screenToTile(e.x, e.y);
+          if (units.length) {
+            this.emit("ATTACK_MOVE", { unitIds: units.map((u) => u.id), x: tile.x, y: tile.y, spread: true });
+            this.pushMarker(tile.x, tile.y);
+            this.pushCommandMarker(units, tile, "attackMove");
+          }
+          this.attackPending = false;
+        } else if (e.type === "down" && e.button === 2) {
+          this.attackPending = false;
         }
         continue;
       }
@@ -694,6 +647,7 @@ export class InputController {
 
   /** What a click would do at the cursor right now → drives the action cursor + target glow (§10). */
   private computeHover(): HoverInfo {
+    if (this.attackPending) return { action: "attack" };
     if (this.placementType || this.pendingPowerKey || this.pendingAbility || this.guardPending) return { action: "none" };
     const tile = this.camera.screenToTile(this.input.mouse.x, this.input.mouse.y);
     const units = this.selectedUnits();
@@ -746,8 +700,69 @@ export class InputController {
     this.placementType = null;
     this.pendingPowerKey = null;
     this.guardPending = false;
+    this.attackPending = false;
     this.rallyPending = false;
     this.wallDragStart = null;
+  }
+
+  // ── 30 §A/§B: command-card + HUD selection helpers ───────────────────────────
+  /** Attack-move button: arm targeting for the current unit selection. */
+  enterAttackMove(): void {
+    if (this.selectedUnits().length === 0) return;
+    this.clearPendingModes();
+    this.attackPending = true;
+  }
+
+  /** Replace the selection with these entities (own + alive only). */
+  selectIds(ids: number[]): void {
+    const want = new Set(ids);
+    const next = new Set<number>();
+    for (const e of this.state.entities) if (want.has(e.id) && e.owner === this.local && e.hp > 0) next.add(e.id);
+    this.selectedIds = next;
+  }
+
+  centerOn(x: number, y: number): void {
+    this.camera.centerOnTile(x, y);
+  }
+
+  /** Production tab: select the next own finished building of `type` after the current one. */
+  selectNextOfType(type: BuildingType, center: boolean): void {
+    const list = this.state.entities
+      .filter((e): e is Building => e.kind === "building" && e.owner === this.local && e.buildingType === type && e.buildProgress >= 1)
+      .sort((a, b) => a.id - b.id);
+    if (list.length === 0) return;
+    const cur = this.getSelectedBuilding();
+    const i = cur && cur.buildingType === type ? list.findIndex((b) => b.id === cur.id) : -1;
+    const b = list[(i + 1) % list.length];
+    this.selectedIds = new Set([b.id]);
+    if (center) this.camera.centerOnTile(b.x + b.width / 2, b.y + b.height / 2);
+  }
+
+  private idleWorkers(): Unit[] {
+    return this.state.entities
+      .filter((e): e is Unit => e.kind === "unit" && e.owner === this.local && e.unitType === "worker" && e.state === "idle" && e.hp > 0)
+      .sort((a, b) => a.id - b.id);
+  }
+
+  idleWorkerCount(): number {
+    return this.idleWorkers().length;
+  }
+
+  /** `.` / rim button: select the next idle worker and centre on it. */
+  selectIdleWorker(): void {
+    const list = this.idleWorkers();
+    if (list.length === 0) return;
+    const u = list.find((w) => w.id > this.idleCursor) ?? list[0];
+    this.idleCursor = u.id;
+    this.selectedIds = new Set([u.id]);
+    this.camera.centerOnTile(u.x, u.y);
+  }
+
+  /** `` ` `` / rim button: select every own combat unit on the map. */
+  selectArmy(): void {
+    const ids = new Set<number>();
+    for (const e of this.state.entities) if (e.kind === "unit" && e.owner === this.local && e.unitType !== "worker" && e.hp > 0) ids.add(e.id);
+    if (ids.size) this.selectedIds = ids;
   }
 
   /** Cancel a queue slot on the selected building (research for a Lab, else production); §7. */

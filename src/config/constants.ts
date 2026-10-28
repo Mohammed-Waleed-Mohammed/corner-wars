@@ -247,13 +247,12 @@ export const STRUCTURE_CAP = { wallsPerPlayer: 60 } as const;
 // What each production building can build (06-buildings.md, 15-logic §4). ORDER = the fixed
 // Q/W/E/R hotkey slots (16 §1): Barracks Q/W/E = Rifleman/Grenadier/Rocket; War Factory
 // Q/W/E/R = Scout/Tank/Heavy/Artillery; CY Q = Worker.
+// Training order = command-card slots Q W E R T (30 §B).
 export const PRODUCES: Partial<Record<BuildingType, UnitType[]>> = {
   constructionYard: ["worker"],
   warFactory: ["scoutBuggy", "tank", "heavyTank", "artillery", "worker"],
   barracks: ["rifleman", "grenadier", "rocket", "medic"], // medic on slot R (19 §D)
 };
-// Positional hotkeys for the Nth unit-production slot (16 §1). worker (5th WF slot) has none.
-export const UNIT_HOTKEY_SLOTS = ["Q", "W", "E", "R"] as const;
 
 // What each building can construct (structures, placed on the map). The Construction
 // Yard's command card OFFERS all structures (06-buildings.md tech tree); the actual
@@ -266,18 +265,7 @@ export const CONSTRUCTS: Partial<Record<BuildingType, BuildingType[]>> = {
   ],
 };
 
-// Build panel = the full buildable list, shown left-edge always (16 §4). Order = panel order.
-export const BUILD_PANEL: BuildingType[] = [
-  "powerPlant", "refinery", "barracks", "warFactory", "lab",
-  "turret", "pillbox", "antiArmorCannon", "missileTower", "wall", "gate", "constructionYard",
-];
 
-// Fixed mnemonic build hotkeys (16 §1). P/R/B/F/L/T/G/Y per spec; the rest are free letters.
-export const BUILD_HOTKEYS: Partial<Record<BuildingType, string>> = {
-  powerPlant: "P", refinery: "R", barracks: "B", warFactory: "F", lab: "L",
-  turret: "T", pillbox: "X", antiArmorCannon: "C", missileTower: "V",
-  wall: "Y", gate: "G", constructionYard: "N",
-};
 
 // Build-once limits per player (16 §5). Absent = unlimited (walls/gates use STRUCTURE_CAP).
 export const BUILD_MAX_COUNT: Partial<Record<BuildingType, number>> = {
@@ -847,12 +835,14 @@ export const SETTINGS_DEFAULTS = {
   masterVolume: 0.45, // 0..1 — matches AudioManager's prior fixed volume
   muted: false,
   cameraScrollSpeed: 28, // tiles/s (≈ the prior 900 px/s at TILE_SIZE 32)
-  edgeScroll: false, // off by default; some players find it disruptive
+  edgeScroll: true, // 30 §B: on by default — keyboard panning is arrows only now (WASD are grid keys)
+  hudScale: 1, // 30 §A: user HUD size multiplier on top of the automatic resolution scale
 } as const;
 export const SETTINGS_LIMITS = {
   usernameMax: 20,
   volumeMin: 0, volumeMax: 1,
   scrollMin: 8, scrollMax: 60, // tiles/s slider range
+  hudScaleMin: 0.8, hudScaleMax: 1.25,
 } as const;
 
 // ── Multiplayer / deterministic lockstep (17-multiplayer-implementation.md §7) ──

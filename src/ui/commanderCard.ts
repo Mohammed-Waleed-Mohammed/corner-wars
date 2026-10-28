@@ -1,6 +1,6 @@
 // 27 §F — the in-game commander card: portrait, name, faction, and the ability button with a radial
-// cooldown and the Z hotkey. Lives in the HUD's left stack (under Resources). Display-only: clicking
-// calls the handler (controller.activateAbility), which emits USE_ABILITY through the session.
+// cooldown and the Z hotkey. Lives in the top bar's centre dock (30 §A). Display-only: clicking calls
+// the handler (controller.activateAbility), which emits USE_ABILITY through the session.
 
 import "./commanderCard.css";
 import { ABILITIES, COMMANDERS } from "../config/commanders";
@@ -46,11 +46,8 @@ export class CommanderCard {
     this.cd = this.root.querySelector("[data-c]") as HTMLElement;
     this.label = this.root.querySelector("[data-l]") as HTMLElement;
     this.btn.addEventListener("click", onCast);
-    // Under the Resources console if the HUD's left stack exists; else float.
-    const stack = parent.querySelector("#hud-left-stack");
-    const status = parent.querySelector("#console-status");
-    if (stack && status) status.after(this.root);
-    else parent.append(this.root);
+    // 30 §A: the commander dock at the centre of the HUD's top bar (else float, e.g. outside a match HUD).
+    (parent.querySelector("[data-cmdr]") ?? parent).append(this.root);
   }
 
   update(state: GameState, targeting: boolean): void {

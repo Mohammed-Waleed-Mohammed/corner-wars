@@ -53,6 +53,11 @@ export function openSettings(onClose?: () => void): void {
         <input type="checkbox" data-edge /> <span>Edge scrolling (pan when the cursor nears a screen edge)</span>
       </label>
 
+      <label class="settings-field">
+        <span class="settings-label">HUD size <b data-hudval></b></span>
+        <input class="settings-range" type="range" data-hud min="${SETTINGS_LIMITS.hudScaleMin}" max="${SETTINGS_LIMITS.hudScaleMax}" step="0.05" />
+      </label>
+
       <div class="settings-field">
         <span class="settings-label">Custom formations (19 §L)</span>
         <button class="lobby-btn" data-formations>Open formation editor</button>
@@ -72,6 +77,8 @@ export function openSettings(onClose?: () => void): void {
   const scrollEl = q<HTMLInputElement>("[data-scroll]");
   const scrollVal = q<HTMLElement>("[data-scrollval]");
   const edgeEl = q<HTMLInputElement>("[data-edge]");
+  const hudEl = q<HTMLInputElement>("[data-hud]");
+  const hudVal = q<HTMLElement>("[data-hudval]");
 
   // Reflect the current settings into the controls, then wire live writes.
   function paint(cur: UserSettings): void {
@@ -82,6 +89,8 @@ export function openSettings(onClose?: () => void): void {
     scrollEl.value = String(cur.cameraScrollSpeed);
     scrollVal.textContent = `${cur.cameraScrollSpeed} tiles/s`;
     edgeEl.checked = cur.edgeScroll;
+    hudEl.value = String(cur.hudScale);
+    hudVal.textContent = `${Math.round(cur.hudScale * 100)}%`;
     for (const sw of overlay.querySelectorAll<HTMLElement>("[data-color]")) {
       sw.classList.toggle("selected", sw.dataset.color === cur.preferredColor);
     }
@@ -93,6 +102,7 @@ export function openSettings(onClose?: () => void): void {
   mutedEl.onchange = () => updateSettings({ muted: mutedEl.checked });
   scrollEl.oninput = () => { const v = Number(scrollEl.value); scrollVal.textContent = `${v} tiles/s`; updateSettings({ cameraScrollSpeed: v }); };
   edgeEl.onchange = () => updateSettings({ edgeScroll: edgeEl.checked });
+  hudEl.oninput = () => { const v = Number(hudEl.value); hudVal.textContent = `${Math.round(v * 100)}%`; updateSettings({ hudScale: v }); };
   for (const sw of overlay.querySelectorAll<HTMLElement>("[data-color]")) {
     sw.onclick = () => {
       updateSettings({ preferredColor: sw.dataset.color as UserSettings["preferredColor"] });

@@ -25,6 +25,14 @@ export interface Rect {
 // The controller reads it for click/drag hit-testing; before the first report we fall back to the
 // legacy bottom-right corner square so nothing breaks headless or mid-boot.
 let screenRect: Rect | null = null;
+
+// 30 §D: HUD alerts ping the minimap (tile coords). Render-only state.
+const PING_MS = 2400;
+let pings: { x: number; y: number; color: string; at: number }[] = [];
+export function pingMinimap(x: number, y: number, color: string): void {
+  pings.push({ x, y, color, at: performance.now() });
+}
+
 export function setMinimapScreenRect(r: Rect | null): void {
   screenRect = r;
 }
@@ -158,6 +166,23 @@ export function drawMinimap(ctx: CanvasRenderingContext2D, state: GameState, cam
     ctx.beginPath();
     ctx.arc(px(f.anchor.x), py(f.anchor.y), pulse, 0, Math.PI * 2);
     ctx.stroke();
+  }
+
+  // 30 §D alert pings: two expanding rings over ~2.4 s (display-only; real time, not sim time).
+  const now = performance.now();
+  pings = pings.filter((p) => now - p.at < PING_MS);
+  for (const p of pings) {
+    const k = (now - p.at) / PING_MS;
+    ctx.strokeStyle = p.color;
+    ctx.lineWidth = 1.5;
+    for (const off of [0, 0.35]) {
+      const kk = (k + off) % 1;
+      ctx.globalAlpha = 1 - kk;
+      ctx.beginPath();
+      ctx.arc(px(p.x), py(p.y), 3 + kk * 14, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
   }
 
   // Camera viewport rectangle (§J: TEXT at 80% alpha).

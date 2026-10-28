@@ -49,6 +49,10 @@ export class MissionHud {
     this.dialogue.skip();
   }
 
+  isTalking(): boolean {
+    return this.dialogue.talking;
+  }
+
   destroy(): void {
     for (const t of this.timers) window.clearTimeout(t);
     this.timers.clear();

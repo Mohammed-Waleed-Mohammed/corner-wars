@@ -154,29 +154,18 @@ function bootMatch(opts: MatchOpts): void {
   const controller = new InputController(state, camera, input, session);
   setFactionSource(state); // 27 §H: before the HUD renders its build icons, so they show the faction's buildings
   const hud = new Hud(app, opts.localPlayerId);
-  input.forward(hud.minimapCanvas); // 21 §J: the TACTICAL minimap sits over the canvas — click/drag to pan
-  hud.setBuildHandler((unitType) => controller.buildFromSelected(unitType));
-  hud.setPlaceHandler((buildingType) => controller.enterPlacement(buildingType));
-  hud.setResearchHandler((key) => controller.researchFromSelected(key));
-  hud.setFormationHandler((id) => controller.formSelection(id));
-  hud.setFormationPreviewHandler((id) => controller.setFormationPreview(id)); // 20 §I hover ghost
-  hud.setGroupSelectHandler((n, center) => controller.selectGroup(n, center)); // 20 §I army bar
-  hud.setPowerHandler((key) => controller.activatePower(key));
-  hud.setTypeSelectHandler((type, mapWide) => controller.selectByType(type, !mapWide));
-  hud.setCommandHandler((cmd) => {
-    if (cmd === "stop") controller.stopSelected();
-    else if (cmd === "guard") controller.enterGuard();
-    else if (cmd === "fallback") controller.fallBackSelected(); // 21 §G.3 command buttons
-    else if (cmd === "breakform") controller.breakFormationSelected();
-    else if (cmd === "rally") controller.enterRallyMode();
-  });
-  hud.setCancelHandler((index) => controller.cancelQueueItem(index));
-  hud.setRestartHandler(() => location.reload());
-  // 27 §F commander card (portrait + ability, Z) and 28 mission overlays (objectives + dialogue).
+  input.forward(hud.minimapCanvas); // 30 §A: the minimap sits over the canvas — click/drag to pan
+  // 30: every HUD order (command card, tabs, selection grid, rim buttons) goes through the controller.
+  hud.bind(controller, { onMenu: () => setPaused(true) });
+  // 27 §F commander card (top-bar dock) and 28 mission overlays (objectives + dialogue).
   const commanderCard = new CommanderCard(app, opts.localPlayerId, () => controller.activateAbility());
   const missionHud = opts.mission ? new MissionHud(app, opts.mission.def) : null;
+  // Space: advance an active dialogue line first (28), else jump to the latest alert (30 §D).
   const skipKey = (e: KeyboardEvent): void => {
-    if (missionHud && e.code === "Space" && !isTyping(e)) { e.preventDefault(); missionHud.skipLine(); }
+    if (e.code !== "Space" || isTyping(e) || e.repeat) return;
+    e.preventDefault();
+    if (missionHud?.isTalking()) missionHud.skipLine();
+    else hud.jumpToAlert();
   };
   window.addEventListener("keydown", skipKey);
 
@@ -222,7 +211,7 @@ function bootMatch(opts: MatchOpts): void {
     audio.resume();
     updateSettings({ muted: !getSettings().muted });
   });
-  app.appendChild(muteBtn);
+  hud.muteSlot.append(muteBtn); // 30 §A: top bar, right end
   const muteKey = (e: KeyboardEvent): void => {
     if (e.key.toLowerCase() === "m" && !e.repeat && !isTyping(e)) muteBtn.click();
   };

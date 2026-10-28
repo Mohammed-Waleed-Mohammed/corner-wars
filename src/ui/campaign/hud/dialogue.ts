@@ -69,6 +69,11 @@ export class DialogueBar {
     if (this.current) this.next();
   }
 
+  /** A line is on screen (Space advances it rather than jumping to an alert — 30 §B). */
+  get talking(): boolean {
+    return this.current !== null;
+  }
+
   update(simTime: number): void {
     const dt = this.lastTime === null ? 0 : Math.max(0, Math.min(0.25, simTime - this.lastTime));
     this.lastTime = simTime;

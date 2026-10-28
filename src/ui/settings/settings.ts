@@ -15,6 +15,7 @@ export interface UserSettings {
   muted: boolean;
   cameraScrollSpeed: number; // tiles/s
   edgeScroll: boolean;
+  hudScale: number; // 30 §A: 0.8..1.25
   preferredCommander: CommanderId | "random"; // 27 §D: default commander for skirmish/MP seats
 }
 
@@ -32,6 +33,7 @@ function sanitize(raw: unknown): UserSettings {
     muted: typeof o.muted === "boolean" ? o.muted : d.muted,
     cameraScrollSpeed: typeof o.cameraScrollSpeed === "number" && isFinite(o.cameraScrollSpeed) ? clamp(o.cameraScrollSpeed, SETTINGS_LIMITS.scrollMin, SETTINGS_LIMITS.scrollMax) : d.cameraScrollSpeed,
     edgeScroll: typeof o.edgeScroll === "boolean" ? o.edgeScroll : d.edgeScroll,
+    hudScale: typeof o.hudScale === "number" && isFinite(o.hudScale) ? clamp(o.hudScale, SETTINGS_LIMITS.hudScaleMin, SETTINGS_LIMITS.hudScaleMax) : d.hudScale,
     preferredCommander: isCommanderId(o.preferredCommander) ? o.preferredCommander : "random",
   };
 }

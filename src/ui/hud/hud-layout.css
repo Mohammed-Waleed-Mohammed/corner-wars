@@ -1,0 +1,220 @@
+/* ═══ 30 — the Command HUD: two bands and the grid ════════════════════════════════════════════════
+   Designed at 1920×1080. --hs (set by Hud.applyScale) transform-scales each anchored block from its
+   own corner; full-width bars divide their width by --hs so they still span the screen. Tokens and
+   chrome (.hud-console / .hud-chamfer / .hud-well) come from hud.css (file 21 §B/§C). */
+
+.hud2 { --hs: 1; font-family: var(--hud-display); color: var(--hud-text); }
+.hud2 button { font-family: inherit; color: inherit; }
+@keyframes hud2-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes hud2-rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+@keyframes hud2-blink { 50% { opacity: 0.45; } }
+
+/* ── top bar ─────────────────────────────────────────────────────────────────────────────── */
+.ht {
+  position: fixed; top: 0; left: 0; z-index: 12; box-sizing: border-box;
+  width: calc(100vw / var(--hs)); height: 40px; padding: 0 10px;
+  transform: scale(var(--hs)); transform-origin: 0 0;
+  display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 14px;
+  background: linear-gradient(180deg, rgba(13, 15, 19, 0.97), rgba(17, 20, 25, 0.9));
+  border-bottom: 1px solid var(--hud-border);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+  pointer-events: auto; animation: hud2-fade 250ms ease both;
+}
+.ht::after { /* the gold identity line (21 §C.3), fading out at both ends */
+  content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 1px; opacity: 0.7;
+  background: linear-gradient(90deg, transparent, var(--hud-trim-gold) 18%, var(--hud-trim-gold) 82%, transparent);
+}
+.ht-left, .ht-center, .ht-right { display: flex; align-items: center; min-width: 0; }
+.ht-left { gap: 12px; justify-self: start; }
+.ht-center { gap: 10px; justify-self: center; }
+.ht-right { gap: 18px; justify-self: end; }
+.ht-btn { width: 32px; height: 28px; padding: 0; display: grid; place-items: center; cursor: pointer;
+  background: var(--hud-bg-chip); border: 1px solid var(--hud-border); }
+.ht-btn:hover { border-color: var(--hud-trim-gold); }
+.ht-timer { font-size: 17px; font-weight: 700; letter-spacing: 0.5px; font-variant-numeric: tabular-nums; }
+.ht-dev { font: 11px ui-monospace, monospace; color: var(--hud-text-dim); white-space: nowrap; }
+.ht-glyph { display: inline-flex; line-height: 0; }
+.ht-res { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.ht-res b { font-size: 19px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.ht-gold b { color: var(--hud-text-gold); min-width: 70px; text-align: right; }
+.ht-gold i { font-style: normal; font-size: 13px; font-weight: 700; color: var(--hud-good); min-width: 46px; font-variant-numeric: tabular-nums; }
+.ht-gold i.neg { color: var(--hud-bad); }
+.ht-gold i.flash-good { animation: income-flash 300ms ease; }
+.ht-gold i.flash-bad { color: var(--hud-bad); animation: income-flash 300ms ease; }
+.ht-pbar { position: relative; display: inline-block; width: 48px; height: 6px; overflow: hidden; }
+.ht-pfill { position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: var(--hud-good); }
+.ht-power.warn b { color: var(--hud-warn); }
+.ht-power.warn .ht-pfill { background: var(--hud-warn); }
+.ht-power.bad b { color: var(--hud-bad); }
+.ht-power.bad .ht-pfill { background: var(--hud-bad); }
+.ht-power.bad { animation: hud2-blink 1s steps(2, start) infinite; }
+.ht-units.warn b { color: var(--hud-warn); }
+.ht-units.bad b { color: var(--hud-bad); }
+.ht-mute { display: inline-flex; }
+.ht-mute .mute-btn { position: static; width: 32px; height: 28px; font-size: 15px; }
+
+/* Citadel energy + the five powers (always visible, dim until affordable). */
+.ht-citadel { display: flex; align-items: center; gap: 6px; height: 32px; padding: 0 6px 0 8px;
+  background: rgba(168, 85, 247, 0.06); border: 1px solid rgba(168, 85, 247, 0.25); }
+.ht-citadel.held { border-color: var(--hud-energy); box-shadow: 0 0 12px -4px var(--hud-energy); }
+.ht-energy { min-width: 28px; text-align: right; font-size: 18px; font-weight: 700; color: var(--hud-energy); font-variant-numeric: tabular-nums; }
+.ht-ebar { position: relative; display: inline-block; width: 64px; height: 6px; overflow: hidden; }
+.ht-efill { position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: var(--hud-energy); }
+.ht-powers { display: flex; gap: 3px; margin-left: 4px; }
+.ht-power-btn { position: relative; width: 32px; height: 28px; padding: 0; display: grid; place-items: center; cursor: pointer;
+  background: var(--hud-bg-chip); border: 1px solid var(--hud-border); }
+.ht-power-btn:disabled { opacity: 0.35; cursor: default; }
+.ht-power-btn.affordable { border-color: var(--hud-energy); }
+.ht-power-btn.affordable:hover { filter: brightness(1.25); }
+.ht-power-cost { position: absolute; right: 1px; bottom: 0; font-size: 9px; font-weight: 700; color: var(--hud-energy); }
+
+/* Buff chips hang under the right end of the bar. */
+.ht-buffs { position: fixed; top: calc(var(--hud-top-h, 40px) + 6px); right: 10px; z-index: 12;
+  display: flex; gap: 4px; transform: scale(var(--hs)); transform-origin: 100% 0; pointer-events: auto; }
+.ht-buffs .buff { display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 8px;
+  background: rgba(21, 24, 29, 0.94); border: 1px solid var(--hud-border);
+  font-size: 11px; font-weight: 700; letter-spacing: 0.4px; text-transform: uppercase; }
+.ht-buffs .buff.upgrade { color: #9ec9ff; }
+.ht-buffs .buff.unlock { color: var(--hud-good); }
+.ht-buffs .buff.citadel { color: var(--hud-energy); }
+.ht-buffs .buff.power { color: var(--hud-text-gold); }
+.ht-buffs .buff.warning { color: var(--hud-bad); animation: hud2-blink 1s steps(2, start) infinite; }
+.ht-buffs .buff-cd { font-variant-numeric: tabular-nums; opacity: 0.9; }
+
+/* ── bottom console: map | selection | command ─────────────────────────────────────────────── */
+.hb {
+  position: fixed; left: 0; bottom: 0; z-index: 12; box-sizing: border-box;
+  width: calc(100vw / var(--hs)); height: 212px; padding: 0 8px 6px;
+  transform: scale(var(--hs)); transform-origin: 0 100%;
+  display: flex; align-items: flex-end; gap: 6px; pointer-events: none;
+}
+.hb > section { pointer-events: auto; animation: hud2-rise 250ms ease both; }
+.hb > section:nth-of-type(2) { animation-delay: 50ms; }
+.hb > section:nth-of-type(3) { animation-delay: 100ms; }
+.hb section > .hud-console-inner { box-sizing: border-box; height: calc(100% - 3px); padding: 9px 8px 8px; }
+.hb-map { flex: 0 0 254px; height: 206px; }
+.hb-mid { flex: 1 1 auto; min-width: 340px; height: 152px; }
+.hb-cmd { flex: 0 0 354px; height: 206px; }
+
+/* map block: 188 px minimap + the rim column (idle workers · army · alert) */
+.hb-map .hud-console-inner { display: flex; gap: 6px; }
+.hb-well { position: relative; flex: 0 0 188px; width: 188px; height: 188px; }
+.hb-well .minimap-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: pointer; }
+.hb-rim { flex: 1; display: flex; flex-direction: column; gap: 4px; }
+.rim-btn { position: relative; flex: 1; padding: 0; display: grid; place-items: center; cursor: pointer;
+  background: var(--hud-bg-chip); border: 1px solid var(--hud-border); }
+.rim-btn:hover { border-color: var(--hud-trim-gold); }
+.rim-btn.lit { border-color: var(--hud-warn); }
+.rim-n { position: absolute; right: 3px; bottom: 1px; font-size: 13px; font-weight: 700; color: var(--hud-warn); }
+
+/* middle block: control groups strip + the selection panel */
+.hb-mid .hud-console-inner { display: flex; flex-direction: column; gap: 6px; }
+.hb-groups { flex: 0 0 26px; display: flex; align-items: center; gap: 4px; overflow: hidden; }
+.hg-hint { font-size: 11px; font-weight: 700; letter-spacing: 1px; color: var(--hud-text-dim); white-space: nowrap; }
+.hg-chip { position: relative; height: 26px; padding: 0 9px; display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+  background: var(--hud-bg-chip); border: 1px solid var(--hud-border); }
+.hg-chip:hover { border-color: var(--hud-trim-gold); }
+.hg-chip b { font-size: 16px; }
+.hg-chip span { font-size: 12px; color: var(--hud-text-dim); }
+.hg-chip::after { content: ""; position: absolute; left: 0; bottom: 0; height: 2px; width: calc(var(--int, 1) * 100%); background: var(--intc, var(--hud-border)); }
+.hg-chip.breaking { animation: hud2-blink 0.5s steps(2, start) infinite; }
+.hb-sel { flex: 1 1 auto; min-height: 0; display: flex; gap: 12px; }
+
+.sp-portrait { position: relative; flex: 0 0 96px; width: 96px; height: 96px; }
+.sp-portrait canvas { display: block; width: 96px; height: 96px; }
+.sp-badge { position: absolute; right: 4px; bottom: 2px; font-size: 17px; font-weight: 700; color: var(--hud-text-gold); text-shadow: 0 1px 2px #000; }
+.sp-body { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+.sp-title { font-size: 19px; font-weight: 700; letter-spacing: 0.3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sp-sub { margin-left: 8px; font-size: 12px; font-weight: 500; letter-spacing: 1px; text-transform: uppercase; color: var(--hud-text-dim); }
+.sp-line { font-size: 13px; }
+.sp-line.dim { color: var(--hud-text-dim); }
+.sp-ellipsis { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sp-hp { position: relative; max-width: 380px; height: 16px; overflow: hidden; }
+.sp-hp-fill { position: absolute; left: 0; top: 0; bottom: 0; background: var(--hud-good); }
+.sp-hp-fill.warn { background: var(--hud-warn); }
+.sp-hp-fill.bad { background: var(--hud-bad); }
+.sp-hp-text { position: absolute; inset: 0; display: grid; place-items: center; font-size: 12px; font-weight: 700; text-shadow: 0 1px 2px #000; }
+.sp-stats { display: flex; gap: 16px; font-size: 13px; color: var(--hud-text-dim); }
+.sp-stats b { font-size: 14px; color: var(--hud-text); }
+.sp-help { height: 100%; display: flex; flex-direction: column; justify-content: center; gap: 8px; }
+.sp-help-row { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--hud-text-dim); }
+.sp-kbd { flex: 0 0 auto; min-width: 86px; padding: 2px 6px; text-align: center; font-size: 12px; font-weight: 700;
+  color: var(--hud-text); background: var(--hud-bg-chip); border: 1px solid var(--hud-border); }
+.sp-grid { display: flex; flex-wrap: wrap; align-content: flex-start; gap: 3px; max-height: 69px; overflow: hidden; }
+.sp-cell { position: relative; width: 33px; height: 33px; padding: 0; display: grid; place-items: center; cursor: pointer;
+  background: var(--hud-bg-chip); border: 1px solid var(--hud-border); }
+.sp-cell:hover { border-color: var(--hud-trim-gold); }
+.sp-cell-hp { position: absolute; left: 2px; bottom: 2px; max-width: calc(100% - 4px); height: 3px; background: var(--hud-good); }
+.sp-cell-hp.warn { background: var(--hud-warn); }
+.sp-cell-hp.bad { background: var(--hud-bad); }
+.sp-more { align-self: center; padding: 0 6px; font-size: 13px; font-weight: 700; color: var(--hud-text-dim); }
+.sp-queue { display: flex; flex-wrap: wrap; align-items: center; gap: 3px; }
+.sp-qchip { position: relative; width: 32px; height: 32px; padding: 0; display: grid; place-items: center; cursor: pointer;
+  background: var(--hud-bg-chip); border: 1px solid var(--hud-border); }
+.sp-qchip:hover { border-color: var(--hud-bad); }
+.sp-qcode { font-size: 10px; font-weight: 700; }
+.sp-qprog { position: absolute; left: 0; bottom: 0; width: 0; height: 3px; background: var(--hud-trim-gold); }
+.sp-qcount { margin: 0 6px 0 4px; font-size: 12px; color: var(--hud-text-dim); }
+
+/* command block: production tabs + the 5×3 grid */
+.hb-cmd .hud-console-inner { display: flex; flex-direction: column; gap: 6px; }
+.hb-tabs { flex: 0 0 30px; display: flex; align-items: stretch; gap: 4px; }
+.pt-hint { align-self: center; font-size: 10px; font-weight: 700; letter-spacing: 1.5px; color: var(--hud-text-dim); }
+.pt-tab { position: relative; flex: 0 0 64px; padding: 0; display: grid; place-items: center; cursor: pointer;
+  background: var(--hud-bg-chip); border: 1px solid var(--hud-border); }
+.pt-tab:hover { border-color: var(--hud-trim-gold); }
+.pt-tab.active { border-color: var(--hud-trim-gold); box-shadow: inset 0 0 0 1px var(--hud-trim-gold-dim); }
+.pt-tab.busy { background: rgba(245, 197, 24, 0.08); }
+.pt-n { position: absolute; left: 3px; top: 1px; font-size: 10px; font-weight: 700; color: var(--hud-text-dim); }
+.pt-q { position: absolute; right: 3px; top: 1px; font-size: 11px; font-weight: 700; color: var(--hud-text-gold); }
+.pt-bar { position: absolute; left: 0; bottom: 0; width: 0; height: 3px; background: var(--hud-trim-gold); }
+.hb-grid { display: grid; grid-template-columns: repeat(5, 64px); grid-template-rows: repeat(3, 50px); gap: 4px; }
+.cg-btn { position: relative; padding: 0; overflow: hidden; cursor: pointer;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px;
+  background: var(--hud-bg-chip); border: 1px solid var(--hud-border); }
+.cg-btn.empty { cursor: default; background: rgba(10, 12, 15, 0.45); border-color: rgba(43, 49, 59, 0.45); }
+.cg-btn.empty > * { display: none; }
+.cg-btn:not(.empty):hover { border-color: var(--hud-trim-gold); filter: brightness(1.12); }
+.cg-btn:not(.empty):active { transform: translateY(1px); }
+.cg-btn.flash { animation: cg-flash 250ms ease; }
+@keyframes cg-flash { 0% { box-shadow: inset 0 0 0 30px rgba(245, 197, 24, 0.35); } 100% { box-shadow: none; } }
+.cg-btn.is-disabled { opacity: 0.42; }
+.cg-btn.active { border-color: var(--hud-trim-gold); box-shadow: inset 0 0 0 1px var(--hud-trim-gold); }
+.cg-icon { height: 31px; display: grid; place-items: center; line-height: 0; }
+.cg-label { max-width: 60px; font-size: 10px; font-weight: 700; line-height: 1.05; letter-spacing: 0.2px; text-transform: uppercase;
+  text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cg-key { position: absolute; left: 3px; top: 1px; font-size: 10px; font-weight: 700; color: var(--hud-text-dim); }
+.cg-cost { position: absolute; right: 3px; top: 1px; font-size: 10px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.cg-cost.gold { color: var(--hud-text-gold); }
+.cg-cost.energy { color: var(--hud-energy); }
+.cg-count { position: absolute; right: 4px; bottom: 13px; font-size: 14px; font-weight: 700; color: #fff; text-shadow: 0 1px 2px #000; }
+.cg-wipe { position: absolute; left: 0; right: 0; bottom: 0; height: 0; background: rgba(0, 0, 0, 0.55); pointer-events: none; }
+
+/* tooltip above the card · alert feed above the minimap (both inside .hb, so they scale with it) */
+.hb-tip { position: absolute; right: 8px; bottom: 214px; width: 310px; box-sizing: border-box; padding: 8px 11px 9px;
+  background: rgba(13, 15, 19, 0.97); border: 1px solid var(--hud-border); border-top: 2px solid var(--hud-trim-gold);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.55); pointer-events: none; }
+.hb-tip[hidden] { display: none; }
+.ct-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 5px; }
+.ct-title { font-size: 16px; font-weight: 700; }
+.ct-key { padding: 1px 7px; font-size: 12px; font-weight: 700; color: var(--hud-text-dim); border: 1px solid var(--hud-border); }
+.ct-line { font-size: 13px; line-height: 1.35; color: #c3cad5; }
+.ct-line b { color: var(--hud-text); }
+.hb-tip .gold { color: var(--hud-text-gold); }
+.hb-tip .good { color: var(--hud-good); }
+.hb-tip .bad { color: var(--hud-bad); }
+.hb-tip .energy { color: var(--hud-energy); }
+.hb-tip .dim { color: var(--hud-text-dim); font-weight: 500; }
+.hb-alerts { position: absolute; left: 8px; bottom: 214px; display: flex; flex-direction: column; align-items: flex-start; gap: 4px; pointer-events: auto; }
+.al-item { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px 6px 8px; cursor: pointer;
+  background: rgba(13, 15, 19, 0.95); border: 1px solid var(--hud-border); border-left: 3px solid var(--hud-warn);
+  font-size: 13px; font-weight: 700; letter-spacing: 0.3px; animation: hud2-rise 200ms ease both; }
+.al-item:hover:not(:disabled) { border-color: var(--hud-trim-gold); }
+.al-item.bad { border-left-color: var(--hud-bad); }
+.al-item.good { border-left-color: var(--hud-good); }
+.al-item:disabled { cursor: default; }
+
+/* ── elements other modules place relative to the bands ────────────────────────────────────── */
+.spectate-banner { top: calc(var(--hud-top-h, 40px) + 40px); }
+.net-stall { top: calc(var(--hud-top-h, 40px) + 12px) !important; }
+.test-exit-btn { top: calc(var(--hud-top-h, 40px) + 8px) !important; }

@@ -1,5 +1,7 @@
 # 21 — In-Game HUD Overhaul: The Command Console
 
+> **Superseded in part by file 30.** The layout and controls here (§A, §D, §G, §H, §I, §J and the roster strip) were replaced by the Command HUD in file 30. This file's tokens, chamfer chrome, procedural icons and typography (§B, §C, §E, §F) still apply.
+
 Transforms the in-game GUI from "floating web dashboard" to "military command console." Everything is **code-drawn** — no image assets. One external file: a font (§F). This spec is deliberately exact (pixels, hexes, formulas, class names) — follow it literally; where a value isn't given, derive it from the tokens in §B.
 
 The five moves: (1) consolidate 9 floating islands into **3 anchored consoles**; (2) replace rounded web cards with **chamfered military chrome**; (3) replace letter/emoji icons with **procedural icons** reusing the entity draw functions; (4) one **display font** for headers and numbers; (5) **fixed command-card geometry** that never jumps.

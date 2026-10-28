@@ -49,7 +49,7 @@ Concerns are separated so the renderer never mutates state and placeholder shape
 - `src/render/` — `camera.ts`, `renderer.ts` (read-only orchestrator), `draw/*` (one fn per entity kind + grid/terrain/fog/minimap/projectiles/effects/overlays).
 - `src/input/` — `input.ts` (raw events), `selection.ts` (hit-testing), `controller.ts` (camera, selection, orders, building placement, power targeting, minimap drag).
 - `src/audio/audioManager.ts` — Web-Audio synth sound set, mute, played from `main.ts` by draining `state.soundEvents`.
-- `src/ui/hud.ts` — DOM HUD (gold/power/energy, build menu, power buttons, Command Energy + power buttons, selection info, victory). `src/main.ts` wires it all and runs the loop.
+- `src/ui/hud.ts` + `src/ui/hud/*` — the Command HUD (file 30): a top bar (menu, timer, commander, Citadel powers, gold/power/units) and a bottom console (minimap + rim buttons · control groups + selection panel · production tabs + the 5×3 command card). The card's slots come from `ui/hud/cards.ts`; every HUD order goes through the controller (`ui/hud/controls.ts`). `src/main.ts` wires it all and runs the loop.
 
 **Engine stays DOM-free** (so the headless tests below run): nothing in `engine/`, `state/`, or `core/` imports the DOM or audio. Sound is emitted as `state.soundEvents` (`SoundId` strings) and played by `main.ts`. `audio/`, `render/`, `input/`, `ui/`, `main.ts` are the only DOM-touching code.
 
@@ -70,7 +70,7 @@ Key rules:
 
 ## Conventions worth knowing
 
-- **Control scheme** (resolves a spec contradiction): left-drag selects, right-click moves/attacks/harvests (Ctrl+right = attack-move), panning is WASD/arrows + middle-drag + minimap click, wheel zooms. Documented in `input/controller.ts`.
+- **Control scheme** (file 30 §B): left-drag selects, right-click moves/attacks/harvests (Ctrl+right = attack-move), panning is arrows + edge scroll + middle/right-drag + minimap, wheel zooms. Every order/build/power key is a **positional command-card slot** (QWERT/ASDFG/ZXCVB by `KeyboardEvent.code`; Z = ability and X = Citadel powers in every card) handled by `ui/hud/commandCard.ts` — WASD do NOT pan. 1–9 groups, `.` idle worker, `` ` `` army, Space latest alert.
 - **Data-model extensions:** `description/10-data-model.md` calls its interfaces "a starting point." The code adds engine-only fields (marked in `core/types.ts`): `kind` discriminant, `moveTarget`, worker harvest fields, `attackMove`/`forcedTargetId`, building `width`/`height`/`buildProgress`/`attackTimer`, `Player.frenzyTimer`/`ai`, `GameState.seed`.
 - **Building anchor:** a building's `x,y` is the **top-left tile** of its footprint; the Citadel's `x,y` is its **center** (24,24).
 - Append `?seed=<n>` to the URL to reproduce a specific map layout (logged to console on load).
