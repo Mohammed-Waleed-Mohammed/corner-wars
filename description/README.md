@@ -21,6 +21,12 @@ Each file is the **single source of truth** for its own system and numbers. The 
 | `11-visuals-assets.md` | Placeholder shapes, colors, HUD — **art spec** |
 | `12-balancing.md` | How to tune numbers safely |
 | `13-build-order.md` | The order to build the game in code |
+| `14`–`24` | Later systems: consolidated spec (14), logic, build UX, multiplayer, maps/lobby, formations, UI/UX, HUD, AI Commander, asset manifest, terrain |
+| `25-world-and-story.md` | **The canon**: premise, the Citadel's rules, timeline, regions, factions, characters, style guide |
+| `26-biomes.md` | The six biomes: what each tile is, gameplay modifiers, art and weather, palettes |
+| `27-factions-and-commanders.md` | Four factions, eight commanders: doctrines, abilities, unit names, AI use, HUD |
+| `28-campaign.md` | The 12-mission campaign: flow, difficulty, objective and event types, every mission |
+| `29-art-pipeline.md` | The Art Lab: guide images, exact prompts, automatic fixing and QA thresholds |
 
 ## Conventions used everywhere
 

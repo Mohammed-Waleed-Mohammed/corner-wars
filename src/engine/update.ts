@@ -11,6 +11,8 @@
 
 import type { GameState, Unit } from "../core/types";
 import { updateCitadel } from "./citadel";
+import { updateAbilities } from "./abilities";
+import { updateMission } from "./campaign/director";
 import { updateCombatUnit, updateDefense, updateGates, updateGuard, removeDead } from "./combat";
 import { updateBuilder, updateConstruction, updateRepair, updateRepairer } from "./construction";
 import { DEFENSE_STATS } from "../config/constants";
@@ -73,12 +75,14 @@ export function updateGame(state: GameState, dt: number): void {
   }
 
   updateProjectiles(state, dt); // apply ranged damage on arrival
+  updateAbilities(state, dt); // 27 §C: cooldowns, buffs, field expiry, strikes landing
   removeDead(state); // spawn death explosions (rendered this frame, aged next)
   pruneFormations(state); // 19: drop the dead from formations (holes stay; empty ones disappear)
   unitHash.rebuild(state, true); // units-only index for separation (post-movement)
   updateSeparation(state); // push overlapping units apart
   updateCitadel(state, dt);
   updateWinConditions(state);
+  if (state.mission) updateMission(state, dt); // 28: campaign objectives + scripted events (SP only)
   updateFog(state, dt); // human-only visibility (timed)
 
   // Expire Battle Frenzy buffs.

@@ -7,7 +7,18 @@ import "./style.css";
 import "./ui/hud.css"; // 21: in-game HUD chrome (tokens mirrored from constants.HUD)
 import { AudioManager } from "./audio/audioManager";
 import { COLORS, colorKeyToIndex, resetPlayerPalette, setPlayerPalette } from "./config/constants";
-import type { GameMap, PlayerId } from "./core/types";
+import { COMMANDERS, randomCommander } from "./config/commanders";
+import type { BiomeId, CommanderId, GameMap, PlayerId } from "./core/types";
+import { FACTIONS } from "./content/factions";
+import { MISSION_BY_ID, type CampaignDifficulty, type MissionDef } from "./content/campaign";
+import { setupMission } from "./engine/campaign/director";
+import { applyBiome, applyCommanders } from "./state/gameState";
+import { CommanderCard } from "./ui/commanderCard";
+import { MissionHud } from "./ui/campaign/missionHud";
+import { showDebrief } from "./ui/campaign/debrief";
+import { nextMissionId } from "./ui/campaign/progress";
+import { openCampaignFlow } from "./ui/screens/menuScreens";
+import { codexScreen } from "./ui/codex/codexScreen";
 import { getSettings, onSettingsChange, updateSettings } from "./ui/settings/settings";
 import { GameLoop } from "./engine/loop";
 import { InputController } from "./input/controller";
@@ -62,14 +73,32 @@ interface MatchOpts {
   difficulties?: Partial<Record<PlayerId, "easy" | "medium" | "hard">>; // 22 §N per-AI difficulty
   seed?: number; // 22: shared match seed (MP: host's; SP: random) — drives AI personalities
   onExit?: () => void; // 20 §H Test Play: show an "End Test" button; tear the match down and call this
+  commanders?: (CommanderId | null)[]; // 27 §D: concrete commander per player (randoms already resolved)
+  biome?: BiomeId; // 26 §E: biome override (skirmish/lobby choice); else the map's
+  mission?: { def: MissionDef; difficulty: CampaignDifficulty }; // 28: a campaign mission
+}
+
+/** 27 §D: resolve a seat's choice ("random" → seeded) into a concrete commander. */
+function resolveCommander(choice: CommanderId | "random" | null | undefined, seed: number, seat: number): CommanderId {
+  return choice && choice !== "random" ? choice : randomCommander(seed, seat);
 }
 
 // 18 §H: apply the agreed per-player color palette (render-only, determinism-safe). MP uses the
 // host-resolved colorIndex on each slot (identical on every peer); SP gives the human their chosen
-// color and hands the remaining defaults to the AI in order.
+// color and hands the remaining defaults to the AI in order. 28 §F: campaign seats wear their
+// faction colour (first come, first served; a repeat faction falls back to a free colour).
 function applyPalette(opts: MatchOpts): void {
   const palette: (string | undefined)[] = [];
-  if (opts.slots) {
+  if (opts.mission) {
+    const used = new Set<string>();
+    const seats: [number, CommanderId][] = [[0, opts.mission.def.commander], ...opts.mission.def.seats.map((s) => [s.slot, s.commander] as [number, CommanderId])];
+    for (const [pid, c] of seats) {
+      let col = FACTIONS[COMMANDERS[c].faction].color;
+      if (used.has(col)) col = COLORS.players.find((x) => !used.has(x)) ?? col;
+      used.add(col);
+      palette[pid] = col;
+    }
+  } else if (opts.slots) {
     for (const s of opts.slots) palette[s.playerId] = COLORS.players[s.colorIndex ?? s.playerId];
   } else {
     const mine = colorKeyToIndex(getSettings().preferredColor);
@@ -96,13 +125,21 @@ function bootMatch(opts: MatchOpts): void {
   state.viewPlayer = opts.localPlayerId; // this peer sees the map through its own player's fog/HUD
   // MP: set player roles from the shared roster so only AI seats are AI-driven (host-run) and human
   // seats — including remote ones — are never auto-played. Identical on every peer, determinism-safe.
-  if (opts.slots) {
-    const ids = (kind: string): PlayerId[] => opts.slots!.filter((s) => s.kind === kind).map((s) => s.playerId);
-    configurePlayers(state, ids("human"), ids("ai"));
+  if (opts.mission) {
+    // 28: the director seats players, commanders, biome, gold, extras and the objective runtime.
+    setupMission(state, opts.mission.def, opts.mission.difficulty);
+  } else {
+    if (opts.slots) {
+      const ids = (kind: string): PlayerId[] => opts.slots!.filter((s) => s.kind === kind).map((s) => s.playerId);
+      configurePlayers(state, ids("human"), ids("ai"));
+    }
+    // 26 §E biome + 27 §D commanders (frozen match config → identical on every peer).
+    if (opts.biome) applyBiome(state, opts.biome);
+    applyCommanders(state, opts.commanders ?? [0, 1, 2, 3].map((i) => resolveCommander(i === opts.localPlayerId ? getSettings().preferredCommander : "random", state.seed, i)));
+    // 20 §D match options (sim-side, identical on all peers): starting gold + per-AI difficulty.
+    if (opts.startingGold != null) for (const p of state.players) if (!p.eliminated) p.gold = opts.startingGold;
+    if (opts.difficulties) for (const p of state.players) if (p.ai && opts.difficulties[p.id]) p.ai.difficulty = opts.difficulties[p.id];
   }
-  // 20 §D match options (sim-side, identical on all peers): starting gold + per-AI difficulty.
-  if (opts.startingGold != null) for (const p of state.players) if (!p.eliminated) p.gold = opts.startingGold;
-  if (opts.difficulties) for (const p of state.players) if (p.ai && opts.difficulties[p.id]) p.ai.difficulty = opts.difficulties[p.id];
   console.log(`The Fall of the Citadel — map "${opts.map.name}" (${opts.map.width}×${opts.map.height}, ${opts.map.maxPlayers}p)`);
 
   const camera = new Camera();
@@ -132,6 +169,13 @@ function bootMatch(opts: MatchOpts): void {
   });
   hud.setCancelHandler((index) => controller.cancelQueueItem(index));
   hud.setRestartHandler(() => location.reload());
+  // 27 §F commander card (portrait + ability, Z) and 28 mission overlays (objectives + dialogue).
+  const commanderCard = new CommanderCard(app, opts.localPlayerId, () => controller.activateAbility());
+  const missionHud = opts.mission ? new MissionHud(app, opts.mission.def) : null;
+  const skipKey = (e: KeyboardEvent): void => {
+    if (missionHud && e.code === "Space" && !isTyping(e)) { e.preventDefault(); missionHud.skipLine(); }
+  };
+  window.addEventListener("keydown", skipKey);
 
   // Audio: synth sounds, started on the first user gesture (browser autoplay policy).
   const audio = new AudioManager();
@@ -259,6 +303,8 @@ function bootMatch(opts: MatchOpts): void {
         armyBar: controller.getArmyBar(),
         selection: controller.getSelectionDetail(),
       });
+      commanderCard.update(state, controller.isTargetingAbility()); // 27 §F
+      missionHud?.update(state); // 28: objectives tracker + dialogue (drains state.storyEvents)
       maybeSpectate(); // 22 §W3: local elimination → spectator banner (match continues)
       if (state.winner !== null) onWinner(); // 22 §W1: ONLY a last-player-standing winner ends it
     },
@@ -290,11 +336,14 @@ function bootMatch(opts: MatchOpts): void {
     window.removeEventListener("resize", resize);
     window.removeEventListener("keydown", muteKey);
     window.removeEventListener("keydown", f4Key);
+    window.removeEventListener("keydown", skipKey);
     window.removeEventListener("keydown", escKey);
     window.removeEventListener("pointerdown", resumeAudio);
     window.removeEventListener("keydown", resumeAudio);
     for (const n of [canvas, muteBtn, stallEl, debugEl, ...extraNodes]) n.remove();
     hud.destroy();
+    commanderCard.destroy();
+    missionHud?.destroy();
   };
   const exitToMenu = (): void => {
     teardown();
@@ -373,6 +422,22 @@ function bootMatch(opts: MatchOpts): void {
     if (pauseEl) { pauseEl.remove(); pauseEl = null; }
     loop.stop();
     playUiSound("ui_open");
+    if (opts.mission) {
+      // 28 §A: campaign missions end in a story debrief (records progress) instead of the scoreboard.
+      const m = opts.mission;
+      missionHud?.update(state); // flush the final lines/objective states
+      const result = state.mission?.result ?? (state.winner === opts.localPlayerId ? "victory" : "defeat");
+      const next = result === "victory" ? nextMissionId(m.def.id) : null;
+      const debrief = showDebrief(app, state, m.def, result, m.difficulty, {
+        onContinue: result !== "victory" ? null
+          : next ? () => { teardown(); openCampaign(next); }
+          : () => { teardown(); goToMenu(); screens.navigator.push(codexScreen("epilogue")); }, // after the finale: the epilogue
+        onRetry: () => { teardown(); bootMatch(opts); },
+        onCampaign: () => { teardown(); openCampaign(m.def.id); },
+      });
+      extraNodes.push(debrief);
+      return;
+    }
     const isMP = !!opts.peer;
     const overlay = showPostMatch(app, state, opts.localPlayerId, opts.slots, {
       onRematch: isMP || opts.onExit ? undefined : () => { teardown(); bootMatch(opts); },
@@ -402,7 +467,13 @@ const screens = new ScreenManager(app);
 function lobbyHandlers(): ConstructorParameters<typeof Lobby>[1] {
   return {
     onSinglePlayer: () => bootMatch({ map: SP_DEFAULT_MAP, localPlayerId: 0 }),
-    onStartMatch: (r) => bootMatch({ map: r.map, localPlayerId: r.localPlayerId, slots: r.slots, peer: r.peer, seed: r.config.seed }),
+    // 27 §D: every peer resolves commanders from the shared roster + seed (Random → seeded pick), so
+    // all peers seat identical commanders; 26 §E: the host's biome choice rides in the frozen config.
+    onStartMatch: (r) => bootMatch({
+      map: r.map, localPlayerId: r.localPlayerId, slots: r.slots, peer: r.peer, seed: r.config.seed,
+      commanders: r.slots.map((s) => (s.kind === "human" || s.kind === "ai" ? resolveCommander(s.commander, r.config.seed, s.playerId) : null)),
+      biome: r.config.biome,
+    }),
     onMapEditor: () => { screens.close(); setAppBackground("editor"); new MapEditor(app, goToMenu, undefined, editorServices()); },
     onExitToMenu: goToMenu,
   };
@@ -418,15 +489,34 @@ function editorServices(): import("./ui/editor/editor").EditorServices {
         name: i === 0 ? getSettings().username : i === 1 ? "Computer" : "",
         color: COLORS.players[i], colorIndex: i, corner: "", peerId: null,
       }));
-      bootMatch({ map, localPlayerId: 0, slots, difficulties: { 1: "easy" }, onExit: ret });
+      const seed = Math.floor(Math.random() * 0xffffffff) >>> 0;
+      const commanders = [0, 1, 2, 3].map((i) => (i <= 1 ? resolveCommander(i === 0 ? getSettings().preferredCommander : "random", seed, i) : null));
+      bootMatch({ map, localPlayerId: 0, slots, difficulties: { 1: "easy" }, onExit: ret, seed, commanders });
     },
   };
+}
+
+/** 28 §A: back to the campaign screen (optionally straight into a mission's briefing). */
+function openCampaign(missionId?: string): void {
+  goToMenu();
+  openCampaignFlow(screens.navigator, menuServices, missionId);
 }
 
 const menuServices: MenuServices = {
   version: VERSION,
   playerName: () => getSettings().username,
-  bootSkirmish: (s) => bootMatch({ map: s.map, localPlayerId: 0, slots: s.slots, startingGold: s.startingGold, gameSpeed: s.gameSpeed, difficulties: s.difficulties, seed: Math.floor(Math.random() * 0xffffffff) >>> 0 }),
+  bootSkirmish: (s) => {
+    const seed = Math.floor(Math.random() * 0xffffffff) >>> 0;
+    const commanders = s.commanders.map((c, i) => (s.slots[i]?.kind === "closed" ? null : resolveCommander(c, seed, i)));
+    bootMatch({ map: s.map, localPlayerId: 0, slots: s.slots, startingGold: s.startingGold, gameSpeed: s.gameSpeed, difficulties: s.difficulties, seed, commanders, biome: s.biome ?? undefined });
+  },
+  startMission: (missionId, difficulty) => {
+    const def = MISSION_BY_ID.get(missionId);
+    const map = def ? MAP_BY_ID.get(def.mapId) : undefined;
+    if (!def || !map) return;
+    screens.close();
+    bootMatch({ map: { ...map, biome: def.biome }, localPlayerId: 0, mission: { def, difficulty }, seed: Math.floor(Math.random() * 0xffffffff) >>> 0 });
+  },
   editMap: (map) => { screens.close(); setAppBackground("editor"); new MapEditor(app, goToMenu, map, editorServices()); },
   hostMultiplayer: () => { screens.close(); setAppBackground("lobby"); new Lobby(app, lobbyHandlers()).hostGame(); },
   joinMultiplayer: () => { screens.close(); setAppBackground("lobby"); new Lobby(app, lobbyHandlers()).joinGame(); },

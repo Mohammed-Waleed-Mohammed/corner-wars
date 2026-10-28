@@ -74,5 +74,20 @@ Key rules:
 - **Data-model extensions:** `description/10-data-model.md` calls its interfaces "a starting point." The code adds engine-only fields (marked in `core/types.ts`): `kind` discriminant, `moveTarget`, worker harvest fields, `attackMove`/`forcedTargetId`, building `width`/`height`/`buildProgress`/`attackTimer`, `Player.frenzyTimer`/`ai`, `GameState.seed`.
 - **Building anchor:** a building's `x,y` is the **top-left tile** of its footprint; the Citadel's `x,y` is its **center** (24,24).
 - Append `?seed=<n>` to the URL to reproduce a specific map layout (logged to console on load).
-- Not a git repository.
-- Later enhancements not built (per the spec): fog of war, pathfinding (units move in straight lines), unit upgrades, sound, real sprites, online multiplayer.
+- It is a git repository (main branch). Fog of war, A* pathfinding, upgrades, sound and online multiplayer have all been built since the first version of this file.
+
+## World, factions, biomes, campaign (files 25–29)
+
+- **Story canon** is `description/25-world-and-story.md`; the in-game Codex (`src/content/lore.ts`) must agree with it. Dialogue lives only in `src/content/campaign.ts`.
+- **Content vs. config:**
+  - `src/content/*` is display data: biome palettes and species, faction and commander bios, portrait specs, lore, missions.
+  - `src/config/biomes.ts` and `src/config/commanders.ts` are sim numbers. Mirror files 26 and 27 there.
+- **Commanders (27):**
+  - `Player.commander` (faction derives from it). Doctrines are pure multipliers in `state/doctrine.ts`: every price, train time, HP, range, damage, mining or capture read goes through them.
+  - Abilities are cast with the `USE_ABILITY` command (`engine/abilities.ts`). Effects live on `GameState.fields` and `GameState.strikes` and are read via `state/fields.ts`.
+  - The AI casts through `engine/aiAbilities.ts`.
+  - Hotkey `Z`.
+- **Biomes (26):** `GameState.biome` (from `GameMap.biome`, the official default, or a match override). Terrain helpers in `state/terrain.ts` take the biome into account: speed, cover, sight, and A* admissibility via `fastestFactor`.
+- **Campaign (28):** `engine/campaign/director.ts` (`setupMission` at boot, `updateMission` inside `updateGame`) runs objectives and events, and pushes dialogue to `state.storyEvents`. The UI is in `src/ui/campaign/` and `src/ui/codex/`.
+- **Art (29):** real art drops into `src/assets/terrain/<biome>/` and `src/assets/portraits/`. Make it with the dev-only Art Lab (`/artlab.html`).
+- **Determinism:** commanders, fields and strikes are hashed in `sim/checksum.ts`. A "Random" commander resolves via `randomCommander(seed, seat)` identically on every peer.

@@ -8,7 +8,7 @@
 // NetworkSession in M4/M5. PLAYER_LEFT + PING/PONG land in M6/M7.
 
 import type { Command } from "../sim/commands";
-import type { GameMap, PlayerId } from "../core/types";
+import type { BiomeId, CommanderId, GameMap, PlayerId } from "../core/types";
 
 /** A lobby seat. Every peer sees the same slot list (the host is the single source of truth). */
 export type SlotKind = "human" | "ai" | "open" | "closed";
@@ -22,6 +22,7 @@ export interface SlotInfo {
   corner: string;          // human-readable corner label
   peerId: string | null;   // which peer occupies a human seat (null for ai/open/closed)
   ready?: boolean;         // 20 §G: a human client's ready flag (host START gates on all-ready)
+  commander?: CommanderId | "random"; // 27 §D: seat commander (clamped at the boundary; host resolves Random at START)
 }
 
 /** The frozen match parameters the host broadcasts with START; every peer inits identically. */
@@ -29,13 +30,14 @@ export interface MatchConfig {
   mapId: string;   // 18 §D: official maps are loaded by id (both peers have the same bundled data)
   seed: number;    // vestigial since maps are static (18 §A); kept for the field's type
   terrain: boolean;
+  biome?: BiomeId; // 26 §E: host-chosen biome override (absent = the map's own)
 }
 
 export type NetMessage =
   // ── Lobby (M3) ──
   | { t: "JOIN"; name: string; colorPref?: number }               // client → host, on connect (§H color)
   | { t: "JOIN_REJECTED"; reason: string }                        // host → one client (room full)
-  | { t: "LOBBY_STATE"; slots: SlotInfo[]; seed: number; hostId: string; mapId: string } // host → all
+  | { t: "LOBBY_STATE"; slots: SlotInfo[]; seed: number; hostId: string; mapId: string; biome?: BiomeId | null } // host → all
   | { t: "MAP_DATA"; map: GameMap }                               // host → all: a full custom map (18 §D)
   | { t: "START"; config: MatchConfig; slots: SlotInfo[] }        // host → all: enter the match
   // ── Lockstep (M4) / desync (M5) ──
@@ -46,6 +48,8 @@ export type NetMessage =
   | { t: "CHAT"; playerId: number; name: string; text: string; ts: number } // playerId -1 = system line
   // ── Ready toggle (20 §G) — client → host; host reflects it in LOBBY_STATE + gates START ──
   | { t: "READY"; ready: boolean }
+  // ── 27 §D commander pick — client → host; host clamps it and reflects it in LOBBY_STATE ──
+  | { t: "COMMANDER"; commander: string }
   // ── 10-second connection test (18 §G) — separate from the lightweight PING so it doesn't skew stats ──
   | { t: "NETTEST_PING"; id: number; ts: number }
   | { t: "NETTEST_PONG"; id: number; ts: number }

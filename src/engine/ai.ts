@@ -11,6 +11,7 @@
 
 import { AI, AI_DIFFICULTY, BUILDING_STATS, CITADEL_POWERS } from "../config/constants";
 import { runCommander } from "./commander/commander";
+import { planAbility } from "./aiAbilities";
 import { initIntel, perceive } from "./aiPerception";
 import type { AnyEntity, Building, GameState, Player, PlayerId, Unit } from "../core/types";
 import type { Command } from "../sim/commands";
@@ -110,6 +111,8 @@ function decide(state: GameState, p: Player, submit: Submit): void {
 
   // Spend Command Energy — banked energy is usable even after losing the Citadel (Easy AI skips powers).
   if (tune.usePowers) useCitadelPowers(state, p, army, submit);
+  const cast = planAbility(state, p.id, false); // 27 §E: easy AI fires when ready
+  if (cast) submit({ type: "USE_ABILITY", playerId: p.id, seq: 0, payload: { x: cast.x, y: cast.y } });
 }
 
 function maintainEconomy(state: GameState, p: Player, cy: Building, workerCount: number, workerTarget: number, submit: Submit): void {

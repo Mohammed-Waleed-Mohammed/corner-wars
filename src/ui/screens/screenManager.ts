@@ -122,6 +122,11 @@ export class ScreenManager {
     }, UI.FADE_MS + 20);
   }
 
+  /** The navigation surface (lets main.ts push the campaign flow after a debrief). */
+  get navigator(): ScreenNav {
+    return this.nav;
+  }
+
   get busy(): boolean {
     return this.transitioning;
   }

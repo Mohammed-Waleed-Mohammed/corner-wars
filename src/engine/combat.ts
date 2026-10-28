@@ -25,7 +25,10 @@ import { clamp } from "../core/math";
 import type { AnyEntity, Building, CombatType, Formation, GameState, Owner, Unit, Vec2 } from "../core/types";
 import { createProjectile, spawnEffect } from "../state/entities";
 import { isLowPower, recomputePower } from "../state/gameState";
+import { coverMult, defenseRangeOf, rangeOf, terrainSpeedMult } from "../state/terrain";
 import { weaponDamageMult } from "../state/upgrades";
+import { defenseDamageDoctrineMult, defenseRangeBonus, unitDamageDoctrineMult } from "../state/doctrine";
+import { damageTakenMult, hostileDamageMult } from "../state/fields";
 import { FORMATION_DEFS } from "../sim/formations";
 import { updateUnitMovement } from "./movement";
 import { navigateTo } from "./navigation";
@@ -51,12 +54,15 @@ export function findEntityById(state: GameState, id: number): AnyEntity | undefi
 
 /** Apply damage and the visual feedback (hit-flash + spark). Death is reaped in removeDead.
  *  §F Brace: a Box member takes −15% damage while its formation is stationary (dug in).
+ *  24 §B Cover: a unit standing in a forest takes −30% (foot) / −15% (vehicles) from everything.
  *  `attacker` (20 §J) records the last damaging player for the buildings-razed stat. */
 export function dealDamage(state: GameState, target: AnyEntity, dmg: number, attacker?: Owner): void {
   if (target.kind === "unit" && target.formationId != null) {
     const f = state.formations.find((ff) => ff.id === target.formationId);
     if (f && f.moveTarget == null && FORMATION_DEFS[f.formationDefId]?.trait === "brace") dmg *= FORMATIONS.TRAITS.BRACE_TAKEN;
   }
+  dmg *= coverMult(state, target);
+  dmg *= damageTakenMult(state, target); // 27 §C Aegis Field
   target.hp -= dmg;
   if (attacker !== undefined && attacker !== "neutral") target.lastHitBy = attacker;
   target.hitFlashTimer = EFFECTS.hitFlashTime;
@@ -79,12 +85,15 @@ export function typeMultFor(attacker: CombatType | undefined, target: AnyEntity)
   return counterMult(attacker, tc);
 }
 
-/** Frenzy/Weapons damage mult + Frenzy speed mult (Field Logistics is already baked into u.speed). */
+/** Frenzy/Weapons damage mult + Frenzy speed mult (Field Logistics is already baked into u.speed).
+ *  27: × the commander's doctrine damage, an active Rally buff, and any enemy Prism/Ashstorm field
+ *  the shooter stands in. (Rally/field SPEED effects are applied in terrainSpeedMult.) */
 function combatMults(state: GameState, u: Unit): { dmgMult: number; speedMult: number } {
   const player = state.players[u.owner as Exclude<Owner, "neutral">];
   const frenzied = (player.frenzyTimer ?? 0) > 0;
   return {
-    dmgMult: (frenzied ? FRENZY_DMG_MULT : 1) * weaponDamageMult(player),
+    dmgMult: (frenzied ? FRENZY_DMG_MULT : 1) * weaponDamageMult(player) * unitDamageDoctrineMult(player)
+      * (player.abilityBuff?.damageMult ?? 1) * hostileDamageMult(state, u.owner, u.x, u.y),
     speedMult: frenzied ? FRENZY_SPEED_MULT : 1,
   };
 }
@@ -93,7 +102,8 @@ function combatMults(state: GameState, u: Unit): { dmgMult: number; speedMult: n
 function engageTarget(state: GameState, u: Unit, target: AnyEntity, dt: number, dmgMult: number, speedMult: number): void {
   const d = distToEntity(u, target);
   const minR = u.minRange ?? 0;
-  if (d <= u.range && d >= minR) {
+  const range = rangeOf(state, u); // 24 §B: +1 from high ground
+  if (d <= range && d >= minR) {
     u.state = "attacking";
     u.path = []; // stop pathing while in range
     if (u.attackTimer <= 0) {
@@ -109,7 +119,7 @@ function engageTarget(state: GameState, u: Unit, target: AnyEntity, dt: number, 
   } else {
     // Chase: route toward the target; the range check above stops the unit when close.
     const c = entityCenter(target);
-    navigateTo(state, u, c.x, c.y, dt, u.range, u.speed * speedMult);
+    navigateTo(state, u, c.x, c.y, dt, range, u.speed * speedMult);
     u.state = "moving";
   }
 }
@@ -152,7 +162,8 @@ export function pickFormationTarget(u: Unit, slot: Vec2, reach: number): AnyEnti
 export function formationEngage(state: GameState, u: Unit, f: Formation, slot: Vec2, dt: number): boolean {
   if (u.combatType === undefined || u.owner === "neutral") return false;
   const leash = FORMATIONS.LEASH;
-  const reach = leash + u.range;
+  const range = rangeOf(state, u); // 24 §B: +1 from high ground
+  const reach = leash + range;
   const target = pickFormationTarget(u, slot, reach);
   if (!target) return false;
 
@@ -162,7 +173,7 @@ export function formationEngage(state: GameState, u: Unit, f: Formation, slot: V
 
   const d = distToEntity(u, target);
   const minR = u.minRange ?? 0;
-  if (d <= u.range && d >= minR) {
+  if (d <= range && d >= minR) {
     u.state = "attacking";
     u.path = [];
     if (u.attackTimer <= 0) {
@@ -174,7 +185,7 @@ export function formationEngage(state: GameState, u: Unit, f: Formation, slot: V
   }
   // Not in range: shift toward the target but stay within LEASH of the slot (never chase off).
   const c = entityCenter(target);
-  const step = u.speed * speedMult * dt;
+  const step = u.speed * speedMult * terrainSpeedMult(state, u) * dt; // 24 §B terrain speed
   const ang = Math.atan2(c.y - u.y, c.x - u.x);
   let nx = u.x + Math.cos(ang) * step;
   let ny = u.y + Math.sin(ang) * step;
@@ -296,7 +307,8 @@ export function updateDefense(state: GameState, b: Building, dt: number): void {
   b.attackTimer = Math.max(0, (b.attackTimer ?? 0) - dt);
   if (isLowPower(state, b.owner)) return; // offline under low power
   const center: Vec2 = { x: b.x + b.width / 2, y: b.y + b.height / 2 };
-  const target = nearestEnemy(b.owner, center, stat.range);
+  const baseRange = stat.range + defenseRangeBonus(state.players[b.owner], b.buildingType); // 27 §B Fire Mission
+  const target = nearestEnemy(b.owner, center, defenseRangeOf(state, b, baseRange)); // 24 §B high ground
   if (!target || (b.attackTimer ?? 0) > 0) return;
   fireDefense(state, b, center, target, stat);
   b.attackTimer = stat.cooldown;
@@ -304,7 +316,9 @@ export function updateDefense(state: GameState, b: Building, dt: number): void {
 
 function fireDefense(state: GameState, b: Building, center: Vec2, target: AnyEntity, stat: DefenseStat): void {
   const tc = entityCenter(target);
-  let dmg = stat.damage;
+  // 27: Bastion Doctrine (+defense damage) and enemy Prism/Ashstorm fields over the defense.
+  let dmg = stat.damage * (b.owner === "neutral" ? 1 : defenseDamageDoctrineMult(state.players[b.owner], b.buildingType))
+    * hostileDamageMult(state, b.owner, center.x, center.y);
   if (stat.bonusVsType) {
     const hit =
       stat.bonusVsType === "building"
@@ -380,7 +394,7 @@ function resolveTarget(state: GameState, u: Unit): AnyEntity | null {
     }
   }
   // Long-range units (artillery r9) auto-engage at their range, not just the global aggro radius.
-  const t = nearestEnemy(u.owner, u, Math.max(AGGRO_RADIUS, u.range));
+  const t = nearestEnemy(u.owner, u, Math.max(AGGRO_RADIUS, rangeOf(state, u)));
   u.target = t ? t.id : null;
   return t;
 }

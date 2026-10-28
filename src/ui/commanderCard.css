@@ -1,0 +1,25 @@
+/* 27 §F commander card — sits in the HUD left stack under Resources. Tokens come from hud.css. */
+#console-commander { --cmdr-accent: var(--hud-trim-gold, #f5c518); pointer-events: auto; }
+#console-commander .cmdr-inner { display: flex; gap: 10px; align-items: center; padding: 8px 10px; }
+#console-commander .cmdr-portrait { width: 56px; height: 56px; flex: 0 0 56px; overflow: hidden; box-shadow: inset 0 0 0 1px var(--cmdr-accent); }
+#console-commander .cmdr-portrait canvas { width: 56px; height: 56px; display: block; }
+#console-commander .cmdr-info { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; }
+#console-commander .cmdr-faction { font-size: 10px; letter-spacing: 0.12em; }
+#console-commander .cmdr-name { font: 600 13px/1.1 "Rajdhani", system-ui, sans-serif; color: #e2e8f0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#console-commander .cmdr-ability {
+  --cd: 0;
+  position: relative; display: flex; align-items: center; gap: 6px; justify-content: space-between;
+  padding: 4px 8px; margin-top: 2px; border: 1px solid #2b313b; color: #8b94a3; cursor: pointer;
+  font: 600 11px/1 "Rajdhani", system-ui, sans-serif; letter-spacing: 0.06em; text-transform: uppercase;
+  background:
+    conic-gradient(rgba(10, 12, 15, 0.82) calc(var(--cd) * 360deg), transparent 0) padding-box,
+    rgba(35, 39, 46, 0.95);
+}
+#console-commander .cmdr-ability.ready { color: #fff; border-color: var(--cmdr-accent); box-shadow: 0 0 10px -2px var(--cmdr-accent); }
+#console-commander .cmdr-ability.ready:hover { filter: brightness(1.15); }
+#console-commander .cmdr-ability.targeting { animation: cmdr-pulse 0.8s ease-in-out infinite alternate; }
+#console-commander .cmdr-ability-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#console-commander .cmdr-ability-cd { color: var(--cmdr-accent); font-variant-numeric: tabular-nums; }
+#console-commander .cmdr-key { font-size: 9px; padding: 1px 4px; border: 1px solid #3d434e; color: #8b94a3; }
+#console-commander.buffed .cmdr-portrait { box-shadow: inset 0 0 0 2px var(--cmdr-accent), 0 0 12px -2px var(--cmdr-accent); }
+@keyframes cmdr-pulse { from { box-shadow: 0 0 4px -2px var(--cmdr-accent); } to { box-shadow: 0 0 14px 0 var(--cmdr-accent); } }

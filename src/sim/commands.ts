@@ -17,6 +17,7 @@ import type { Building, GameState, PlayerId, Unit } from "../core/types";
 import { assignBuilders } from "../engine/construction";
 import { planWallLine, wallLineTiles, footprintClear, withinBuildRadius } from "../engine/placement";
 import { firePower } from "../engine/powers";
+import { useAbility } from "../engine/abilities";
 import { cancelProduction, enqueueUnit } from "../engine/production";
 import { buildAvailability } from "../state/buildRules";
 import { createBuilding } from "../state/entities";
@@ -28,6 +29,7 @@ export type CommandType =
   | "MOVE" | "ATTACK_MOVE" | "ATTACK_TARGET" | "GUARD" | "STOP" | "HOLD"
   | "PLACE_BUILDING" | "PLACE_WALL_LINE" | "ASSIGN_BUILD" | "SET_RALLY"
   | "QUEUE_UNIT" | "CANCEL_QUEUE" | "RESEARCH" | "REPAIR" | "HARVEST" | "USE_POWER"
+  | "USE_ABILITY" // 27 §C commander ability (target point or null)
   | "FORM_UP" | "BREAK_FORMATION" | "FALL_BACK" // 19 formations
   | "CONCEDE"; // 20 §J pause menu — surrender (deterministic: all peers execute it)
 
@@ -189,6 +191,10 @@ export function executeCommand(state: GameState, cmd: Command): void {
     case "USE_POWER":
       // firePower re-checks Command Energy + target requirement internally (desync-safe).
       firePower(state, pid, pl.powerId, pl.x != null && pl.y != null ? { x: pl.x, y: pl.y } : null);
+      break;
+    case "USE_ABILITY":
+      // useAbility re-checks readiness + target internally (desync-safe on every peer).
+      useAbility(state, pid, typeof pl.x === "number" && typeof pl.y === "number" ? { x: pl.x, y: pl.y } : null);
       break;
     case "FORM_UP": {
       // 19: form the owned, live combat units in the selection into the chosen formation. Mixed

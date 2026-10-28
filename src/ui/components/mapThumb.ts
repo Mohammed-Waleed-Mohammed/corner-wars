@@ -3,6 +3,8 @@
 // map browser cards + details strip, the lobby, and (later) the editor. Pure canvas, no state.
 
 import { COLORS } from "../../config/constants";
+import { biomeOfMap } from "../../config/biomes";
+import { biomeMapColors } from "../../content/biomes";
 import type { GameMap } from "../../core/types";
 
 export function drawMapThumb(canvas: HTMLCanvasElement, map: GameMap): void {
@@ -10,13 +12,14 @@ export function drawMapThumb(canvas: HTMLCanvasElement, map: GameMap): void {
   if (!ctx) return;
   const W = canvas.width, H = canvas.height;
   const sx = W / map.width, sy = H / map.height;
-  ctx.fillStyle = COLORS.ground;
+  const tileColor = biomeMapColors(biomeOfMap(map)); // 26: shown in the map's biome
+  ctx.fillStyle = tileColor.ground;
   ctx.fillRect(0, 0, W, H);
   for (let y = 0; y < map.height; y++) {
     for (let x = 0; x < map.width; x++) {
       const t = map.terrain[y][x];
       if (t === "ground") continue;
-      ctx.fillStyle = t === "mountain" ? COLORS.mountain : t === "water" ? COLORS.water : t === "rock" ? COLORS.rock : COLORS.void;
+      ctx.fillStyle = tileColor[t]; // 24 §D
       ctx.fillRect(x * sx, y * sy, sx + 0.6, sy + 0.6);
     }
   }

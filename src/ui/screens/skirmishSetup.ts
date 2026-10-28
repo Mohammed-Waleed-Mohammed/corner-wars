@@ -5,10 +5,13 @@
 // and ≥1 AI is enabled. All local — nothing here touches the sim except the frozen config on START.
 
 import { COLORS, colorKeyToIndex, MATCH_OPTIONS } from "../../config/constants";
-import type { GameMap, PlayerId } from "../../core/types";
+import type { BiomeId, GameMap, PlayerId } from "../../core/types";
 import { CORNER_LABELS, type SlotInfo } from "../../net/protocol";
 import { assignColorIndices } from "../lobby/colorAssign";
-import { getSettings } from "../settings/settings";
+import { getSettings, updateSettings } from "../settings/settings";
+import { BIOME_IDS, biomeOfMap } from "../../config/biomes";
+import { BIOMES } from "../../content/biomes";
+import { commanderPicker, type CommanderChoice } from "../components/commanderPicker";
 import { MapBrowser } from "../components/mapBrowser";
 import { button, el, setButtonState } from "../components/ui";
 import type { MenuServices } from "./menuScreens";
@@ -20,6 +23,8 @@ export interface SkirmishStart {
   startingGold: number;
   gameSpeed: number;
   difficulties: Partial<Record<PlayerId, "easy" | "medium" | "hard">>;
+  commanders: CommanderChoice[]; // 27 §D: per seat (Random resolved from the match seed at boot)
+  biome: BiomeId | null; // 26 §E: null = the map's own biome
 }
 
 export function skirmishSetupScreen(services: MenuServices): Screen {
@@ -45,6 +50,8 @@ export function skirmishSetupScreen(services: MenuServices): Screen {
       const colorPref = [colorKeyToIndex(getSettings().preferredColor), 1, 2, 3];
       let startingGold: number = MATCH_OPTIONS.startingGoldDefault;
       let gameSpeed: number = MATCH_OPTIONS.gameSpeedDefault;
+      const commanderChoice: CommanderChoice[] = [getSettings().preferredCommander, "random", "random", "random"];
+      let biome: BiomeId | null = null;
 
       const browser = new MapBrowser(left, {
         onSelect: (m) => { map = m; renderRight(); },
@@ -70,6 +77,7 @@ export function skirmishSetupScreen(services: MenuServices): Screen {
           row.append(sw);
           if (i === 0) {
             row.append(el("span", "setup-pname", `${getSettings().username} (You)`));
+            row.append(commanderPicker({ value: commanderChoice[0], onPick: (v) => { commanderChoice[0] = v; updateSettings({ preferredCommander: v }); renderRight(); } }));
           } else if (i >= maxP) {
             row.append(el("span", "setup-pname dim", "—"));
           } else {
@@ -84,6 +92,7 @@ export function skirmishSetupScreen(services: MenuServices): Screen {
               diff.append(b);
             }
             row.append(diff);
+            row.append(commanderPicker({ value: commanderChoice[i], disabled: !aiEnabled[i], onPick: (v) => { commanderChoice[i] = v; renderRight(); } }));
           }
           players.append(row);
         }
@@ -93,6 +102,9 @@ export function skirmishSetupScreen(services: MenuServices): Screen {
         right.append(el("div", "ui-panel-title", "Options"));
         right.append(segmented("Starting gold", MATCH_OPTIONS.startingGoldChoices as readonly number[], startingGold, (v) => { startingGold = v; renderRight(); }, (v) => `${v / 1000}k`));
         right.append(segmented("Game speed", MATCH_OPTIONS.gameSpeedChoices as readonly number[], gameSpeed, (v) => { gameSpeed = v; renderRight(); }, (v) => `${v}×`));
+        // 26 §E: biome — the map's own by default, or any of the six.
+        const ownBiome = map ? biomeOfMap(map) : null;
+        right.append(segmented<BiomeId | null>("Biome", [null, ...BIOME_IDS], biome, (v) => { biome = v; renderRight(); }, (v) => (v === null ? (ownBiome ? `Map (${BIOMES[ownBiome].name})` : "Map default") : BIOMES[v].name)));
 
         const anyAI = map ? aiEnabled.slice(1, maxP).some(Boolean) : false;
         const reason = !map ? "Select a map first" : !anyAI ? "Enable at least one AI" : "";
@@ -127,7 +139,7 @@ export function skirmishSetupScreen(services: MenuServices): Screen {
         const difficulties: Partial<Record<PlayerId, "easy" | "medium" | "hard">> = {};
         for (let i = 1; i < maxP; i++) if (aiEnabled[i]) difficulties[i as PlayerId] = aiDifficulty[i];
         nav.close();
-        services.bootSkirmish({ map, slots, startingGold, gameSpeed, difficulties });
+        services.bootSkirmish({ map, slots, startingGold, gameSpeed, difficulties, commanders: commanderChoice.slice(), biome });
       }
 
       void browser;

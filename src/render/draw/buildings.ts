@@ -10,10 +10,16 @@ import {
   RENDER,
   UNIT_STATS,
 } from "../../config/constants";
-import type { Building } from "../../core/types";
+import type { Building, Owner, UnitType } from "../../core/types";
 import type { Camera } from "../camera";
 import { drawHpBar, drawSelectionRect } from "./overlays";
 import { roundRectPath } from "./shapes";
+
+// 27 §B: production bars use the owner's doctrine-adjusted train time (the renderer installs this).
+let resolveBuildTime = (_owner: Owner, type: UnitType): number => UNIT_STATS[type].buildTime;
+export function setBuildTimeResolver(fn: (owner: Owner, type: UnitType) => number): void {
+  resolveBuildTime = fn;
+}
 
 export function drawBuilding(
   ctx: CanvasRenderingContext2D,
@@ -98,7 +104,7 @@ export function drawBuilding(
 
   // Production progress + queue badge (finished, producing buildings).
   if (!underConstruction && b.productionQueue.length > 0) {
-    const buildTime = UNIT_STATS[b.productionQueue[0]].buildTime;
+    const buildTime = resolveBuildTime(b.owner, b.productionQueue[0]);
     const frac = buildTime > 0 ? Math.min(1, b.productionTimer / buildTime) : 0;
     const pad = 3;
     ctx.fillStyle = "rgba(0,0,0,0.5)";

@@ -7,18 +7,22 @@ import { slotWorld } from "../sim/formations";
 import type { Camera } from "./camera";
 import type { HoverInfo, PlacementGhost, PowerReticle, RenderView } from "./view";
 import { drawBackground, drawGrid } from "./draw/grid";
-import { drawTerrainLayer, drawFogLayer } from "./draw/worldLayers";
-import { drawBuilding } from "./draw/buildings";
+import { drawTerrainAnim, drawTerrainLayer, drawFogLayer } from "./draw/worldLayers";
+import { drawBuilding, setBuildTimeResolver } from "./draw/buildings";
+import { unitBuildTime } from "../state/doctrine";
 import { drawUnit } from "./draw/units";
 import { drawCitadel, drawGoldSource } from "./draw/world";
 import { drawDragBox, drawMoveMarker } from "./draw/overlays";
 import { drawProjectiles } from "./draw/projectiles";
 import { drawEffects } from "./draw/effects";
+import { drawAbilityFx } from "./draw/abilityFx";
 import { drawBuildArea } from "./draw/fog";
 import { drawAIOverlay } from "./draw/aiDebug";
 import { drawMinimap } from "./draw/minimap";
+import { drawWeather } from "./weather";
 import { fogAt } from "../engine/fog";
 import { isLowPower } from "../state/gameState";
+import { concealedFrom } from "../state/terrain";
 
 export function renderGame(
   ctx: CanvasRenderingContext2D,
@@ -28,9 +32,11 @@ export function renderGame(
   alpha = 1,
   minimap?: { ctx: CanvasRenderingContext2D; w: number; h: number } | null, // 21 §J: TACTICAL well canvas
 ): void {
+  setBuildTimeResolver((o, t) => unitBuildTime(o === "neutral" ? null : state.players[o], t)); // 27 §B
   drawBackground(ctx, camera, state);
   drawTerrainLayer(ctx, state, camera); // cached offscreen terrain, blitted
-  drawGrid(ctx, camera, state);
+  drawTerrainAnim(ctx, state, camera, performance.now()); // 24 §D: water, swaying grass + trees (cosmetic)
+  if (view.placement) drawGrid(ctx, camera, state); // the tile grid only while placing a building
 
   // Ground decals: destination markers + player movement lines under everything else.
   for (const m of view.moveMarkers) drawMoveMarker(ctx, camera, m, state.viewPlayer);
@@ -62,6 +68,7 @@ export function renderGame(
     const ry = (e.prevY ?? e.y) + (e.y - (e.prevY ?? e.y)) * alpha;
     if (!camera.isTileVisible(rx, ry)) continue;
     if (e.owner !== state.viewPlayer && fogAt(state, Math.floor(rx), Math.floor(ry)) !== "visible") continue;
+    if (concealedFrom(state, state.viewPlayer, e)) continue; // 24 §B: hidden in a forest beyond spotting range
     drawUnit(ctx, camera, e, view.selectedIds.has(e.id), rx, ry);
   }
 
@@ -70,6 +77,8 @@ export function renderGame(
   // Projectiles and combat effects above the units (hidden in fog inside their fns).
   drawProjectiles(ctx, state, camera, alpha);
   drawEffects(ctx, state, camera);
+  drawAbilityFx(ctx, state, camera, performance.now()); // 27 fields + telegraphed strikes
+  drawWeather(ctx, state, camera, performance.now(), camera.viewportW, camera.viewportH); // 26 §D: above units, below fog/HUD
 
   // Fog overlay over the world; then the buildable-area wash while placing.
   drawFogLayer(ctx, state, camera);

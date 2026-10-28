@@ -4,6 +4,8 @@
 // The holder gains +2 gold/s, Command Energy, and (via productionSpeedMult) +20% production.
 
 import { CITADEL } from "../config/constants";
+import { BIOME_RULES } from "../config/biomes";
+import { captureSpeedMult, energyDoctrineMult } from "../state/doctrine";
 import type { AnyEntity, GameState, PlayerId } from "../core/types";
 import { entityHash } from "./spatial";
 
@@ -42,7 +44,7 @@ export function updateCitadel(state: GameState, dt: number): void {
         c.capturingPlayer = p; // a new challenger starts fresh
         c.captureTimer = 0;
       }
-      c.captureTimer += dt;
+      c.captureTimer += dt * captureSpeedMult(state.players[p]); // 27 §B Hymn of the Hollow Sun
       if (c.captureTimer >= CITADEL.captureTime) {
         c.controllingPlayer = p;
         c.captureTimer = 0;
@@ -60,7 +62,8 @@ export function updateCitadel(state: GameState, dt: number): void {
   for (const pl of state.players) {
     if (c.controllingPlayer === pl.id) {
       pl.gold += CITADEL.goldPerSecond * dt;
-      pl.commandEnergy = Math.min(CITADEL.maxEnergy, pl.commandEnergy + CITADEL.energyPerSecond * dt);
+      const energyRate = CITADEL.energyPerSecond * energyDoctrineMult(pl) * (BIOME_RULES[state.biome]?.energyMult ?? 1); // 27 §B, 26 §C
+      pl.commandEnergy = Math.min(CITADEL.maxEnergy, pl.commandEnergy + energyRate * dt);
       pl.citadelHoldTime += dt;
       pl.stats.citadelSeconds += dt; // 20 §J: total hold time (never reset, unlike the win clock)
     } else {

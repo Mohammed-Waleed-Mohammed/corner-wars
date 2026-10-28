@@ -8,12 +8,16 @@
 // agreed seed through a LocalSession, so every peer starts from the identical world.
 
 import { CHAT, COLORS, colorKeyToIndex, NET_STRENGTH } from "../../config/constants";
-import type { GameMap, PlayerId } from "../../core/types";
+import type { BiomeId, GameMap, PlayerId } from "../../core/types";
+import { BIOME_IDS, isBiomeId } from "../../config/biomes";
+import { isCommanderId } from "../../config/commanders";
+import { BIOMES } from "../../content/biomes";
+import { commanderPicker, type CommanderChoice } from "../components/commanderPicker";
 import { NetPeer } from "../../net/peer";
 import { MAP_BY_ID, OFFICIAL_MAPS } from "../../state/officialMaps";
 import { sanitizeMap, validateMap } from "../../state/mapValidation";
 import { loadMyMaps } from "../editor/mapStorage";
-import { getSettings } from "../settings/settings";
+import { getSettings, updateSettings } from "../settings/settings";
 import { openSettings } from "../settings/settingsPanel";
 import { assignColorIndices } from "./colorAssign";
 import { LinkStats, qualityBars } from "./netStats";
@@ -65,6 +69,7 @@ function defaultSlots(): SlotInfo[] {
     colorIndex: i,
     corner: CORNER_LABELS[i],
     peerId: null,
+    commander: (i === 0 ? getSettings().preferredCommander : "random") as CommanderChoice, // 27 §D
     ready: false,
   }));
 }
@@ -93,6 +98,7 @@ function sanitizeSlots(raw: unknown): SlotInfo[] {
       corner: CORNER_LABELS[pid],
       peerId: typeof o.peerId === "string" ? o.peerId : null,
       ready: o.ready === true,
+      commander: isCommanderId(o.commander) ? o.commander : "random", // 27 §D clamped at the boundary
     };
   });
 }
@@ -105,6 +111,7 @@ export class Lobby {
   private seed = randomSeed();
   private mapId = "four_corners"; // 18 §C: the selected map (official id, or a custom map's id)
   private mapMax = 4;             // the current map's maxPlayers — the seat auto-close boundary
+  private biome: BiomeId | null = null;  // 26 §E host-chosen biome override (null = the map's own)
   private customMaps: GameMap[] = [];              // host: the host's saved "My Maps" (unofficial)
   private receivedMaps = new Map<string, GameMap>(); // client: full custom maps received via MAP_DATA
   private started = false;
@@ -375,6 +382,11 @@ export class Lobby {
       this.relayChat(s ? s.playerId : -1, s?.name || "?", msg.text);
       return;
     }
+    if (msg.t === "COMMANDER") { // 27 §D: a client picked its commander — clamp + rebroadcast
+      const s = this.slots.find((sl) => sl.peerId === from);
+      if (s) { s.commander = isCommanderId(msg.commander) ? msg.commander : "random"; this.broadcastLobby(); this.renderHostLobby(); }
+      return;
+    }
     if (msg.t === "READY") { // §G: reflect the client's ready flag + rebroadcast so everyone sees it
       const s = this.slots.find((sl) => sl.peerId === from);
       if (s) { s.ready = msg.ready === true; this.broadcastLobby(); this.renderHostLobby(); }
@@ -426,7 +438,7 @@ export class Lobby {
   }
 
   private broadcastLobby(): void {
-    this.peer?.broadcast({ t: "LOBBY_STATE", slots: this.slots, seed: this.seed, hostId: this.peer.id, mapId: this.mapId });
+    this.peer?.broadcast({ t: "LOBBY_STATE", slots: this.slots, seed: this.seed, hostId: this.peer.id, mapId: this.mapId, biome: this.biome });
   }
 
   private renderHostLobby(): void {
@@ -500,7 +512,7 @@ export class Lobby {
   /** Refresh only the mutable parts (slots + START/Ready state + bars); the shell + Map Browser persist. */
   private refreshDynamic(host: boolean): void {
     const slotsEl = this.root.querySelector<HTMLElement>("[data-slots]");
-    if (slotsEl) slotsEl.replaceChildren(...this.slots.map((s, i) => this.slotNode(s, i, host)));
+    if (slotsEl) slotsEl.replaceChildren(...this.slots.map((s, i) => this.slotNode(s, i, host)), this.biomeNode(host));
     if (host) {
       const start = this.root.querySelector<HTMLButtonElement>("[data-start]");
       if (start) { const reason = this.startReason(); start.disabled = !!reason; start.classList.toggle("is-disabled", !!reason); start.title = reason; }
@@ -534,6 +546,11 @@ export class Lobby {
     name.textContent = s.kind === "human" ? `${s.name}${you ? " (you)" : ""}` : s.kind === "ai" ? "Computer (AI)" : s.kind === "closed" ? "Closed" : "Open";
     if (isHostSeat) name.append(el("span", "lobby2-crown", " ♛"));
     row.append(name);
+    // 27 §D commander: your own seat (host or client) and, for the host, AI seats are editable.
+    if (s.kind === "human" || s.kind === "ai") {
+      const editable = !!you || (host && s.kind === "ai");
+      row.append(commanderPicker({ value: (s.commander ?? "random") as CommanderChoice, disabled: !editable, onPick: (v) => this.pickCommander(i, v, host) }));
+    }
 
     const right = el("div", "lobby2-slot-right");
     // Ready check for human clients (not the host).
@@ -548,6 +565,34 @@ export class Lobby {
       if (s.kind !== "human") right.append(button({ label: s.kind === "ai" ? "AI" : s.kind === "closed" ? "Closed" : "Open", kind: "secondary", className: "lobby2-mini", onClick: () => this.cycleSlot(i) }));
       else if (s.peerId) right.append(button({ label: "Kick", kind: "ghost", className: "lobby2-mini", onClick: () => this.kick(i) }));
     }
+    row.append(right);
+    return row;
+  }
+
+  /** 27 §D: a commander pick from this screen (host edits slots directly; a client asks the host). */
+  private pickCommander(i: number, v: CommanderChoice, host: boolean): void {
+    const s = this.slots[i];
+    if (s.kind === "human" && ((host && i === 0) || s.peerId === this.peer?.id)) updateSettings({ preferredCommander: v });
+    if (host) { s.commander = v; this.broadcastLobby(); this.renderHostLobby(); }
+    else { s.commander = v; this.peer?.sendToHost({ t: "COMMANDER", commander: v }); this.refreshDynamic(false); }
+  }
+
+  /** 26 §E: the biome row under the seats — a picker for the host, a read-only label for clients. */
+  private biomeNode(host: boolean): HTMLElement {
+    const row = el("div", "lobby2-slot lobby2-biome");
+    row.append(el("span", "lobby2-name", "Biome"));
+    if (!host) { row.append(el("span", "lobby2-slot-right", this.biome ? BIOMES[this.biome].name : "Map default")); return row; }
+    const sel = document.createElement("select");
+    sel.className = "lobby2-select";
+    for (const id of ["", ...BIOME_IDS]) {
+      const o = document.createElement("option");
+      o.value = id; o.textContent = id ? BIOMES[id as BiomeId].name : "Map default";
+      if ((this.biome ?? "") === id) o.selected = true;
+      sel.append(o);
+    }
+    sel.onchange = () => { this.biome = isBiomeId(sel.value) ? sel.value : null; this.broadcastLobby(); this.renderHostLobby(); };
+    const right = el("div", "lobby2-slot-right");
+    right.append(sel);
     row.append(right);
     return row;
   }
@@ -595,7 +640,7 @@ export class Lobby {
     // Freeze the roster: any still-open in-range seat fills with AI; seats beyond the map's player
     // count stay closed (fewer than 4 players). Closed seats are never filled.
     for (const s of this.slots) if (s.kind === "open") { s.kind = "ai"; s.name = "Computer"; s.colorPref = undefined; }
-    const config: MatchConfig = { mapId: this.mapId, seed: this.seed, terrain: true };
+    const config: MatchConfig = { mapId: this.mapId, seed: this.seed, terrain: true, biome: this.biome ?? undefined };
     this.started = true;
     this.peer?.broadcast({ t: "START", config, slots: this.slots });
     this.enterMatch(config, this.slots, 0, this.currentMap());
@@ -658,6 +703,7 @@ export class Lobby {
       this.slots = sanitizeSlots(msg.slots); // never trust wire data straight into the DOM/sim
       this.seed = Number(msg.seed) >>> 0;
       if (typeof msg.mapId === "string") this.mapId = msg.mapId; // official id, or a custom id (data via MAP_DATA)
+      this.biome = isBiomeId(msg.biome) ? msg.biome : null; // 26 §E (validated)
       this.renderClientLobby();
     } else if (msg.t === "START") {
       const slots = sanitizeSlots(msg.slots);
@@ -681,7 +727,8 @@ export class Lobby {
         return;
       }
       this.started = true;
-      this.enterMatch({ mapId: wantId, seed: Number(msg.config?.seed) >>> 0, terrain: msg.config?.terrain !== false }, slots, mine.playerId, map);
+      const biome = isBiomeId(msg.config?.biome) ? msg.config.biome : undefined; // 26 §E (validated)
+      this.enterMatch({ mapId: wantId, seed: Number(msg.config?.seed) >>> 0, terrain: msg.config?.terrain !== false, biome }, slots, mine.playerId, map);
     }
   }
 

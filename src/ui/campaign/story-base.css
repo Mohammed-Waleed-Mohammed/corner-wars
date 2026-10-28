@@ -1,0 +1,115 @@
+/* ═══ 28 — Story UI: shared tokens + primitives (campaign, briefing, codex, mission HUD) ═══════
+   Military-briefing look on the existing UI kit: dark surfaces, the amber accent, thin rule lines,
+   small-caps labels, faint scanlines, faction colour as the accent (--fc) and portrait rims (--rim).
+   Fonts: Rajdhani (loaded by hud.css) with the system fallback — nothing external. */
+
+:root {
+  --st-ink: #0b0d10;
+  --st-panel: rgba(17, 20, 25, 0.92);
+  --st-panel-2: rgba(24, 28, 34, 0.94);
+  --st-rule: rgba(148, 163, 184, 0.18);
+  --st-rule-strong: rgba(148, 163, 184, 0.34);
+  --st-text: #e2e8f0;
+  --st-dim: #8b94a3;
+  --st-faint: #5b6472;
+  --st-amber: #f5c518;
+  --st-amber-dim: rgba(245, 197, 24, 0.35);
+  --st-good: #22c55e;
+  --st-bad: #ef4444;
+  --st-display: "Rajdhani", "Segoe UI", system-ui, sans-serif;
+  --st-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+  --st-chamfer: polygon(8px 0, calc(100% - 8px) 0, 100% 8px, 100% calc(100% - 8px),
+    calc(100% - 8px) 100%, 8px 100%, 0 calc(100% - 8px), 0 8px);
+  --st-chamfer-sm: polygon(5px 0, calc(100% - 5px) 0, 100% 5px, 100% calc(100% - 5px),
+    calc(100% - 5px) 100%, 5px 100%, 0 calc(100% - 5px), 0 5px);
+}
+
+/* ── atmosphere: vignette + scanlines + grain (pure CSS, pointer-transparent) ── */
+.st-atmos { position: absolute; inset: 0; pointer-events: none; z-index: 0; overflow: hidden;
+  background:
+    radial-gradient(ellipse at 50% 30%, transparent 0%, rgba(5, 6, 8, 0.55) 70%, rgba(5, 6, 8, 0.85) 100%),
+    linear-gradient(180deg, rgba(10, 12, 15, 0.35), rgba(10, 12, 15, 0.75)); }
+.st-atmos::before { content: ""; position: absolute; inset: 0;
+  background: repeating-linear-gradient(180deg, rgba(255, 255, 255, 0.025) 0 1px, transparent 1px 3px);
+  mix-blend-mode: overlay; }
+.st-atmos::after { content: ""; position: absolute; inset: -50%; opacity: 0.06;
+  background-image: radial-gradient(rgba(255, 255, 255, 0.5) 0.5px, transparent 0.6px);
+  background-size: 3px 3px; animation: st-grain 1.2s steps(4) infinite; }
+@keyframes st-grain {
+  0% { transform: translate(0, 0); } 25% { transform: translate(-1%, 1%); }
+  50% { transform: translate(1%, -1%); } 75% { transform: translate(-1%, -1%); } 100% { transform: translate(0, 0); }
+}
+.st-tint { position: absolute; inset: 0; pointer-events: none; z-index: 0; opacity: 0.22;
+  background: radial-gradient(ellipse at 20% 0%, var(--fc, var(--st-amber)), transparent 60%); }
+
+/* ── type ─────────────────────────────────────────────────────────────────── */
+.st-label { font-family: var(--st-display); font-size: 11px; font-weight: 700; letter-spacing: 0.18em;
+  text-transform: uppercase; color: var(--st-dim); font-variant: small-caps; }
+.st-label.amber { color: var(--st-amber); }
+.st-title { font-family: var(--st-display); font-weight: 700; letter-spacing: 0.04em; color: var(--st-text); line-height: 1.05; }
+.st-mono { font-family: var(--st-mono); font-variant-numeric: tabular-nums; }
+.st-rule { height: 1px; background: linear-gradient(90deg, var(--st-rule-strong), var(--st-rule) 60%, transparent); border: 0; }
+.st-rule.amber { background: linear-gradient(90deg, var(--st-amber), var(--st-amber-dim) 40%, transparent); }
+
+/* ── panels ───────────────────────────────────────────────────────────────── */
+.st-panel { position: relative; background: var(--st-panel); border: 1px solid var(--st-rule);
+  clip-path: var(--st-chamfer); }
+.st-panel::before { content: ""; position: absolute; top: 0; left: 10px; right: 10px; height: 2px;
+  background: var(--fc, var(--st-amber)); opacity: 0.9; }
+.st-panel-head { display: flex; align-items: center; gap: 8px; padding: 10px 14px 8px;
+  border-bottom: 1px solid var(--st-rule); }
+
+/* ── portraits: faction-colour rim + corner ticks ─────────────────────────── */
+.st-portrait, .st-emblem { display: block; }
+.st-frame { position: relative; display: inline-flex; flex-direction: column; align-items: stretch;
+  padding: 2px; background: linear-gradient(160deg, var(--rim, #9aa4b2), rgba(0, 0, 0, 0.6) 55%, var(--rim, #9aa4b2));
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.7), 0 6px 18px rgba(0, 0, 0, 0.45); flex: 0 0 auto; }
+.st-frame > .st-portrait { background: #000; }
+.st-frame::after { content: ""; position: absolute; inset: -4px; pointer-events: none;
+  background:
+    linear-gradient(var(--rim), var(--rim)) left top / 8px 1px no-repeat,
+    linear-gradient(var(--rim), var(--rim)) left top / 1px 8px no-repeat,
+    linear-gradient(var(--rim), var(--rim)) right bottom / 8px 1px no-repeat,
+    linear-gradient(var(--rim), var(--rim)) right bottom / 1px 8px no-repeat;
+  opacity: 0.8; }
+.st-frame-cap { font-family: var(--st-display); font-size: 11px; font-weight: 700; letter-spacing: 0.08em;
+  text-transform: uppercase; text-align: center; padding: 3px 4px 1px; color: var(--st-text);
+  background: rgba(0, 0, 0, 0.75); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ── chips + segmented control ────────────────────────────────────────────── */
+.st-chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px 3px 7px;
+  font-family: var(--st-display); font-size: 11px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--st-text); background: rgba(35, 39, 46, 0.9); border: 1px solid var(--st-rule-strong);
+  clip-path: var(--st-chamfer-sm); white-space: nowrap; }
+.st-swatch { width: 10px; height: 10px; flex: 0 0 auto; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.5); }
+.st-seg { display: inline-flex; border: 1px solid var(--st-rule-strong); clip-path: var(--st-chamfer-sm);
+  background: rgba(10, 12, 15, 0.8); }
+.st-seg button { appearance: none; border: 0; background: transparent; color: var(--st-dim); cursor: pointer;
+  font-family: var(--st-display); font-size: 13px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase;
+  padding: 8px 16px; border-right: 1px solid var(--st-rule); transition: background 0.12s, color 0.12s; }
+.st-seg button:last-child { border-right: 0; }
+.st-seg button:hover { color: var(--st-text); background: rgba(255, 255, 255, 0.04); }
+.st-seg button.on { color: #14161a; background: var(--st-amber); }
+.st-seg button:focus-visible { outline: 2px solid var(--st-amber); outline-offset: -2px; }
+
+/* ── chamfered buttons (story screens use the kit's ui-btn, squared off) ─── */
+.st-btn.ui-btn { border-radius: 0; clip-path: var(--st-chamfer-sm); font-family: var(--st-display);
+  letter-spacing: 0.12em; text-transform: uppercase; font-weight: 700; }
+.st-btn.ui-btn.primary { box-shadow: 0 0 24px rgba(245, 197, 24, 0.18); }
+.st-back.ui-btn { padding: 7px 12px; }
+
+/* ── typewriter primitives (reveal.ts): the hidden tail keeps the layout fixed ── */
+/* The caret is zero-width (drawn by ::after), so it never changes where a line wraps. */
+.st-caret { display: inline-block; position: relative; width: 0; height: 1em; vertical-align: -0.14em; }
+.st-caret::after { content: ""; position: absolute; left: 1px; top: 0; width: 0.45em; height: 100%;
+  background: var(--st-amber); animation: st-caret 0.9s steps(2, start) infinite; }
+@keyframes st-caret { to { visibility: hidden; } }
+.st-para.pending { visibility: hidden; }
+
+/* ── scrollbars inside story panels ───────────────────────────────────────── */
+.st-scroll { overflow-y: auto; scrollbar-width: thin; scrollbar-color: #3a414c transparent; }
+
+/* ── reduced motion: keep the look, drop the movement ─────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .st-atmos::after, .st-caret::after { animation: none; }
+}

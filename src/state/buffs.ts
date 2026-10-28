@@ -6,6 +6,8 @@
 import { CITADEL, POWER_INFO, RESEARCH } from "../config/constants";
 import type { GameState, PlayerId } from "../core/types";
 import { isLowPower } from "./gameState";
+import { COMMANDERS } from "../config/commanders";
+import { COMMANDER_INFO, abilityText } from "../content/factions";
 
 export interface Buff {
   id: string;              // stable key (drives the HUD's rebuild signature)
@@ -48,6 +50,18 @@ export function deriveBuffs(state: GameState, pid: PlayerId): Buff[] {
   // Timed powers — Battle Frenzy with a live countdown.
   if ((p.frenzyTimer ?? 0) > 0) {
     out.push({ id: "frenzy", short: "Frenzy", tooltip: POWER_INFO.frenzy.tooltip, kind: "power", countdown: p.frenzyTimer });
+  }
+
+  // 27: an instant commander ability buff (Supply Drop / Rally) with its countdown.
+  if (p.abilityBuff && p.commander && p.abilityBuff.until > state.time) {
+    const ab = COMMANDERS[p.commander].ability;
+    out.push({ id: `ability-${ab}`, short: COMMANDER_INFO[p.commander].abilityName, tooltip: abilityText(ab), kind: "power", countdown: p.abilityBuff.until - state.time });
+  }
+  // 27: own Aegis / Prism / Ghost Roads / Ashstorm fields still running.
+  for (const f of state.fields) {
+    if (f.owner !== pid || f.until <= state.time || !p.commander) continue;
+    const ab = COMMANDERS[p.commander].ability;
+    out.push({ id: `field-${f.id}`, short: COMMANDER_INFO[p.commander].abilityName, tooltip: abilityText(ab), kind: "power", countdown: f.until - state.time });
   }
 
   // Low power — the red warning lives in the strip too (§K).

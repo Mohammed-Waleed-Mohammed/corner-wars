@@ -19,6 +19,7 @@ import {
 import { aiLog, ensureSquad, type Ctx } from "./commander";
 import { nearestPassableTile } from "../pathfinding";
 import { staleness } from "../aiPerception";
+import { planAbility } from "../aiAbilities";
 
 const cmd = (ctx: Ctx, type: string, payload: Record<string, unknown>): void =>
   ctx.submit({ type, playerId: ctx.pid, seq: 0, payload } as never);
@@ -35,6 +36,7 @@ export function runTactical(ctx: Ctx): void {
   runCitadel(ctx);
   runScout(ctx);
   runPowers(ctx);
+  runAbility(ctx); // 27 §E commander ability
 }
 
 // ── §J v3 Scout: fog of war means the AI must go and look, like a player ─────────
@@ -687,4 +689,12 @@ function findCluster(state: GameState, pid: PlayerId, radius: number, count: num
     if (n >= count) return { x: sx / n, y: sy / n };
   }
   return null;
+}
+
+// ── 27 §E commander ability ──────────────────────────────────────────────────────
+function runAbility(ctx: Ctx): void {
+  const cast = planAbility(ctx.state, ctx.pid, true);
+  if (!cast) return;
+  cmd(ctx, "USE_ABILITY", { x: cast.x, y: cast.y });
+  aiLog(ctx.cs, ctx.state.tick, "T", `ABILITY: ${ctx.p.commander}`);
 }

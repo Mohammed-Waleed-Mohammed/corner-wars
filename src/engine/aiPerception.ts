@@ -21,6 +21,7 @@
 
 import { AI_INTEL } from "../config/constants";
 import type { AIIntel, AnyEntity, Building, Formation, GameState, GoldSource, Player, PlayerId, Unit } from "../core/types";
+import { concealedFrom, sightOf } from "../state/terrain";
 
 export function initIntel(state: GameState, pid: PlayerId): AIIntel {
   const n = state.mapWidth * state.mapHeight;
@@ -58,7 +59,7 @@ export function perceive(state: GameState, pid: PlayerId, intel: AIIntel): GameS
       if (e.owner !== pid || e.hp <= 0) continue;
       const cx = e.kind === "building" ? e.x + e.width / 2 : e.x;
       const cy = e.kind === "building" ? e.y + e.height / 2 : e.y;
-      reveal(intel, W, H, cx, cy, e.sightRadius, state.tick);
+      reveal(intel, W, H, cx, cy, sightOf(state, e), state.tick); // 24 §B: +2 from high ground
     }
   }
   const visibleAt = (x: number, y: number): boolean => intel.visible[tileAt(x, y)] === 1;
@@ -71,7 +72,8 @@ export function perceive(state: GameState, pid: PlayerId, intel: AIIntel): GameS
     if (e.owner === pid || e.owner === "neutral") { entities.push(e); continue; }
     if (e.kind === "unit") {
       alive.add(e.id);
-      if (e.hp > 0 && visibleAt(e.x, e.y)) {
+      // 24 §B forest concealment: in sight AND not hidden in a forest beyond spotting range.
+      if (e.hp > 0 && visibleAt(e.x, e.y) && !concealedFrom(state, pid, e)) {
         entities.push(e);
         nowVisible.add(e.id);
         intel.units.set(e.id, { u: { ...e }, tick: state.tick });

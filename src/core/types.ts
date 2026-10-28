@@ -49,9 +49,92 @@ export type ResearchKey =
 export type UnitState = "idle" | "moving" | "attacking" | "gathering" | "guarding" | "repairing" | "healing";
 // "void" (18 §A) = outside the playable shape — not rendered as terrain, not pathable; lets maps be
 // non-rectangular. Impassable like mountain/water/rock (isGround only permits "ground").
-export type TerrainType = "ground" | "mountain" | "water" | "rock" | "void";
+// 24 §A: passable `ground | road | bridge | hill | forest | shallows`; impassable `water | mountain | rock |
+// void`. Movement/cover/sight/concealment rules per type live in config TERRAIN + state/terrain.ts.
+export type TerrainType =
+  | "ground" | "mountain" | "water" | "rock" | "void"
+  | "road" | "bridge" | "hill" | "forest" | "shallows";
+export type MoveClass = "foot" | "wheeled" | "tracked"; // 24 §A
 export type MapTile = TerrainType; // alias used by the static-map system (18 §A)
 export type FogState = "unexplored" | "explored" | "visible";
+
+// 26 — the environment a map is played in (art + a few deterministic modifiers).
+export type BiomeId = "verdant" | "saltglass" | "frostmarch" | "cinder" | "mire" | "scar";
+
+// 27 — factions, commanders and their active abilities.
+export type FactionId = "concord" | "halcyon" | "cantons" | "choir";
+export type CommanderId =
+  | "varga" | "haddad" // concord
+  | "marchetti" | "achterberg" // halcyon
+  | "okafor" | "lindqvist" // cantons
+  | "cantor" | "penitent"; // choir
+export type AbilityId = "aegis" | "hammerfall" | "supplyDrop" | "prism" | "rally" | "ghostRoads" | "hymn" | "ashstorm";
+
+/** 27 §C: a fixed circle of effect left by an ability (sim state, hashed). */
+export type FieldKind = "aegis" | "prism" | "cloak" | "ash";
+export interface AbilityField {
+  id: number;
+  owner: PlayerId;
+  kind: FieldKind;
+  x: number;
+  y: number;
+  r: number;
+  until: number; // state.time when it expires
+}
+
+/** 27 §C / 28 §D: a delayed area hit (Hammerfall impacts, the Sundering Hymn, campaign shard-fall). */
+export interface PendingStrike {
+  owner: Owner; // "neutral" = hits every player (campaign shard-fall / Chorus pulses)
+  x: number;
+  y: number;
+  r: number;
+  damage: number;
+  buildingMult: number; // damage multiplier vs buildings
+  at: number; // state.time it lands
+  castAt: number; // state.time it was called (drives the warning ring)
+  kind: "hammer" | "hymn" | "shard";
+}
+
+/** 27 §C: a timed, player-wide buff (Supply Drop mining, Rally the Cantons). */
+export interface AbilityBuff {
+  until: number;
+  damageMult: number;
+  speedMult: number;
+  miningMult: number;
+}
+
+// ── 28 — campaign mission runtime (single-player only; lives on GameState.mission) ──────────────
+export type ObjectiveStatus = "hidden" | "active" | "done" | "failed";
+export interface ObjectiveState {
+  id: string;
+  status: ObjectiveStatus;
+  primary: boolean;
+  progress: number; // current value for the tracker (seconds, gold, count…)
+  goal: number; // target value (0 = boolean objective)
+  since: number; // state.time it became active (relative `survive` timers count from here)
+}
+export interface StoryLine {
+  speaker: string; // character id (src/content/lore.ts) — the UI resolves name + portrait
+  text: string;
+}
+export interface MissionRuntime {
+  missionId: string;
+  objectives: ObjectiveState[];
+  fired: boolean[]; // per event index: already fired (one-shot events)
+  lastEvery: number[]; // per event index: the last `every` slot that fired (-1 = none)
+  tags: Record<string, number>; // tag → entity id (protect targets)
+  destroyed: Record<string, number>; // "owner:buildingType" → buildings destroyed since start
+  known: Record<string, number[]>; // "owner:buildingType" → ids alive at the last check
+  captured: boolean[]; // per seat: has captured the Citadel at least once this mission
+  result: "victory" | "defeat" | null;
+  unlocked: string[]; // codex keys granted by `unlock` actions this mission (the UI persists them)
+  armedAt: number[]; // per event index: state.time its trigger first fired (-1 = not yet) — for `delay`
+  seed: number; // mission-local hash seed (shard-fall placement)
+  shardfallUntil: number; // state.time the current shard-fall ends (0 = none)
+  shardfall: { rate: number; r: number; damage: number; within: number } | null;
+  shardAcc: number; // fractional impacts accumulated this second
+  shardCount: number; // impacts dropped so far (hash index)
+}
 
 // A static, designed map (18 §A) — loaded at match start, no runtime generation. Shared by all peers
 // so terrain/resources are identical everywhere with NO RNG (removes the file-17 map-gen desync risk).
@@ -66,6 +149,7 @@ export interface GameMap {
   startPositions: { slot: number; x: number; y: number }[]; // one per player slot
   goldMines: { x: number; y: number; amount: number }[]; // home + neutral, all explicit
   citadel: { x: number; y: number } | null;
+  biome?: BiomeId; // 26 — absent on pre-biome maps → "verdant"
 }
 
 /** Sub-phase of the worker harvest loop (engine-only). */
@@ -244,6 +328,7 @@ export interface AIBrain {
   difficulty?: "easy" | "medium" | "hard"; // 22 §N — easy: old simple AI; medium/hard: the Commander
   commander?: CommanderState; // 22 — host-only blackboard (never hashed, never on the wire)
   intel?: AIIntel; // 22 §C v3 — this AI's own fog of war + memory (host-only, never hashed)
+  personalityOverride?: AIPersonality; // 28 §F: campaign seat personality (else seeded)
 }
 
 /** 22 §C v3 — what one AI player knows. Built by aiPerception.ts with the human fog's rules (sight
@@ -325,6 +410,11 @@ export interface Player {
   citadelHoldTime: number; // seconds held continuously; resets if broken
   eliminated: boolean;
   frenzyTimer?: number; // engine-only: seconds left of Battle Frenzy (+dmg/+speed)
+  // 27 — the commander this player leads (null = none: tests / legacy). Faction derives from it.
+  commander: CommanderId | null;
+  abilityCooldown: number; // seconds until the commander ability is ready (starts at its `initial`)
+  abilityBuff?: AbilityBuff | null; // timed player-wide buff from an instant ability
+  displayName?: string; // 28 §F: campaign seat name override (cosmetic, never hashed)
   // 20 §J match stats — sim-side counters, identical on all peers (never hashed, purely derived).
   stats: PlayerStats;
   ai?: AIBrain; // engine-only: present for AI players (1-3)
@@ -412,4 +502,13 @@ export interface GameState {
   // remembers but can't currently see, at their last-seen spot. Strategic estimates (army value,
   // composition) count them; live tactical reads (contact, fight odds, threats) don't.
   aiRemembered?: Unit[];
+  // 26 — the map's biome (drives the deterministic modifiers; art is render-side).
+  biome: BiomeId;
+  // 27 — commander-ability effects in flight (sim state, hashed).
+  fields: AbilityField[];
+  strikes: PendingStrike[];
+  nextFieldId: number;
+  // 28 — campaign: the mission director's runtime (SP only) + dialogue lines for the UI to drain.
+  mission?: MissionRuntime;
+  storyEvents: StoryLine[];
 }

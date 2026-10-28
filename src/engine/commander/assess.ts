@@ -6,6 +6,7 @@ import {
 } from "../../config/constants";
 import type { Building, GameState, GoldSource, Owner, PlayerId, Unit, Vec2 } from "../../core/types";
 import { isLowPower } from "../../state/gameState";
+import { coverMult } from "../../state/terrain";
 import { weaponDamageMult } from "../../state/upgrades";
 
 /** A player's units as this AI knows them: live ones it can see, plus (on an AI perception view, §C v3)
@@ -180,7 +181,7 @@ function makeSide(units: Unit[], defenses: Building[], state: GameState, w?: num
   const ws = w ?? units.map(() => 1);
   let hp = 0, buildingHp = 0;
   units.forEach((u, i) => {
-    const uh = u.hp * ws[i];
+    const uh = (u.hp / coverMult(state, u)) * ws[i]; // 24 §B: forest cover = more effective HP
     hp += uh;
     const k = u.combatType ?? "infantry";
     hpByType[k] = (hpByType[k] ?? 0) + uh;

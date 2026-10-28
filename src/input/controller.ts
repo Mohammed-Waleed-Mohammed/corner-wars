@@ -11,6 +11,7 @@
 //   - WASD / arrows, middle-drag   -> pan the camera; wheel = zoom
 // Panning lives on keyboard + middle-drag so the left button is free for the selection box.
 
+import { researchCost, unitCost } from "../state/doctrine";
 import {
   BUILD_HOTKEYS,
   BUILDING_STATS,
@@ -21,10 +22,8 @@ import {
   MOVE_LINE,
   PRODUCES,
   RENDER,
-  RESEARCH,
   TILE_SIZE,
   UNIT_HOTKEY_SLOTS,
-  UNIT_STATS,
 } from "../config/constants";
 import { clamp } from "../core/math";
 import type { AnyEntity, Building, BuildingType, Formation, FormationId, FormationSlot, GameState, PlayerId, ResearchKey, Unit, UnitType, Vec2 } from "../core/types";
@@ -50,6 +49,7 @@ import { fogAt } from "../engine/fog";
 import { navPassable } from "../engine/pathfinding";
 import { footprintClear, planWallLine, wallLineTiles, withinBuildRadius } from "../engine/placement";
 import { canFirePower, powerNeedsTarget } from "../engine/powers";
+import { abilityOf, abilityReady } from "../engine/abilities";
 import { buildAvailability } from "../state/buildRules";
 import type { Camera } from "../render/camera";
 import { minimapRect } from "../render/draw/minimap";
@@ -89,6 +89,7 @@ export class InputController {
   private middleActive = false;
   private placementType: BuildingType | null = null;
   private pendingPowerKey: string | null = null;
+  private pendingAbility = false; // 27 §F: commander ability awaiting a target click
   private minimapDragging = false;
   // §6/§8/§9 controls.
   private clock = 0;
@@ -142,6 +143,7 @@ export class InputController {
   update(dt: number): void {
     this.clock += dt;
     if (this.input.keys.has("escape")) {
+      this.pendingAbility = false;
       this.placementType = null;
       this.pendingPowerKey = null;
       this.guardPending = false;
@@ -168,6 +170,7 @@ export class InputController {
     if (this.pressed("f3")) this.debugVisible = !this.debugVisible;
     if (this.pressed("f5")) this.aiDebugVisible = !this.aiDebugVisible; // 22 §O AI overlay
     if (this.pressed("f6")) this.dumpAILog(); // 22 §O: dump the AI_LOG ring buffers to console
+    if (this.pressed("z")) this.activateAbility(); // 27 §F commander ability hotkey
     // Formation keys (19 §K) get first crack: when units are selected, F opens the menu and 1/2/3/4
     // pick a preset — so those digits must NOT also fire control-group select this frame.
     const formConsumedDigit = this.handleFormationKeys();
@@ -319,7 +322,7 @@ export class InputController {
 
   /** 20 §J: Esc opens pause only when no transient mode is pending (placement/power/guard/menu). */
   hasPendingMode(): boolean {
-    return this.placementType !== null || this.pendingPowerKey !== null || this.guardPending || this.formationPending || this.rallyPending || this.wallDragStart !== null;
+    return this.placementType !== null || this.pendingPowerKey !== null || this.pendingAbility || this.guardPending || this.formationPending || this.rallyPending || this.wallDragStart !== null;
   }
 
   /** 21 §G.3 Rally command button: arm rally mode for the selected production building. */
@@ -511,6 +514,17 @@ export class InputController {
         continue;
       }
 
+      // 27 §F ability targeting swallows clicks the same way.
+      if (this.pendingAbility) {
+        if (e.type === "down" && e.button === 0) {
+          const t = this.camera.screenToTile(e.x, e.y);
+          this.emit("USE_ABILITY", { x: t.x, y: t.y });
+          this.pendingAbility = false;
+        } else if (e.type === "down" && e.button === 2) {
+          this.pendingAbility = false;
+        }
+        continue;
+      }
       // Power targeting swallows clicks: left = fire at point, right = cancel.
       if (this.pendingPowerKey) {
         if (e.type === "down" && e.button === 0) {
@@ -680,7 +694,7 @@ export class InputController {
 
   /** What a click would do at the cursor right now → drives the action cursor + target glow (§10). */
   private computeHover(): HoverInfo {
-    if (this.placementType || this.pendingPowerKey || this.guardPending) return { action: "none" };
+    if (this.placementType || this.pendingPowerKey || this.pendingAbility || this.guardPending) return { action: "none" };
     const tile = this.camera.screenToTile(this.input.mouse.x, this.input.mouse.y);
     const units = this.selectedUnits();
     const hasUnits = units.length > 0;
@@ -728,6 +742,7 @@ export class InputController {
 
   /** Only one of {placement, power-targeting, guard-targeting} may be pending at a time. */
   private clearPendingModes(): void {
+    this.pendingAbility = false;
     this.placementType = null;
     this.pendingPowerKey = null;
     this.guardPending = false;
@@ -838,6 +853,21 @@ export class InputController {
     return this.placementType;
   }
 
+  /** 27 §F: cast the commander ability (instant) or begin targeting it. */
+  activateAbility(): void {
+    const p = this.state.players[this.local];
+    const a = abilityOf(p);
+    if (!a) return;
+    if (!abilityReady(p)) { this.state.soundEvents.push("insufficientFunds"); return; }
+    this.clearPendingModes();
+    if (a.target === "point") this.pendingAbility = true;
+    else this.emit("USE_ABILITY", { x: null, y: null });
+  }
+
+  isTargetingAbility(): boolean {
+    return this.pendingAbility;
+  }
+
   /** Fire (instant) or begin targeting a Citadel power for the human player. */
   activatePower(key: string): void {
     if (!canFirePower(this.state, this.local, key)) return;
@@ -918,7 +948,7 @@ export class InputController {
     const b = this.getSelectedBuilding();
     if (!b) return false;
     // Cheap local gold check just for the click feedback; QUEUE_UNIT re-validates authoritatively.
-    if (this.state.players[this.local].gold < UNIT_STATS[unitType].gold) {
+    if (this.state.players[this.local].gold < unitCost(this.state.players[this.local], unitType)) {
       this.state.soundEvents.push("insufficientFunds");
       return false;
     }
@@ -929,7 +959,7 @@ export class InputController {
   researchFromSelected(key: ResearchKey): boolean {
     const b = this.getSelectedBuilding();
     if (!b) return false;
-    if (this.state.players[this.local].gold < RESEARCH[key].gold) {
+    if (this.state.players[this.local].gold < researchCost(this.state.players[this.local], key)) {
       this.state.soundEvents.push("insufficientFunds");
       return false;
     }
@@ -1005,6 +1035,10 @@ export class InputController {
     if (this.pendingPowerKey) {
       const t = this.camera.screenToTile(this.input.mouse.x, this.input.mouse.y);
       powerTarget = { x: t.x, y: t.y, radius: CITADEL_POWERS[this.pendingPowerKey].radius ?? 3 };
+    }
+    if (this.pendingAbility) {
+      const t = this.camera.screenToTile(this.input.mouse.x, this.input.mouse.y);
+      powerTarget = { x: t.x, y: t.y, radius: abilityOf(this.state.players[this.local])?.radius ?? 3 };
     }
 
     const guardReticle = this.guardPending ? this.camera.screenToTile(this.input.mouse.x, this.input.mouse.y) : null;

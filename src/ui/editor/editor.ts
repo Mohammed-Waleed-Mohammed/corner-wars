@@ -6,6 +6,8 @@
 // SYMMETRY MODE (Off/×2/×3/×4): every paint/place is mirrored around the centre with the exact
 // rotation the official maps use — paint one quadrant, get four. Edit ops live in editOps.ts (pure).
 
+import { BIOME_IDS, biomeOfMap, isBiomeId } from "../../config/biomes";
+import { BIOMES, biomeMapColors } from "../../content/biomes";
 import { COLORS, MAP_EDITOR, TILE_SIZE } from "../../config/constants";
 import type { GameMap, MapTile } from "../../core/types";
 import { Camera } from "../../render/camera";
@@ -19,10 +21,9 @@ import {
 } from "./editOps";
 import { exportMap, importMap, saveMyMap } from "./mapStorage";
 
-const TERRAIN_TOOLS: MapTile[] = ["ground", "mountain", "water", "rock", "void"];
-const TILE_COLOR: Record<MapTile, string> = {
-  ground: COLORS.ground, mountain: COLORS.mountain, water: COLORS.water, rock: COLORS.rock, void: COLORS.void,
-};
+// 24 §A: every terrain type is paintable; colours match the minimap (in the map's biome, 26).
+const TERRAIN_TOOLS: MapTile[] = ["ground", "road", "bridge", "hill", "forest", "shallows", "water", "mountain", "rock", "void"];
+const tileColors = (map: GameMap): Readonly<Record<MapTile, string>> => biomeMapColors(biomeOfMap(map));
 
 type Selected = { kind: "mine"; index: number } | { kind: "start"; index: number } | null;
 
@@ -166,7 +167,8 @@ export class MapEditor {
   private buildPalette(palette: HTMLElement): void {
     palette.replaceChildren();
     palette.append(el("div", "ed2-ptitle", "Terrain"));
-    for (const t of TERRAIN_TOOLS) palette.append(this.toolBtn(t, t[0].toUpperCase() + t.slice(1), TILE_COLOR[t]));
+    const swatch = tileColors(this.map);
+    for (const t of TERRAIN_TOOLS) palette.append(this.toolBtn(t, t[0].toUpperCase() + t.slice(1), swatch[t]));
     palette.append(el("div", "ed2-ptitle", "Brush"));
     const sizes = el("div", "ed2-sizes");
     for (const s of [1, 3, 5] as BrushSize[]) {
@@ -332,6 +334,20 @@ export class MapEditor {
       pRow.append(b);
     }
     meta.append(pRow);
+    // 26 §E: the map's biome (saved with it; skirmish/MP may still override per match).
+    const bRow = el("div", "ed2-metarow");
+    bRow.append(el("span", "ed2-label", "Biome"));
+    const bSel = document.createElement("select");
+    bSel.className = "ed2-select";
+    const cur = biomeOfMap(this.map);
+    for (const id of BIOME_IDS) {
+      const o = document.createElement("option");
+      o.value = id; o.textContent = BIOMES[id].name; o.selected = id === cur;
+      bSel.append(o);
+    }
+    bSel.onchange = () => { if (isBiomeId(bSel.value)) { this.map.biome = bSel.value; if (this.paletteEl) this.buildPalette(this.paletteEl); this.refreshProps(); } };
+    bRow.append(bSel);
+    meta.append(bRow);
     meta.append(el("div", "ed2-count", `${this.map.goldMines.length} mines · ${this.map.startPositions.length}/${this.map.maxPlayers} starts · citadel ${this.map.citadel ? "✓" : "—"}`));
     p.append(meta);
 
@@ -537,9 +553,10 @@ export class MapEditor {
     const x0 = Math.max(0, Math.floor(tl.x)), y0 = Math.max(0, Math.floor(tl.y));
     const x1 = Math.min(m.width - 1, Math.ceil(br.x)), y1 = Math.min(m.height - 1, Math.ceil(br.y));
 
+    const tileColor = tileColors(m);
     for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
       const p = this.camera.tileToScreen(x, y);
-      ctx.fillStyle = TILE_COLOR[m.terrain[y][x]];
+      ctx.fillStyle = tileColor[m.terrain[y][x]];
       ctx.fillRect(p.x, p.y, ts + 0.5, ts + 0.5);
     }
 

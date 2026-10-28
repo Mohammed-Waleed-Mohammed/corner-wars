@@ -7,8 +7,10 @@
 // minimapRect(), which now reports the well's on-screen rect (set by the HUD each layout change).
 
 import { COLORS, FOG_ALPHA, HUD, RENDER, ownerColor } from "../../config/constants";
+import { BIOMES, biomeMapColors } from "../../content/biomes";
 import { fogAt } from "../../engine/fog";
 import { isLowPower } from "../../state/gameState";
+import { concealedFrom } from "../../state/terrain";
 import type { GameState } from "../../core/types";
 import type { Camera } from "../camera";
 
@@ -93,16 +95,17 @@ export function drawMinimap(ctx: CanvasRenderingContext2D, state: GameState, cam
     return;
   }
 
-  ctx.fillStyle = COLORS.ground;
+  const tileColor = biomeMapColors(BIOMES[state.biome] ? state.biome : "verdant"); // 26: the biome's palette
+  ctx.fillStyle = tileColor.ground;
   ctx.fillRect(0, 0, w, h);
 
-  // Terrain shading.
+  // Terrain shading (24 §D: one flat colour per type).
   for (let ty = 0; ty < state.mapHeight; ty++) {
     const row = state.terrain[ty];
     for (let tx = 0; tx < state.mapWidth; tx++) {
       const t = row[tx];
       if (t === "ground") continue;
-      ctx.fillStyle = t === "mountain" ? COLORS.mountain : t === "water" ? COLORS.water : COLORS.rock;
+      ctx.fillStyle = tileColor[t];
       ctx.fillRect(px(tx), py(ty), sx + 0.6, sy + 0.6);
     }
   }
@@ -128,6 +131,7 @@ export function drawMinimap(ctx: CanvasRenderingContext2D, state: GameState, cam
       ctx.fillRect(px(e.x), py(e.y), Math.max(2, e.width * sx), Math.max(2, e.height * sy));
     } else {
       if (e.owner !== state.viewPlayer && fog(e.x, e.y) !== "visible") continue;
+      if (concealedFrom(state, state.viewPlayer, e)) continue; // 24 §B forest concealment
       ctx.fillStyle = ownerColor(e.owner);
       ctx.fillRect(px(e.x) - 1, py(e.y) - 1, 2.5, 2.5);
     }

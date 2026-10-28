@@ -13,6 +13,7 @@ import type {
   Unit,
   UnitType,
 } from "../core/types";
+import { buildingHpDoctrineMult, unitHpDoctrineMult, unitRangeBonus } from "./doctrine";
 import { maxHpMult, moveSpeedMult } from "./upgrades";
 
 export function createUnit(
@@ -26,8 +27,9 @@ export function createUnit(
   // Upgrades scale effective stats at creation (global multipliers, 15-logic §2): Armor → max
   // HP, Field Logistics → move speed. Both also rescale existing units on research completion.
   // 19 §B pacing: base maxHp × COMBAT_PACE.UNIT_HP_MULT for every unit (damage/buildings unchanged).
+  // 27 §B: the commander's doctrine scales HP (Prototype Program, Ashen Host) and range (Fire Mission).
   const p = owner !== "neutral" ? state.players[owner] : null;
-  const maxHp = s.hp * COMBAT_PACE.UNIT_HP_MULT * (p ? maxHpMult(p) : 1);
+  const maxHp = s.hp * COMBAT_PACE.UNIT_HP_MULT * (p ? maxHpMult(p) * unitHpDoctrineMult(p, unitType) : 1);
   const unit: Unit = {
     id: state.nextId++,
     kind: "unit",
@@ -42,7 +44,7 @@ export function createUnit(
     damage: s.damage,
     cooldown: s.cooldown,
     attackTimer: 0,
-    range: s.range,
+    range: s.range + unitRangeBonus(p, unitType),
     minRange: s.minRange,
     splashRadius: s.splashRadius,
     speed: s.speed * (p ? moveSpeedMult(p) : 1),
@@ -74,14 +76,15 @@ export function createBuilding(
   complete = true,
 ): Building {
   const s = BUILDING_STATS[buildingType];
+  const maxHp = s.hp * buildingHpDoctrineMult(owner !== "neutral" ? state.players[owner] : null); // 27 §B Bastion Doctrine
   return {
     id: state.nextId++,
     kind: "building",
     owner,
     x,
     y,
-    hp: complete ? s.hp : 1,
-    maxHp: s.hp,
+    hp: complete ? maxHp : 1,
+    maxHp,
     sightRadius: s.sight,
     buildingType,
     width: s.width,

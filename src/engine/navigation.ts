@@ -7,6 +7,7 @@
 import { NAV } from "../config/constants";
 import { approach } from "../core/steering";
 import type { GameState, Owner, Unit } from "../core/types";
+import { moveClassOf, terrainSpeedMult } from "../state/terrain";
 import { computePath, enemyGateAt, navPassable } from "./pathfinding";
 
 /** Tile a unit may step onto: passable terrain/buildings AND not an enemy gate (closed to it). */
@@ -28,6 +29,8 @@ export function navigateTo(
     u.pathGoal = null;
     return true;
   }
+  // 24 §B: terrain under the unit scales its speed for its movement class (road fast, forest/ford slow).
+  speed *= terrainSpeedMult(state, u);
 
   u.repathCooldown = Math.max(0, (u.repathCooldown ?? 0) - dt);
   const goalMoved = !u.pathGoal || Math.hypot(u.pathGoal.x - gx, u.pathGoal.y - gy) > NAV.repathDist;
@@ -35,7 +38,8 @@ export function navigateTo(
     u.path.length > 0 && !movePassable(state, Math.floor(u.path[0].x), Math.floor(u.path[0].y), u.owner);
   if (goalMoved || nextBlocked || (u.path.length === 0 && u.repathCooldown <= 0)) {
     u.pathGoal = { x: gx, y: gy };
-    u.path = computePath(state, u.x, u.y, gx, gy, u.owner); // owner-aware: own gates are passable
+    // owner-aware (own gates are passable) + class-weighted terrain costs (24 §B)
+    u.path = computePath(state, u.x, u.y, gx, gy, u.owner, moveClassOf(u));
     if (u.path.length === 0) u.repathCooldown = NAV.repathCooldown; // no route — slow down retries
   }
 

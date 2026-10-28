@@ -5,9 +5,11 @@
 import type {
   BuildingType,
   CombatType,
+  MoveClass,
   Owner,
   PlayerId,
   ResearchKey,
+  TerrainType,
   UnitType,
 } from "../core/types";
 
@@ -477,10 +479,49 @@ export const TERRAIN_WEIGHTS = [
   { type: "water", weight: 2 },
 ] as const;
 
+// ── 24 — Terrain types and how units interact with them (every number mirrors file 24) ──────────
+export interface TerrainDef {
+  passable: boolean;
+  buildable: boolean;
+  speed: Record<MoveClass, number>; // movement multiplier per class (1 = normal)
+}
+const NO_MOVE: Record<MoveClass, number> = { foot: 0, wheeled: 0, tracked: 0 };
+export const TERRAIN: Record<TerrainType, TerrainDef> = {
+  ground: { passable: true, buildable: true, speed: { foot: 1, wheeled: 1, tracked: 1 } },
+  road: { passable: true, buildable: true, speed: { foot: 1.15, wheeled: 1.35, tracked: 1.2 } },
+  bridge: { passable: true, buildable: false, speed: { foot: 1, wheeled: 1.2, tracked: 1 } },
+  hill: { passable: true, buildable: true, speed: { foot: 0.8, wheeled: 0.7, tracked: 0.75 } },
+  forest: { passable: true, buildable: false, speed: { foot: 0.7, wheeled: 0.45, tracked: 0.55 } },
+  shallows: { passable: true, buildable: false, speed: { foot: 0.55, wheeled: 0.4, tracked: 0.6 } },
+  water: { passable: false, buildable: false, speed: NO_MOVE },
+  mountain: { passable: false, buildable: false, speed: NO_MOVE },
+  rock: { passable: false, buildable: false, speed: NO_MOVE },
+  void: { passable: false, buildable: false, speed: NO_MOVE },
+};
+/** Flat colour per terrain type for the minimap, map thumbnails and editor palette (24 §D). */
+export const TERRAIN_MAP_COLOR: Record<TerrainType, string> = {
+  ground: "#3d5a2a", road: "#8a7350", bridge: "#7a5a3a", hill: "#6f7d3e", forest: "#22401d",
+  shallows: "#3f7f8f", water: "#1f4a73", mountain: "#5b544a", rock: "#7d7a72", void: "#0b0d10",
+};
+/** Fastest multiplier per class — scales the A* heuristic so weighted pathfinding stays admissible. */
+export const FASTEST_MOVE: Record<MoveClass, number> = { foot: 1.15, wheeled: 1.35, tracked: 1.2 };
+export const UNIT_MOVE_CLASS: Record<UnitType, MoveClass> = {
+  worker: "foot", rifleman: "foot", rocket: "foot", grenadier: "foot", medic: "foot",
+  scoutBuggy: "wheeled",
+  tank: "tracked", heavyTank: "tracked", artillery: "tracked",
+};
+export const TERRAIN_FX = {
+  FOREST_COVER: { foot: 0.3, wheeled: 0.15, tracked: 0.15 } as Record<MoveClass, number>, // damage taken × (1 − this)
+  FOREST_SPOT_RANGE: 4, // tiles — an enemy unit inside a forest is seen only this close
+  HILL_SIGHT_BONUS: 2, // tiles of extra sight from high ground
+  HILL_RANGE_BONUS: 1, // tiles of extra attack range from high ground…
+  HILL_RANGE_MIN_BASE: 2, // …for units whose base range is at least this (and for all defenses)
+} as const;
+
 export const NAV = {
   repathDist: 2.5, // tiles the goal may drift before a unit recomputes its path
   waypointReach: 0.35, // tiles — close enough to a waypoint to advance to the next
-  maxAStarNodes: 6000, // hard cap on A* expansions (safety)
+  maxAStarNodes: 16000, // hard cap on A* expansions (safety; raised for weighted terrain on 144² maps)
   repathCooldown: 0.4, // s — after a no-route result, wait this long before re-running A*
 } as const;
 
@@ -906,6 +947,10 @@ export const SCREEN_BACKGROUNDS: Record<string, string> = {
   lobby: "/backgrounds/lobby.png",
   skirmish: "/backgrounds/skirmish.png",
   postMatch: "/backgrounds/postmatch.png",
+  // 28: story screens reuse the existing art until bespoke backgrounds exist.
+  campaign: "/backgrounds/menu.png",
+  briefing: "/backgrounds/skirmish.png",
+  codex: "/backgrounds/settings.png",
 };
 
 // 20 §D/§K: skirmish + shared match options (game speed is determinism-critical — see NET note).

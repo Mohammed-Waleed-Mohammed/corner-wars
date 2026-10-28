@@ -1359,3 +1359,11 @@ canvas {
 .menu-live { position: absolute; inset: 0; width: 100%; height: 100%; }
 .menu-live-veil { position: absolute; inset: 0;
   background: radial-gradient(circle at 30% 35%, rgba(20,22,26,0.55), rgba(20,22,26,0.86) 75%); }
+
+/* 26 §E biome pickers (MP lobby + map editor). */
+.lobby2-select, .ed2-select {
+  background: #14161a; color: #e2e8f0; border: 1px solid #31363f; border-radius: 4px;
+  padding: 4px 8px; font: 500 13px/1.2 inherit; cursor: pointer;
+}
+.lobby2-select:focus, .ed2-select:focus { outline: 1px solid #f5c518; }
+.lobby2-biome .lobby2-name { color: #94a3b8; }

@@ -4,7 +4,7 @@
 
 import { BUILD_RADIUS, BUILDING_STATS, CITADEL, STRUCTURE_CAP } from "../config/constants";
 import type { GameState, Owner } from "../core/types";
-import { isGround } from "../state/terrain";
+import { isBuildable } from "../state/terrain";
 
 /** Nearest edge-to-edge distance between two axis-aligned rects (0 if they overlap/touch). */
 export function rectEdgeDist(
@@ -38,7 +38,7 @@ export function footprintClear(state: GameState, x: number, y: number, w: number
   if (x < 0 || y < 0 || x + w > state.mapWidth || y + h > state.mapHeight) return false;
   for (let ty = y; ty < y + h; ty++) {
     for (let tx = x; tx < x + w; tx++) {
-      if (!isGround(state, tx, ty)) return false; // can't build on impassable terrain (§7)
+      if (!isBuildable(state, tx, ty)) return false; // only ground/road/hill take structures (24 §A)
     }
   }
   for (const e of state.entities) {

@@ -1,0 +1,18 @@
+/* ═══ 28 — objective rows (briefing plan + debrief results) ═════════════════════════════════ */
+.ob-list { display: flex; flex-direction: column; gap: 4px; }
+.ob-row { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; align-items: baseline; gap: 8px;
+  padding: 6px 10px 6px 8px; background: rgba(10, 12, 15, 0.55); border-left: 2px solid var(--st-rule-strong); }
+.ob-row.is-primary { border-left-color: var(--st-amber); }
+.ob-glyph { font-size: 13px; line-height: 1; color: var(--st-dim); text-align: center; }
+.ob-text { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; min-width: 0; }
+.ob-label { font-size: 14px; color: var(--st-text); }
+.ob-hint { font-size: 11px; color: var(--st-dim); }
+.ob-tag { font-family: var(--st-display); font-size: 10px; font-weight: 700; letter-spacing: 0.16em;
+  text-transform: uppercase; color: var(--st-faint); }
+.ob-row.is-primary .ob-tag { color: var(--st-amber); }
+.ob-row.st-done .ob-glyph { color: var(--st-good); }
+.ob-row.st-done .ob-label { color: #bbf7d0; }
+.ob-row.st-failed .ob-glyph { color: var(--st-bad); }
+.ob-row.st-failed .ob-label { color: #fca5a5; text-decoration: line-through; text-decoration-color: rgba(239, 68, 68, 0.6); }
+.ob-row.st-active.is-result .ob-label { color: var(--st-dim); }
+.ob-more { font-size: 12px; font-style: italic; color: var(--st-dim); padding: 2px 10px; }

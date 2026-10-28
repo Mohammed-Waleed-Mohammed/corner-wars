@@ -13,12 +13,13 @@ import {
   UNIT_STATS,
 } from "../config/constants";
 import type { Building, GameState, Player, PlayerId, ResearchKey } from "../core/types";
+import { miningDoctrineMult, researchCost, researchTime, unitHpDoctrineMult } from "./doctrine";
 
 // ── Multipliers (read a player's researched upgrades) ────────────────────────
 export const weaponDamageMult = (p: Player): number => 1 + 0.1 * p.upgrades.weapons; // +10%/+20%
 export const maxHpMult = (p: Player): number => 1 + 0.1 * p.upgrades.armor; // +10%/+20%
 export const moveSpeedMult = (p: Player): number => (p.upgrades.fieldLogistics ? 1.15 : 1);
-export const miningMult = (p: Player): number => 1 + 0.15 * p.upgrades.mining; // +15%/+30%
+export const miningMult = (p: Player): number => (1 + 0.15 * p.upgrades.mining) * miningDoctrineMult(p); // +15%/+30% × doctrine/Supply Drop (27)
 export const workerBuildMult = (p: Player): number => (p.upgrades.constructionCrews ? 1.25 : 1);
 export const productionUpgradeMult = (p: Player): number => (p.upgrades.streamlinedProduction ? 1.2 : 1);
 export const unitCap = (p: Player): number => BASE_UNIT_CAP + SUPPLY_LINE_CAP_BONUS * p.upgrades.supplyLines;
@@ -57,13 +58,13 @@ export function canEnqueueResearch(state: GameState, lab: Building, key: Researc
   if (q.includes(key) || q.length >= RESEARCH_QUEUE_MAX) return false;
   const def = RESEARCH[key];
   if (def.requires && !isResearched(p, def.requires) && !q.includes(def.requires)) return false;
-  return p.gold >= def.gold;
+  return p.gold >= researchCost(p, key);
 }
 
 export function enqueueResearch(state: GameState, lab: Building, key: ResearchKey): boolean {
   if (!canEnqueueResearch(state, lab, key)) return false;
   const p = state.players[lab.owner as PlayerId];
-  p.gold -= RESEARCH[key].gold; // paid up front
+  p.gold -= researchCost(p, key); // paid up front (27 §B: doctrine-priced)
   (lab.researchQueue ??= []).push(key);
   return true;
 }
@@ -76,7 +77,7 @@ export function cancelResearch(state: GameState, lab: Building, index: number): 
   if (!q || index < 0 || index >= q.length || lab.owner === "neutral") return false;
   const p = state.players[lab.owner];
   const inProgress = index === 0 && (lab.researchTimer ?? 0) > 0;
-  p.gold += RESEARCH[q[index]].gold * (inProgress ? REFUND.inProgress : REFUND.queued);
+  p.gold += researchCost(p, q[index]) * (inProgress ? REFUND.inProgress : REFUND.queued);
   q.splice(index, 1);
   if (inProgress) lab.researchTimer = 0;
 
@@ -88,7 +89,7 @@ export function cancelResearch(state: GameState, lab: Building, index: number): 
     for (let i = 0; i < q.length; i++) {
       const req = RESEARCH[q[i]].requires;
       if (req && !isResearched(p, req) && !q.slice(0, i).includes(req)) {
-        p.gold += RESEARCH[q[i]].gold * REFUND.queued;
+        p.gold += researchCost(p, q[i]) * REFUND.queued;
         q.splice(i, 1);
         changed = true;
         break;
@@ -109,7 +110,7 @@ export function updateResearch(state: GameState, dt: number): void {
     }
     const key = q[0];
     e.researchTimer = (e.researchTimer ?? 0) + dt;
-    if (e.researchTimer >= RESEARCH[key].time) {
+    if (e.researchTimer >= researchTime(state.players[e.owner], key)) {
       e.researchTimer = 0;
       q.shift();
       applyResearch(state, e.owner, key);
@@ -150,7 +151,7 @@ function rescaleUnits(state: GameState, owner: PlayerId): void {
   for (const e of state.entities) {
     if (e.kind !== "unit" || e.owner !== owner) continue;
     const base = UNIT_STATS[e.unitType];
-    const newMax = base.hp * COMBAT_PACE.UNIT_HP_MULT * hpM; // pacing dial (19 §B) baked like createUnit
+    const newMax = base.hp * COMBAT_PACE.UNIT_HP_MULT * hpM * unitHpDoctrineMult(p, e.unitType); // pacing dial (19 §B) + doctrine (27), like createUnit
     const frac = e.maxHp > 0 ? e.hp / e.maxHp : 1;
     e.maxHp = newMax;
     e.hp = newMax * frac;

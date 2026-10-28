@@ -4,11 +4,12 @@
 // a gold mine over ground (BFS on the terrain grid). sanitizeMap() coerces untrusted imported JSON into
 // a safe GameMap so a hand-edited / hostile file can't inject bad shapes.
 
-import { BUILDING_STATS, MAP_EDITOR } from "../config/constants";
+import { isBiomeId } from "../config/biomes";
+import { BUILDING_STATS, MAP_EDITOR, TERRAIN } from "../config/constants";
 import type { GameMap, MapTile } from "../core/types";
 
 const CY = BUILDING_STATS.constructionYard.width; // 3 — a start's Construction Yard footprint
-const TILES: MapTile[] = ["ground", "mountain", "water", "rock", "void"];
+const TILES = Object.keys(TERRAIN) as MapTile[]; // 24 §A: every terrain type is a valid tile
 
 /** A failure with an optional world location — the editor's validation panel (20 §H) lists issues as
  *  clickable items that jump the camera to (x,y) when present. `errors` stays for old callers. */
@@ -17,11 +18,11 @@ export interface MapValidation { ok: boolean; errors: string[]; issues: MapIssue
 
 const key = (x: number, y: number): string => `${x},${y}`;
 
-/** BFS over "ground" tiles from (sx,sy); returns the set of reachable "x,y" keys. */
+/** BFS over walkable tiles (any passable terrain, 24 §A) from (sx,sy); returns the reachable "x,y" keys. */
 function reachableGround(map: GameMap, sx: number, sy: number): Set<string> {
   const { width: W, height: H } = map;
   const vis = new Set<string>();
-  const walk = (x: number, y: number): boolean => x >= 0 && y >= 0 && x < W && y < H && map.terrain[y][x] === "ground";
+  const walk = (x: number, y: number): boolean => x >= 0 && y >= 0 && x < W && y < H && TERRAIN[map.terrain[y][x]].passable;
   if (!walk(sx, sy)) return vis;
   const q: [number, number][] = [[sx, sy]];
   vis.add(key(sx, sy));
@@ -48,7 +49,8 @@ export function validateMap(map: GameMap): MapValidation {
   const gridOk = Array.isArray(map.terrain) && map.terrain.length === H && map.terrain.every((r) => Array.isArray(r) && r.length === W);
   if (!gridOk) { err("Terrain grid doesn't match the map size."); return done(); }
 
-  const ground = (x: number, y: number): boolean => x >= 0 && y >= 0 && x < W && y < H && map.terrain[y][x] === "ground";
+  // A base, mine or Citadel needs BUILDABLE ground (ground / road / hill — 24 §A).
+  const ground = (x: number, y: number): boolean => x >= 0 && y >= 0 && x < W && y < H && TERRAIN[map.terrain[y][x]].buildable;
   const occ = new Map<string, string>();
   const claim = (x: number, y: number, what: string): void => {
     const k = key(x, y);
@@ -147,5 +149,6 @@ export function sanitizeMap(raw: unknown): GameMap | null {
   const id = typeof o.id === "string" && /^[\w-]{1,40}$/.test(o.id) ? o.id : `custom-${name.replace(/\W+/g, "").slice(0, 12)}`;
   const author = typeof o.author === "string" ? o.author.slice(0, 24) : "custom";
 
-  return { id, name, author, maxPlayers, width: W, height: H, terrain, startPositions, goldMines, citadel };
+  const biome = isBiomeId(o.biome) ? o.biome : undefined; // 26: optional, validated against the known ids
+  return { id, name, author, maxPlayers, width: W, height: H, terrain, startPositions, goldMines, citadel, ...(biome ? { biome } : {}) };
 }

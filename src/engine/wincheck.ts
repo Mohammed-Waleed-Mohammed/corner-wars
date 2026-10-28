@@ -62,6 +62,10 @@ export function updateWinConditions(state: GameState): void {
   }
   if (changed) recomputePower(state);
 
+  // 28 §C: in a campaign mission the DIRECTOR decides victory/defeat from the objectives — wiping
+  // out the enemy must not cut the story short (eliminations and demolition above still happen).
+  if (state.mission) return;
+
   // ── §W1: end if and only if one player remains ──
   const alive = state.players.filter((p) => !p.eliminated);
   if (alive.length === 1) {

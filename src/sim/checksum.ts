@@ -5,6 +5,7 @@
 // state (effects, projectiles-as-visuals, sounds, selection, camera, fog, HUD) is NOT hashed.
 // Positions/timers are rounded so tiny float noise can't false-trigger, real divergence still does.
 
+import { COMMANDER_IDS } from "../config/commanders";
 import type { GameState, Owner } from "../core/types";
 
 const FNV_OFFSET = 0x811c9dc5 | 0;
@@ -73,12 +74,22 @@ export function checksum(state: GameState): number {
     h = mix(h, (u.constructionCrews ? 1 : 0) + (u.streamlinedProduction ? 2 : 0) + (u.fieldLogistics ? 4 : 0));
     const k = p.unlocks;
     h = mix(h, (k.advancedVehicles ? 1 : 0) + (k.siegeDoctrine ? 2 : 0) + (k.advancedDefenses ? 4 : 0));
+    // 27 §G: commander, ability cooldown and any active player-wide buff.
+    h = mix(h, p.commander ? COMMANDER_IDS.indexOf(p.commander) + 1 : 0);
+    h = mix(h, Math.round(p.abilityCooldown * 100));
+    h = mix(h, p.abilityBuff ? Math.round(p.abilityBuff.until * 100) : 0);
   }
 
   for (const g of state.goldSources) {
     h = mix(h, g.id);
     h = mix(h, Math.round(g.goldRemaining * 100));
   }
+
+  // 27 §G: ability fields + pending strikes (position, radius, expiry/landing time).
+  h = mix(h, state.fields.length);
+  for (const f of state.fields) { h = mix(h, f.owner); h = mixStr(h, f.kind); h = mix(h, Math.round(f.x * 100)); h = mix(h, Math.round(f.y * 100)); h = mix(h, Math.round(f.until * 100)); }
+  h = mix(h, state.strikes.length);
+  for (const s of state.strikes) { h = mix(h, ownerInt(s.owner)); h = mix(h, Math.round(s.x * 100)); h = mix(h, Math.round(s.y * 100)); h = mix(h, Math.round(s.at * 100)); h = mix(h, Math.round(s.damage)); }
 
   const c = state.citadel;
   h = mix(h, ownerInt(c.controllingPlayer));

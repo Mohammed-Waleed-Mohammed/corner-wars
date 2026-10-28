@@ -16,6 +16,7 @@ import type { Building, GameState, PlayerId, UnitType } from "../core/types";
 import { createUnit } from "../state/entities";
 import { isLowPower } from "../state/gameState";
 import { isResearched, productionUpgradeMult, unitCap } from "../state/upgrades";
+import { unitBuildTime, unitCost } from "../state/doctrine";
 import { nearestPassableTile } from "./pathfinding";
 
 /** Combined production-speed multiplier for a player's buildings. */
@@ -37,9 +38,10 @@ export function enqueueUnit(state: GameState, building: Building, unitType: Unit
   const player = state.players[building.owner];
   const stat = UNIT_STATS[unitType];
   if (stat.unlock && !isResearched(player, stat.unlock)) return false; // research-locked (Heavy Tank/Artillery)
-  if (player.gold < stat.gold) return false;
+  const cost = unitCost(player, unitType); // 27 §B doctrine price
+  if (player.gold < cost) return false;
 
-  player.gold -= stat.gold;
+  player.gold -= cost;
   building.productionQueue.push(unitType);
   return true;
 }
@@ -49,7 +51,8 @@ export function cancelProduction(state: GameState, building: Building, index: nu
   const q = building.productionQueue;
   if (index < 0 || index >= q.length) return false;
   const inProgress = index === 0 && building.productionTimer > 0;
-  const refund = UNIT_STATS[q[index]].gold * (inProgress ? REFUND.inProgress : REFUND.queued);
+  const payer = building.owner === "neutral" ? null : state.players[building.owner];
+  const refund = unitCost(payer, q[index]) * (inProgress ? REFUND.inProgress : REFUND.queued);
   if (building.owner !== "neutral") state.players[building.owner].gold += refund;
   q.splice(index, 1);
   if (inProgress) building.productionTimer = 0; // the next item starts fresh
@@ -65,7 +68,7 @@ export function updateProduction(state: GameState, dt: number): void {
     }
 
     const unitType = e.productionQueue[0];
-    const buildTime = UNIT_STATS[unitType].buildTime;
+    const buildTime = unitBuildTime(state.players[e.owner], unitType); // 27 §B Militia Levy
     e.productionTimer += dt * productionSpeedMult(state, e.owner);
 
     if (e.productionTimer >= buildTime) {

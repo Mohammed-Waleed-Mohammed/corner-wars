@@ -2,10 +2,11 @@
 // gates, defenses), tech, and counter-composition production. Emits only commands; costs and
 // legality are enforced inside executeCommand like any human order.
 
+import { unitCost } from "../../state/doctrine";
 import { BUILDING_STATS, COMMANDER, DEFENSE_STATS, PRODUCES, REPAIR, RESEARCH, STRUCTURE_CAP, UNIT_STATS } from "../../config/constants";
 import type { Building, BuildingType, GameState, GoldSource, ResearchKey, Unit, UnitType, Vec2 } from "../../core/types";
 import { footprintClear, withinBuildRadius } from "../placement";
-import { isGround } from "../../state/terrain";
+import { isBuildable } from "../../state/terrain";
 import { isLowPower } from "../../state/gameState";
 import { isResearched, unitCap } from "../../state/upgrades";
 import {
@@ -351,7 +352,7 @@ export function planBase(ctx: Ctx, cy: Building): void {
   const perimeter: Vec2[] = [];
   for (let x = minX; x <= maxX; x++) { perimeter.push({ x, y: minY }); perimeter.push({ x, y: maxY }); }
   for (let y = minY + 1; y < maxY; y++) { perimeter.push({ x: minX, y }); perimeter.push({ x: maxX, y }); }
-  const passable = perimeter.filter((t) => isGround(state, t.x, t.y));
+  const passable = perimeter.filter((t) => isBuildable(state, t.x, t.y)); // 24 §A: walls only where structures can stand
 
   // gates where the perimeter crosses used paths: toward my nearest mine + toward map center (max 3).
   const anchor = { x: cy.x + cy.width / 2, y: cy.y + cy.height / 2 };
@@ -623,7 +624,7 @@ function runProduction(ctx: Ctx): void {
     for (const b of sorted) {
       if (!canBuild(b, u) || b.productionQueue.length >= 4) continue;
       possible = true;
-      if (p.gold < UNIT_STATS[u].gold + 60) return "broke";
+      if (p.gold < unitCost(p, u) + 60) return "broke";
       cmd(ctx, "QUEUE_UNIT", { buildingId: b.id, unitType: u });
       return "queued";
     }

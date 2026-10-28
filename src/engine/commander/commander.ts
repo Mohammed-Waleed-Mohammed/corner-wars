@@ -66,7 +66,8 @@ function initCommander(state: GameState, p: Player): CommanderState {
   const rng = makeRng(cs);
   const tier = COMMANDER.TIERS[(p.ai?.difficulty === "hard" ? "hard" : "medium") as "medium" | "hard"];
   const pool = tier.personalities;
-  cs.personality = pool[Math.floor(rng() * pool.length) % pool.length];
+  const rolled = pool[Math.floor(rng() * pool.length) % pool.length]; // always step the RNG (stable stream)
+  cs.personality = p.ai?.personalityOverride ?? rolled; // 28 §F campaign override
   aiLog(cs, state.tick, "S", `spawn: personality=${cs.personality}`);
   return cs;
 }

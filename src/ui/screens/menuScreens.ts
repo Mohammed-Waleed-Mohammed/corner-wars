@@ -2,9 +2,15 @@
 // is fullscreen with a title block, a vertical button stack, and a PLAY expander that swaps in two
 // large cards (Skirmish / Multiplayer) one click deep. Multiplayer opens an MP-home screen (Create /
 // Join). About is a simple panel. A static background stands in until the living background (M9).
+// 28 §A: CAMPAIGN leads the stack (campaign → briefing → mission), CODEX opens the lore archive.
 
 import { button, card, el, esc } from "../components/ui";
+import { MISSIONS, MISSION_BY_ID, type CampaignDifficulty } from "../../content/campaign";
 import type { GameMap } from "../../core/types";
+import { briefingScreen } from "../campaign/briefingScreen";
+import { campaignScreen } from "../campaign/campaignScreen";
+import { isMissionUnlocked, loadProgress } from "../campaign/progress";
+import { codexScreen } from "../codex/codexScreen";
 import { MenuBattle } from "./menuBattle";
 import { skirmishSetupScreen, type SkirmishStart } from "./skirmishSetup";
 import type { Screen, ScreenNav } from "./screenManager";
@@ -19,6 +25,24 @@ export interface MenuServices {
   joinMultiplayer: () => void;
   openEditor: () => void;
   openSettings: () => void;
+  startMission: (missionId: string, difficulty: CampaignDifficulty) => void; // 28: boot a campaign mission
+}
+
+/**
+ * 28 §A: open the campaign map, and the briefing for `missionId` on top of it when given (and
+ * unlocked). The debrief's Continue / Retry / Campaign buttons land here via main.ts.
+ */
+export function openCampaignFlow(nav: ScreenNav, services: MenuServices, missionId?: string): void {
+  nav.push(campaignScreen(services, missionId));
+  if (missionId && MISSION_BY_ID.has(missionId) && isMissionUnlocked(missionId)) nav.push(briefingScreen(services, missionId));
+}
+
+/** "Continue · 5. River Rights" for the CAMPAIGN button (the first unlocked, unfinished mission). */
+function campaignNote(): string {
+  const p = loadProgress();
+  if (Object.keys(p.completed).length === 0) return "Begin · Prologue";
+  const next = MISSIONS.find((m) => !p.completed[m.id] && isMissionUnlocked(m.id, p));
+  return next ? `Continue · ${next.number}. ${next.title}` : "Complete · replay any mission";
 }
 
 export function mainMenuScreen(services: MenuServices): Screen {
@@ -29,7 +53,7 @@ export function mainMenuScreen(services: MenuServices): Screen {
 
       const content = el("div", "menu-content");
       const titleBlock = el("div", "menu-title-block");
-      titleBlock.append(el("h1", "menu-title", "The Fall of the Citadel"), el("div", "menu-underline"), el("p", "menu-tagline", "4-player free-for-all · capture the Citadel"));
+      titleBlock.append(el("h1", "menu-title", "The Fall of the Citadel"), el("div", "menu-underline"), el("p", "menu-tagline", "The Spire Wars · 2071"));
       content.append(titleBlock);
 
       // The action area toggles between the button stack and the PLAY expander.
@@ -38,8 +62,12 @@ export function mainMenuScreen(services: MenuServices): Screen {
 
       const renderStack = (): void => {
         actions.replaceChildren();
+        const campaign = button({ label: "CAMPAIGN", kind: "primary", className: "menu-btn menu-btn-campaign", onClick: () => openCampaignFlow(nav, services) });
+        campaign.append(el("span", "menu-btn-note", campaignNote()));
         actions.append(
-          button({ label: "PLAY", kind: "primary", className: "menu-btn", onClick: renderPlay }),
+          campaign,
+          button({ label: "PLAY", kind: "secondary", className: "menu-btn", onClick: renderPlay }),
+          button({ label: "CODEX", kind: "secondary", className: "menu-btn", onClick: () => nav.push(codexScreen()) }),
           button({ label: "MAP EDITOR", kind: "secondary", className: "menu-btn", onClick: services.openEditor }),
           button({ label: "SETTINGS", kind: "secondary", className: "menu-btn", onClick: services.openSettings }),
           button({ label: "ABOUT", kind: "ghost", className: "menu-btn", onClick: () => nav.push(aboutScreen(services)) }),
@@ -105,9 +133,12 @@ export function aboutScreen(services: MenuServices): Screen {
       content.append(el("h2", "screen-heading", "About"));
       const p = el("div", "ui-panel about-panel");
       p.innerHTML = `
-        <p><b>The Fall of the Citadel</b> — a 2D top-down real-time strategy game. 4-player free-for-all; capture the
-        central Citadel to grow stronger. Runs fully in the browser; play the AI or friends online.</p>
-        <p class="about-dim">Vanilla TypeScript + HTML5 Canvas, no framework. Formations combat overhaul,
+        <p><b>The Fall of the Citadel</b> — in 2063 the black-glass spire that powered the world broke apart.
+        Twelve shards fell across the continents and regrew into lesser Citadels, each a fortune in gold and a
+        key to the old Concord's orbital weapons. Eight years later four powers fight the Spire Wars over them,
+        and the shards have begun to sing to one another.</p>
+        <p class="about-dim">A 2D top-down real-time strategy game: a twelve-mission campaign, skirmish against
+        the AI, or friends online. Vanilla TypeScript + HTML5 Canvas, no framework. Formations combat overhaul,
         static maps, and deterministic-lockstep multiplayer.</p>
         <p class="about-dim">${esc(services.version)}</p>`;
       content.append(p, button({ label: "Back", kind: "ghost", className: "menu-btn-sm", onClick: () => nav.back() }));

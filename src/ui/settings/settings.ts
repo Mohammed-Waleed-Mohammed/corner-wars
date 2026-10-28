@@ -5,6 +5,8 @@
 
 import { COLOR_KEYS, SETTINGS_DEFAULTS, SETTINGS_LIMITS, type ColorKey } from "../../config/constants";
 import { clamp } from "../../core/math";
+import { isCommanderId } from "../../config/commanders";
+import type { CommanderId } from "../../core/types";
 
 export interface UserSettings {
   username: string;
@@ -13,6 +15,7 @@ export interface UserSettings {
   muted: boolean;
   cameraScrollSpeed: number; // tiles/s
   edgeScroll: boolean;
+  preferredCommander: CommanderId | "random"; // 27 §D: default commander for skirmish/MP seats
 }
 
 const KEY = "cornerwars.settings";
@@ -29,6 +32,7 @@ function sanitize(raw: unknown): UserSettings {
     muted: typeof o.muted === "boolean" ? o.muted : d.muted,
     cameraScrollSpeed: typeof o.cameraScrollSpeed === "number" && isFinite(o.cameraScrollSpeed) ? clamp(o.cameraScrollSpeed, SETTINGS_LIMITS.scrollMin, SETTINGS_LIMITS.scrollMax) : d.cameraScrollSpeed,
     edgeScroll: typeof o.edgeScroll === "boolean" ? o.edgeScroll : d.edgeScroll,
+    preferredCommander: isCommanderId(o.preferredCommander) ? o.preferredCommander : "random",
   };
 }
 

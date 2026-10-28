@@ -14,11 +14,11 @@
 - **Clamp:** the camera can't scroll past the map edges.
 - **Zoom (nice-to-have):** mouse wheel, clamped to sensible min/max.
 
-## Terrain & fog (first version)
+## Terrain & fog
 
-- **Terrain:** flat and fully passable. Units move in straight lines toward their targets. No obstacles or pathfinding yet.
-- **Fog of war:** off — the entire map is visible.
-- Both are listed as later enhancements; don't build them into core assumptions.
+- ~~Terrain flat and fully passable; fog off (first version).~~ **Superseded.**
+- **Terrain:** see **file 24**. It covers grass, roads, bridges, hills, forests, shallows, deep water, mountains and rock; movement speed by unit class; forest cover and concealment; high-ground sight and range; and where structures can be built. Units path around obstacles with weighted A*.
+- **Fog of war:** on, for the human (file 14 §11) and for every AI (file 22 §C v3).
 
 ## Fixed map features
 

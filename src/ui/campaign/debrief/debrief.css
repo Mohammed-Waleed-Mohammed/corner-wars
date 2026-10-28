@@ -1,0 +1,92 @@
+/* ═══ 28 §A.4 — mission debrief ═════════════════════════════════════════════════════════════
+   Above every in-game layer (pause/post-match sit at 45). Styled after the post-match card
+   (chamfer, gold trim, display font) but story-first and full-screen. */
+
+.db-overlay { position: fixed; inset: 0; z-index: 46; display: flex; align-items: center; justify-content: center;
+  padding: 3vh 3vw; background: rgba(6, 7, 9, 0.78); backdrop-filter: blur(4px) saturate(0.7);
+  animation: db-in 0.45s ease both; font-family: var(--st-display); color: var(--st-text); }
+@keyframes db-in { from { opacity: 0; } to { opacity: 1; } }
+.db-overlay.is-victory .st-atmos { background:
+  radial-gradient(ellipse at 50% 0%, rgba(245, 197, 24, 0.16), transparent 55%),
+  radial-gradient(ellipse at 50% 40%, transparent 0%, rgba(5, 6, 8, 0.6) 80%); }
+.db-overlay.is-defeat .st-atmos { background:
+  radial-gradient(ellipse at 50% 0%, rgba(239, 68, 68, 0.16), transparent 55%),
+  radial-gradient(ellipse at 50% 40%, transparent 0%, rgba(5, 6, 8, 0.7) 80%); }
+
+.db-card { position: relative; z-index: 1; width: min(940px, 100%); max-height: 100%; display: flex; flex-direction: column;
+  gap: 12px; padding: 20px 24px 18px; overflow: hidden; background: rgba(17, 20, 25, 0.96);
+  border: 1px solid var(--st-rule-strong); clip-path: var(--st-chamfer); box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6);
+  animation: db-card-in 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) 0.1s both; }
+.db-card::before { content: ""; position: absolute; top: 0; left: 10px; right: 10px; height: 2px; background: var(--st-amber); }
+.db-overlay.is-defeat .db-card::before { background: var(--st-bad); }
+@keyframes db-card-in { from { opacity: 0; transform: translateY(14px) scale(0.985); } to { opacity: 1; transform: none; } }
+
+/* ── headline ─────────────────────────────────────────────────────────────── */
+.db-top { position: relative; display: flex; flex-direction: column; align-items: center; text-align: center; gap: 2px; }
+.db-laurel { width: 46px; height: 46px; color: var(--st-amber); opacity: 0.85; margin-bottom: -4px; }
+.db-headline { font-size: 64px; font-weight: 700; letter-spacing: 0.32em; line-height: 1; margin-right: -0.32em;
+  text-transform: uppercase; color: var(--st-amber); text-shadow: 0 0 30px rgba(245, 197, 24, 0.35);
+  animation: db-headline 0.9s cubic-bezier(0.2, 0.8, 0.2, 1) 0.2s both; }
+.db-overlay.is-defeat .db-headline { color: var(--st-bad); text-shadow: 0 0 30px rgba(239, 68, 68, 0.35); }
+@keyframes db-headline { from { opacity: 0; letter-spacing: 0.7em; filter: blur(6px); } to { opacity: 1; filter: none; } }
+.db-title { font-size: 24px; margin-top: 4px; }
+.db-when { font-size: 11px; letter-spacing: 0.14em; color: var(--st-dim); }
+
+/* ── body: story | results ────────────────────────────────────────────────── */
+.db-body { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); gap: 22px; overflow: hidden; }
+.db-story { min-height: 0; overflow-y: auto; scrollbar-width: thin; padding-right: 6px; }
+.db-text { cursor: pointer; display: flex; flex-direction: column; gap: 12px; }
+.db-overlay.is-read .db-text { cursor: default; }
+.db-para { margin: 0; font-family: var(--sans, system-ui); font-size: 15px; line-height: 1.65; color: #d4dbe6; }
+.db-para:first-child::first-letter { font-family: var(--st-display); font-size: 2.4em; font-weight: 700; float: left;
+  line-height: 0.85; margin: 0.08em 0.1em 0 0; color: var(--fc); }
+.db-results-col { min-height: 0; overflow-y: auto; scrollbar-width: thin; display: flex; flex-direction: column; gap: 8px;
+  padding-left: 18px; border-left: 1px solid var(--st-rule); }
+.db-results .ob-label { font-size: 13px; }
+.db-badges { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 2px; }
+.db-badges .cm-stars { font-size: 16px; }
+.db-new { font-size: 11px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: #14161a;
+  background: var(--st-amber); padding: 2px 8px; clip-path: var(--st-chamfer-sm); }
+.db-codex { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; margin-top: 4px;
+  background: rgba(192, 132, 252, 0.08); border-left: 3px solid #c084fc; }
+.db-codex-tag { font-size: 10.5px; font-weight: 700; letter-spacing: 0.18em; text-transform: uppercase; color: #d8b4fe; }
+.db-codex-list { font-family: var(--sans, system-ui); font-size: 13px; color: var(--st-text); }
+
+/* ── stats strip ──────────────────────────────────────────────────────────── */
+.db-stats { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); border-top: 1px solid var(--st-rule);
+  border-bottom: 1px solid var(--st-rule); }
+.db-stat { padding: 8px 6px; text-align: center; border-right: 1px solid var(--st-rule); }
+.db-stat:last-child { border-right: 0; }
+.db-stat-v { font-size: 18px; font-weight: 700; color: var(--st-text); }
+.db-stat-l { font-size: 10px; font-weight: 700; letter-spacing: 0.16em; text-transform: uppercase; color: var(--st-dim); margin-top: 1px; }
+
+/* ── actions ──────────────────────────────────────────────────────────────── */
+.db-actions { display: flex; justify-content: flex-end; gap: 10px; }
+.db-actions .ui-btn { min-width: 132px; height: 42px; justify-content: center; }
+.db-continue.ui-btn { min-width: 190px; }
+
+/* ── The End (finale victory) ─────────────────────────────────────────────── */
+.db-end { margin: 26px 0 6px; text-align: center; font-family: Georgia, "Times New Roman", serif; font-style: italic;
+  font-size: 34px; letter-spacing: 0.08em; color: #f3e8c8; opacity: 0; transform: translateY(6px);
+  transition: opacity 1.6s ease 0.4s, transform 1.6s ease 0.4s; }
+.db-end::before, .db-end::after { content: ""; display: inline-block; width: 64px; height: 1px; margin: 0 16px;
+  vertical-align: middle; background: linear-gradient(90deg, transparent, var(--st-amber)); }
+.db-end::after { background: linear-gradient(90deg, var(--st-amber), transparent); }
+.db-overlay.is-read .db-end { opacity: 1; transform: none; }
+.db-overlay.is-finale .db-card { border-color: rgba(245, 197, 24, 0.45);
+  box-shadow: 0 0 0 1px rgba(245, 197, 24, 0.12), 0 30px 90px rgba(0, 0, 0, 0.65), 0 0 120px rgba(245, 197, 24, 0.12); }
+.db-overlay.is-finale .st-atmos { background:
+  radial-gradient(ellipse at 50% 10%, rgba(192, 132, 252, 0.18), transparent 55%),
+  radial-gradient(ellipse at 50% 0%, rgba(245, 197, 24, 0.14), transparent 45%),
+  radial-gradient(ellipse at 50% 40%, transparent 0%, rgba(5, 6, 8, 0.65) 80%); }
+
+@media (max-width: 860px), (max-height: 640px) {
+  .db-card { overflow-y: auto; }
+  .db-body { grid-template-columns: minmax(0, 1fr); overflow: visible; }
+  .db-results-col { padding-left: 0; border-left: 0; overflow: visible; }
+  .db-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .db-headline { font-size: 46px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .db-overlay, .db-card, .db-headline { animation: none; }
+}

@@ -2,6 +2,7 @@
 // the input controller (gating tryPlace / hotkeys) and the HUD (grey-out + tooltips), so the
 // priority order — tech → can't afford → no power → at limit → available — lives in ONE place.
 
+import { unitCost } from "./doctrine";
 import {
   BUILD_MAX_COUNT,
   BUILDING_DESC,
@@ -68,8 +69,9 @@ export function unitAvailability(state: GameState, owner: PlayerId, building: Bu
   if (stat.unlock && !p.unlocks[stat.unlock]) {
     return { ok: false, reason: `Requires Lab: ${UNLOCK_LABEL[stat.unlock]}` };
   }
-  if (p.gold < stat.gold) return { ok: false, reason: `Need ${stat.gold} gold (${Math.ceil(stat.gold - p.gold)} more)` };
+  const cost = unitCost(p, type); // 27 §B doctrine price
+  if (p.gold < cost) return { ok: false, reason: `Need ${cost} gold (${Math.ceil(cost - p.gold)} more)` };
   if (building.buildProgress < 1) return { ok: false, reason: "Building still under construction" };
   if (building.productionQueue.length >= PRODUCTION_QUEUE_MAX) return { ok: false, reason: `Queue full (${PRODUCTION_QUEUE_MAX})` };
-  return { ok: true, reason: `${stat.gold}g — ${UNIT_DESC[type]}` };
+  return { ok: true, reason: `${cost}g — ${UNIT_DESC[type]}` };
 }

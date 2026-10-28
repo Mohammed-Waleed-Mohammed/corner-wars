@@ -4,9 +4,10 @@
 // facing from orders, engagement discipline, and traits arrive in M4/M6. Deaths are pruned once per
 // tick by pruneFormations (survivors keep their slot — deaths leave holes, §I).
 
-import { FORMATIONS, NAV } from "../config/constants";
-import type { Formation, GameState, PlayerId, Unit, Vec2 } from "../core/types";
+import { FORMATIONS, NAV, UNIT_MOVE_CLASS } from "../config/constants";
+import type { Formation, GameState, MoveClass, PlayerId, Unit, Vec2 } from "../core/types";
 import { FORMATION_DEFS, slotWorld } from "../sim/formations";
+import { speedFactor, terrainAt } from "../state/terrain";
 import { formationEngage, nearestEnemyTo } from "./combat";
 import { healTick } from "./medic";
 import { navigateTo } from "./navigation";
@@ -17,13 +18,24 @@ export function formationOf(state: GameState, u: Unit): Formation | null {
   return state.formations.find((f) => f.id === u.formationId) ?? null;
 }
 
-/** §I cohesion: the whole shape moves at its slowest member's speed. */
+/** §I cohesion: the whole shape moves at its slowest member's speed — and (24 §B) at the terrain
+ *  factor under its anchor for its most restrictive movement class (tracked if any vehicle, else foot). */
 function slowestSpeed(state: GameState, f: Formation): number {
   let s = Infinity;
   for (const e of state.entities) {
     if (e.kind === "unit" && e.hp > 0 && e.formationId === f.id) s = Math.min(s, e.speed);
   }
-  return Number.isFinite(s) ? s : 2;
+  const base = Number.isFinite(s) ? s : 2;
+  const factor = speedFactor(terrainAt(state, f.anchor.x, f.anchor.y), formationClass(state, f), state.biome);
+  return base * (factor > 0 ? factor : 1);
+}
+
+/** 24 §B: the class a formation paths and paces as — tracked if it holds any vehicle, else foot. */
+function formationClass(state: GameState, f: Formation): MoveClass {
+  for (const e of state.entities) {
+    if (e.kind === "unit" && e.hp > 0 && e.formationId === f.id && UNIT_MOVE_CLASS[e.unitType] !== "foot") return "tracked";
+  }
+  return "foot";
 }
 
 function stepAnchor(f: Formation, tx: number, ty: number, step: number): void {
@@ -63,7 +75,7 @@ function updateFormationAnchor(state: GameState, f: Formation, dt: number): void
   const goalMoved = !f.pathGoal || Math.hypot(f.pathGoal.x - goal.x, f.pathGoal.y - goal.y) > NAV.repathDist;
   if (goalMoved || f.path.length === 0) {
     f.pathGoal = { x: goal.x, y: goal.y };
-    f.path = computePath(state, f.anchor.x, f.anchor.y, goal.x, goal.y, owner);
+    f.path = computePath(state, f.anchor.x, f.anchor.y, goal.x, goal.y, owner, formationClass(state, f));
   }
   const wp: Vec2 = f.path.length > 0 ? f.path[0] : goal; // straight-line fallback if no route
   stepAnchor(f, wp.x, wp.y, speed * dt);

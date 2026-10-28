@@ -3,10 +3,14 @@
 // one Worker. NO runtime RNG — a fixed, shared map is identical on every peer (one fewer desync
 // source than the old random terrain/resource generation this replaces).
 
-import { FOG_UPDATE_INTERVAL, START_GOLD } from "../config/constants";
-import type { FogState, GameMap, GameState, Player, PlayerId } from "../core/types";
+import { BUILDING_STATS, COMBAT_PACE, FOG_UPDATE_INTERVAL, START_GOLD, UNIT_STATS } from "../config/constants";
+import { biomeOfMap } from "../config/biomes";
+import { ABILITIES, COMMANDERS } from "../config/commanders";
+import type { BiomeId, CommanderId, FogState, GameMap, GameState, Player, PlayerId } from "../core/types";
+import { buildingHpDoctrineMult, unitHpDoctrineMult, unitRangeBonus } from "./doctrine";
 import { createBuilding, createGoldSource, createUnit } from "./entities";
 import { DEFAULT_MAP, OPEN_MAP } from "./maps";
+import { maxHpMult } from "./upgrades";
 
 function createPlayer(id: PlayerId): Player {
   return {
@@ -19,6 +23,9 @@ function createPlayer(id: PlayerId): Player {
     citadelHoldTime: 0,
     eliminated: false,
     frenzyTimer: 0,
+    commander: null,
+    abilityCooldown: 0,
+    abilityBuff: null,
     stats: { produced: 0, lost: 0, goldMined: 0, buildingsRazed: 0, citadelSeconds: 0 },
     unlocks: { advancedVehicles: false, siegeDoctrine: false, advancedDefenses: false },
     upgrades: {
@@ -57,6 +64,36 @@ export function configurePlayers(state: GameState, humanIds: PlayerId[], aiIds: 
   recomputePower(state);
 }
 
+/** 27 §D: seat each player's commander (null = none). Faction derives from the commander. Doctrine
+ *  HP/range multipliers are re-applied to what already exists (the starting yard + worker were built
+ *  before commanders were known), preserving HP fractions, and the ability starts on its initial
+ *  lockout. Identical on every peer — the commanders come from the frozen match config. */
+export function applyCommanders(state: GameState, commanders: readonly (CommanderId | null | undefined)[]): void {
+  for (const p of state.players) {
+    const c = commanders[p.id] ?? null;
+    p.commander = c && COMMANDERS[c] ? c : null;
+    p.abilityCooldown = p.commander ? ABILITIES[COMMANDERS[p.commander].ability].initial : 0;
+    p.abilityBuff = null;
+  }
+  for (const e of state.entities) {
+    if (e.owner === "neutral") continue;
+    const p = state.players[e.owner];
+    const frac = e.maxHp > 0 ? e.hp / e.maxHp : 1;
+    if (e.kind === "building") {
+      e.maxHp = BUILDING_STATS[e.buildingType].hp * buildingHpDoctrineMult(p);
+    } else {
+      e.maxHp = UNIT_STATS[e.unitType].hp * COMBAT_PACE.UNIT_HP_MULT * maxHpMult(p) * unitHpDoctrineMult(p, e.unitType);
+      e.range = UNIT_STATS[e.unitType].range + unitRangeBonus(p, e.unitType);
+    }
+    e.hp = e.maxHp * frac;
+  }
+}
+
+/** 26 §E: override the match biome (skirmish/lobby choice or a campaign mission). */
+export function applyBiome(state: GameState, biome: BiomeId): void {
+  state.biome = biome;
+}
+
 /** THE loader (18 §A): build the world from static map data. Deterministic — no RNG. */
 export function buildFromMap(map: GameMap): GameState {
   const state: GameState = {
@@ -90,6 +127,11 @@ export function buildFromMap(map: GameMap): GameState {
     humanLowPower: false,
     fogTimer: FOG_UPDATE_INTERVAL, // force a fog compute on frame 1 (no startup black flash)
     fogVersion: 0,
+    biome: biomeOfMap(map), // 26: stored biome, else the official default, else verdant
+    fields: [],
+    strikes: [],
+    nextFieldId: 1,
+    storyEvents: [],
   };
 
   // Gold mines (home + neutral + rich), all explicit in the data.

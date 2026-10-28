@@ -1,51 +1,154 @@
-// Cached static world layers (15-logic §6). Terrain never changes after generation, and fog
-// changes only every ~0.2s, so both are rendered ONCE to offscreen world-resolution canvases
-// and then blitted (a single drawImage of the visible region) each frame instead of thousands
-// of per-tile fillRects. The fog canvas is rebuilt when state.fogVersion bumps.
+// World layers (15-logic §6, 24 §D, 26 §D), all in the state's biome (`state.biome`).
+//  • STATIC terrain cache (terrainCache.ts): built once per map/biome (and again when real art
+//    finishes loading) into an offscreen world-resolution canvas, then blitted (one drawImage of the
+//    visible region) per frame.
+//  • ANIMATED overlay (visible area only, cheap, batched): the biome's water style (water.ts), tufts
+//    swaying in a travelling wind wave, tree canopies swaying.
+//  • FOG cache: rebuilt when state.fogVersion bumps; blitted with smoothing (soft edges).
 
-import { COLORS, FOG_ALPHA, TILE_SIZE } from "../../config/constants";
-import type { GameState, TerrainType } from "../../core/types";
+import { FOG_ALPHA, TILE_SIZE } from "../../config/constants";
+import type { BiomeId, GameState, TerrainType } from "../../core/types";
+import { BIOMES, type TuftSpecies } from "../../content/biomes";
 import type { Camera } from "../camera";
+import { artVersion, hasRealSprite, spriteVariants, tileHash } from "../terrainArt";
+import { buildTerrain, treesAt } from "./terrainCache";
+import { drawWaterAnim } from "./water";
 
-const TERRAIN_COLOR: Record<Exclude<TerrainType, "ground">, string> = {
-  mountain: COLORS.mountain,
-  water: COLORS.water,
-  rock: COLORS.rock,
-  void: COLORS.void, // 18 §A: rendered as an off-map background tile, not a terrain material
-};
+const TS = TILE_SIZE;
+/** While real images stream in, rebuild the static cache at most this often (each load bumps). */
+const ART_REBUILD_MS = 400;
 
 let terrainCanvas: HTMLCanvasElement | null = null;
+let terrainFor: TerrainType[][] | null = null; // the map the cache was built for (new match → rebuild)
+let terrainBiome: BiomeId | null = null;
+let terrainArtVersion = -1;
+let lastBuild = 0;
 let fogCanvas: HTMLCanvasElement | null = null;
+let fogFor: unknown = null;
 let lastFogVersion = -1;
+
+/** The state's biome (falls back to verdant for states built before biomes existed). */
+export function biomeOf(state: GameState): BiomeId {
+  return state.biome && BIOMES[state.biome] ? state.biome : "verdant";
+}
 
 // Offscreen canvases are sized to the LOADED map (18 §M2: maps vary in size), not a fixed 48×48.
 function make(state: GameState): HTMLCanvasElement {
   const c = document.createElement("canvas");
-  c.width = state.mapWidth * TILE_SIZE;
-  c.height = state.mapHeight * TILE_SIZE;
+  c.width = state.mapWidth * TS;
+  c.height = state.mapHeight * TS;
   return c;
 }
 
 export function drawTerrainLayer(ctx: CanvasRenderingContext2D, state: GameState, camera: Camera): void {
-  if (!terrainCanvas) {
-    terrainCanvas = make(state);
-    const tc = terrainCanvas.getContext("2d")!;
-    for (let ty = 0; ty < state.mapHeight; ty++) {
-      const row = state.terrain[ty];
-      for (let tx = 0; tx < state.mapWidth; tx++) {
-        if (row[tx] === "ground") continue;
-        tc.fillStyle = TERRAIN_COLOR[row[tx] as Exclude<TerrainType, "ground">];
-        tc.fillRect(tx * TILE_SIZE, ty * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+  const v = artVersion(), biome = biomeOf(state), now = performance.now();
+  const fresh = !terrainCanvas || terrainFor !== state.terrain || terrainBiome !== biome
+    || terrainCanvas.width !== state.mapWidth * TS || terrainCanvas.height !== state.mapHeight * TS;
+  if (fresh || (terrainArtVersion !== v && now - lastBuild >= ART_REBUILD_MS)) {
+    if (fresh) terrainCanvas = make(state);
+    buildTerrain(terrainCanvas!, state, biome);
+    terrainFor = state.terrain;
+    terrainBiome = biome;
+    terrainArtVersion = artVersion(); // building may itself have started this biome's image loads
+    lastBuild = now;
+  }
+  blit(ctx, terrainCanvas!, camera, true);
+}
+
+// ── animated overlay (visible region only) ────────────────────────────────────────────────────────
+
+/** Procedural (vector) tuft look per species: density, height, curl, highlight colour. */
+const TUFT: Record<TuftSpecies, { density: number; h: number; curl: number; tip?: string }> = {
+  grass: { density: 0.38, h: 1, curl: 1 },
+  dryGrass: { density: 0.26, h: 0.9, curl: 1.3 },
+  frostGrass: { density: 0.22, h: 0.85, curl: 0.8, tip: "rgba(240,246,252,0.85)" },
+  ashGrass: { density: 0.24, h: 0.9, curl: 0.9 },
+  reed: { density: 0.3, h: 1.45, curl: 0.4 },
+  crystalGrass: { density: 0.24, h: 1.05, curl: 0 },
+};
+
+export function drawTerrainAnim(ctx: CanvasRenderingContext2D, state: GameState, camera: Camera, timeMs: number): void {
+  const biome = biomeOf(state), b = BIOMES[biome];
+  const z = camera.zoom, t = timeMs / 1000;
+  const x0 = Math.max(0, Math.floor(camera.x / TS) - 2), y0 = Math.max(0, Math.floor(camera.y / TS) - 2);
+  const x1 = Math.min(state.mapWidth - 1, Math.ceil((camera.x + camera.viewportW / z) / TS) + 1);
+  const y1 = Math.min(state.mapHeight - 1, Math.ceil((camera.y + camera.viewportH / z) / TS) + 1);
+  const T = state.terrain;
+  // World px → device px, composed with the caller's CSS-px (HiDPI) transform.
+  const m = ctx.getTransform(), S = z * m.a, ex = m.e - camera.x * S, ey = m.f - camera.y * S;
+  ctx.save();
+  ctx.setTransform(S, 0, 0, S, ex, ey);
+
+  drawWaterAnim(ctx, state, biome, { x0, y0, x1, y1 }, t, z);
+
+  // Tufts swaying in a travelling wind wave: vector blades in the biome's tones, or real sprites.
+  if (z >= 0.6) {
+    const look = TUFT[b.tuft];
+    if (!hasRealSprite(biome, "tuft")) {
+      const tone = b.tuftTone;
+      for (let pass = 0; pass < 2; pass++) {
+        ctx.strokeStyle = pass === 0 ? `rgba(${tone.dark.join(",")},0.85)` : look.tip ?? `rgba(${tone.light.join(",")},0.75)`;
+        ctx.lineWidth = pass === 0 ? 1.6 : 1.1;
+        ctx.lineCap = "round";
+        ctx.beginPath();
+        for (let y = y0; y <= y1; y++) {
+          for (let x = x0; x <= x1; x++) {
+            if (T[y][x] !== "ground" && T[y][x] !== "hill") continue;
+            if (tileHash(x, y, 130) > look.density) continue;
+            const bx = x * TS + TS * tileHash(x, y, 131), by = y * TS + TS * (0.5 + 0.45 * tileHash(x, y, 132));
+            const sway = Math.sin(t * 2 - (bx + by) * 0.012 + tileHash(x, y, 133)) * 2.2 * (look.curl > 0 ? 1 : 0.4);
+            for (let k = 0; k < 3; k++) {
+              if (pass === 1 && k !== 1) continue; // pass 0: all three blades dark; pass 1: lit middle blade
+              const ox = (k - 1) * 2.6, h = (7 + 3 * tileHash(x, y, 134 + k)) * look.h;
+              ctx.moveTo(bx + ox, by);
+              if (look.curl === 0) ctx.lineTo(bx + ox * 1.4 + sway, by - h); // crystal needles: straight
+              else ctx.quadraticCurveTo(bx + ox + sway * 0.4 * look.curl, by - h * 0.6, bx + ox * 1.6 + sway, by - h);
+            }
+          }
+        }
+        ctx.stroke();
+      }
+    } else {
+      const tufts = spriteVariants(biome, "tuft");
+      for (let y = y0; y <= y1; y++) {
+        for (let x = x0; x <= x1; x++) {
+          if (T[y][x] !== "ground" && T[y][x] !== "hill") continue;
+          if (tileHash(x, y, 130) > Math.min(0.3, look.density)) continue;
+          const bx = x * TS + TS * tileHash(x, y, 131), by = y * TS + TS * (0.5 + 0.45 * tileHash(x, y, 132));
+          const sway = Math.sin(t * 2 - (bx + by) * 0.012 + tileHash(x, y, 133)) * 0.18;
+          const img = tufts[Math.floor(tileHash(x, y, 135) * tufts.length)];
+          const s = TS * 0.7;
+          ctx.setTransform(S, 0, sway * S, S, ex + bx * S, ey + by * S); // skew around the base = sway
+          ctx.drawImage(img, -s / 2, -s, s, s);
+        }
+      }
+      ctx.setTransform(S, 0, 0, S, ex, ey);
+    }
+  }
+
+  // Tree canopies, gently swaying (shadows are in the static cache). Forest tiles draw the biome's
+  // species (woodland, palms, spruce, charred trunks, mangroves, crystal groves…).
+  const trees = spriteVariants(biome, "tree");
+  for (let y = y0; y <= y1; y++) {
+    for (let x = x0; x <= x1; x++) {
+      if (T[y][x] !== "forest") continue;
+      for (const tr of treesAt(x, y, b)) {
+        const a = Math.sin(t * 1.1 + tr.phase) * 0.035 * tr.sway;
+        const cos = Math.cos(a) * S, sin = Math.sin(a) * S;
+        ctx.setTransform(cos, sin, -sin, cos, ex + tr.wx * S, ey + tr.wy * S);
+        ctx.drawImage(trees[tr.v % trees.length], -tr.size / 2, -tr.size / 2, tr.size, tr.size);
       }
     }
   }
-  blit(ctx, terrainCanvas, camera);
+  ctx.restore();
 }
+
+// ── fog ─────────────────────────────────────────────────────────────────────────────────────────
 
 export function drawFogLayer(ctx: CanvasRenderingContext2D, state: GameState, camera: Camera): void {
   const version = state.fogVersion ?? 0;
-  if (!fogCanvas || lastFogVersion !== version) {
-    if (!fogCanvas) fogCanvas = make(state);
+  if (!fogCanvas || fogFor !== state.fog || lastFogVersion !== version) {
+    if (!fogCanvas || fogFor !== state.fog) fogCanvas = make(state);
     const fc = fogCanvas.getContext("2d")!;
     fc.clearRect(0, 0, fogCanvas.width, fogCanvas.height);
     for (let ty = 0; ty < state.mapHeight; ty++) {
@@ -54,16 +157,17 @@ export function drawFogLayer(ctx: CanvasRenderingContext2D, state: GameState, ca
         const st = row[tx];
         if (st === "visible") continue;
         fc.fillStyle = `rgba(0,0,0,${st === "unexplored" ? FOG_ALPHA.unexplored : FOG_ALPHA.explored})`;
-        fc.fillRect(tx * TILE_SIZE, ty * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+        fc.fillRect(tx * TS, ty * TS, TS, TS);
       }
     }
     lastFogVersion = version;
+    fogFor = state.fog;
   }
-  blit(ctx, fogCanvas, camera);
+  blit(ctx, fogCanvas, camera, true); // smoothing on → soft fog edges (24 §D)
 }
 
 /** Blit the visible world region of an offscreen canvas to the viewport (clamped to the map). */
-function blit(ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement, camera: Camera): void {
+function blit(ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement, camera: Camera, smooth: boolean): void {
   const z = camera.zoom;
   let sx = camera.x;
   let sy = camera.y;
@@ -81,7 +185,7 @@ function blit(ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement, camera: 
   if (sw <= 0 || sh <= 0) return;
 
   const prev = ctx.imageSmoothingEnabled;
-  ctx.imageSmoothingEnabled = false;
+  ctx.imageSmoothingEnabled = smooth;
   ctx.drawImage(canvas, sx, sy, sw, sh, dx, dy, dw, dh);
   ctx.imageSmoothingEnabled = prev;
 }

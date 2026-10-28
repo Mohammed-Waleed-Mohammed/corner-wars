@@ -6,6 +6,7 @@
 
 import { FOG_UPDATE_INTERVAL } from "../config/constants";
 import type { FogState, GameState } from "../core/types";
+import { sightOf } from "../state/terrain";
 
 export function updateFog(state: GameState, dt: number): void {
   state.fogTimer = (state.fogTimer ?? 0) + dt;
@@ -32,7 +33,7 @@ export function updateFog(state: GameState, dt: number): void {
     if (e.owner !== state.viewPlayer || e.hp <= 0) continue;
     const cx = e.kind === "building" ? e.x + e.width / 2 : e.x;
     const cy = e.kind === "building" ? e.y + e.height / 2 : e.y;
-    reveal(state, cx, cy, e.sightRadius);
+    reveal(state, cx, cy, sightOf(state, e)); // 24 §B: +2 from high ground
   }
 }
 

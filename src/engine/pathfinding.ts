@@ -1,12 +1,15 @@
 // A* on the tile grid (§12): 8-directional, octile heuristic, no diagonal corner-cutting.
-// Impassable = non-ground terrain OR a building footprint. If the goal tile is blocked
+// Impassable = impassable terrain OR a building footprint. If the goal tile is blocked
 // (e.g. a building), routes to the nearest passable tile and lets the caller close the last
 // gap. Paths are string-pulled (line-of-sight smoothing) to remove per-tile zig-zag. A node
 // cap bounds worst-case cost; callers cache the result and only recompute when needed.
+// 24 §B: with a movement class, entering a tile costs step / speedFactor(tile, class) and the
+// heuristic is scaled by 1 / FASTEST_MOVE[class] (admissible), so units take roads and go round
+// forests/shallows when that's faster; smoothing never shortcuts across slower-than-normal tiles.
 
 import { NAV } from "../config/constants";
-import type { GameState, Owner, Vec2 } from "../core/types";
-import { isGround } from "../state/terrain";
+import type { GameState, MoveClass, Owner, Vec2 } from "../core/types";
+import { fastestFactor, isGround, speedFactor } from "../state/terrain";
 
 // A gate never blocks generic movement (it's owner-gated in computePath instead); every other
 // building blocks. Used by navPassable (separation, spawn-snapping, no-route inching).
@@ -76,7 +79,7 @@ function gateOccupancy(state: GameState, owner: Owner | undefined): Set<number> 
 }
 
 export function computePath(
-  state: GameState, fromX: number, fromY: number, toX: number, toY: number, owner?: Owner,
+  state: GameState, fromX: number, fromY: number, toX: number, toY: number, owner?: Owner, cls?: MoveClass,
 ): Vec2[] {
   const W = state.mapWidth;
   const H = state.mapHeight;
@@ -88,6 +91,15 @@ export function computePath(
   const occ = buildingOccupancy(state);
   const gates = gateOccupancy(state, owner);
   const pass = (x: number, y: number) => isGround(state, x, y) && !occ.has(y * W + x) && !gates.has(y * W + x);
+  // Weighted terrain (24 §B): cost multiplier per tile for this class; smoothing may only cross
+  // normal-or-faster tiles, so a string-pulled shortcut never slices through a forest or a ford.
+  const terrain = state.terrain;
+  const biome = state.biome;
+  const costMul = cls ? (x: number, y: number): number => 1 / speedFactor(terrain[y][x], cls, biome) : null;
+  const hScale = cls ? 1 / fastestFactor(biome, cls) : 1; // 26 §C: admissible under the biome
+  const passSmooth = cls
+    ? (x: number, y: number): boolean => pass(x, y) && speedFactor(terrain[y][x], cls, biome) >= 1
+    : pass;
 
   if (sx === gx && sy === gy) return [];
   if (!pass(gx, gy)) {
@@ -107,12 +119,12 @@ export function computePath(
   g[start] = 0;
 
   const open = new MinHeap();
-  open.push(start, heuristic(sx, sy, gx, gy));
+  open.push(start, heuristic(sx, sy, gx, gy) * hScale);
   let expansions = 0;
 
   while (open.size > 0 && expansions < NAV.maxAStarNodes) {
     const cur = open.pop();
-    if (cur === goal) return smooth(fromX, fromY, reconstruct(came, goal, W), pass);
+    if (cur === goal) return smooth(fromX, fromY, reconstruct(came, goal, W), passSmooth);
     if (closed[cur]) continue;
     closed[cur] = 1;
     expansions++;
@@ -128,11 +140,11 @@ export function computePath(
       if (dx !== 0 && dy !== 0 && (!pass(cx + dx, cy) || !pass(cx, cy + dy))) continue; // no corner cut
       const ni = ny * W + nx;
       if (closed[ni]) continue;
-      const tentative = g[cur] + DIRS[d][2];
+      const tentative = g[cur] + DIRS[d][2] * (costMul ? costMul(nx, ny) : 1);
       if (tentative < g[ni]) {
         came[ni] = cur;
         g[ni] = tentative;
-        open.push(ni, tentative + heuristic(nx, ny, gx, gy));
+        open.push(ni, tentative + heuristic(nx, ny, gx, gy) * hScale);
       }
     }
   }

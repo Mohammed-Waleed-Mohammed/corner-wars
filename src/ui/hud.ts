@@ -23,9 +23,11 @@ import {
   RESEARCHES,
   UNIT_HOTKEY_SLOTS,
   UNIT_LABEL,
-  UNIT_STATS,
 } from "../config/constants";
-import type { Building, BuildingType, GameState, PlayerId, ResearchKey, UnitType } from "../core/types";
+import type { Building, BuildingType, GameState, Player, PlayerId, ResearchKey, UnitType } from "../core/types";
+import { factionOf } from "../config/commanders";
+import { UNIT_NAMES } from "../content/factions";
+import { researchTime, unitBuildTime, unitCost } from "../state/doctrine";
 import type { ArmyBarEntry, FormationOption, SelectionDetail } from "../input/controller";
 import { deriveBuffs } from "../state/buffs";
 import { buildAvailability, unitAvailability } from "../state/buildRules";
@@ -58,7 +60,14 @@ export interface HudInfo {
   selection: SelectionDetail; // 21 §G.3 portrait/info zones
 }
 
-const UNIT_LABELS = UNIT_LABEL;
+// 27 §A: units are named by the local player's faction (base name in tooltips) and priced by doctrine.
+let hudPlayer: Player | null = null; // set at the top of every update()
+function unitName(u: UnitType): string {
+  const f = factionOf(hudPlayer?.commander);
+  return f ? UNIT_NAMES[f][u] : UNIT_LABEL[u];
+}
+const unitPrice = (u: UnitType): number => unitCost(hudPlayer, u);
+const UNIT_LABELS = new Proxy(UNIT_LABEL, { get: (_t, k: string) => unitName(k as UnitType) }) as Record<UnitType, string>;
 const BUILDING_LABELS = BUILDING_LABEL;
 // §J: power button order. Icon/label/tooltip come from POWER_INFO (numbers templated from CITADEL_POWERS).
 const POWER_ORDER = ["artillery", "reinforcements", "frenzy", "repair", "ion"] as const;
@@ -408,6 +417,7 @@ export class Hud {
 
   update(state: GameState, info: HudInfo): void {
     const p = state.players[this.local];
+    hudPlayer = p;
     // 21 §L number tween: the readout lerps toward the real value at TWEEN_RATE per frame.
     // Display-only — the sim value stays exact; snap when close so it never drifts.
     this.displayGold += (p.gold - this.displayGold) * HUD_ANIM.TWEEN_RATE;
@@ -808,7 +818,7 @@ export class Hud {
     }
     if (this.ccQueueCounter) this.ccQueueCounter.textContent = `${queue.length}/${max}`;
     if (this.ccQueueFront && queue.length > 0) {
-      const total = isLab ? RESEARCH[queue[0] as ResearchKey].time : UNIT_STATS[queue[0] as UnitType].buildTime;
+      const total = isLab ? researchTime(hudPlayer, queue[0] as ResearchKey) : unitBuildTime(hudPlayer, queue[0] as UnitType); // 27 doctrine-adjusted
       const timer = isLab ? b.researchTimer ?? 0 : b.productionTimer;
       this.ccQueueFront.style.width = `${total > 0 ? Math.min(1, timer / total) * 100 : 0}%`;
     }
@@ -857,7 +867,7 @@ export class Hud {
       const prods = PRODUCES[b.buildingType] ?? [];
       prods.forEach((u, i) => {
         if (i > 5) return;
-        setSlot(i, `${UNIT_LABELS[u].toUpperCase()} · ${UNIT_STATS[u].gold}`, UNIT_HOTKEY_SLOTS[i] ?? "", () => this.buildHandler?.(u));
+        setSlot(i, `${UNIT_LABELS[u].toUpperCase()} · ${unitPrice(u)}`, UNIT_HOTKEY_SLOTS[i] ?? "", () => this.buildHandler?.(u));
         this.ccSlots[i].label.classList.add("cost");
       });
       let next = Math.min(prods.length, 6);
@@ -915,7 +925,7 @@ interface Item {
 function buildItems(type: BuildingType): Item[] {
   const items: Item[] = [];
   (PRODUCES[type] ?? []).forEach((u, i) => {
-    items.push({ kind: "unit", key: u, label: UNIT_LABELS[u], cost: UNIT_STATS[u].gold, hotkey: UNIT_HOTKEY_SLOTS[i] });
+    items.push({ kind: "unit", key: u, label: UNIT_LABELS[u], cost: unitPrice(u), hotkey: UNIT_HOTKEY_SLOTS[i] });
   });
   return items;
 }
