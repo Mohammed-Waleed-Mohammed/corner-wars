@@ -11,7 +11,7 @@ import { speedFactor, terrainAt } from "../state/terrain";
 import { formationEngage, nearestEnemyTo } from "./combat";
 import { healTick } from "./medic";
 import { navigateTo } from "./navigation";
-import { computePath } from "./pathfinding";
+import { computePath, enemyGateAt, navPassable } from "./pathfinding";
 
 export function formationOf(state: GameState, u: Unit): Formation | null {
   if (u.formationId == null) return null;
@@ -46,6 +46,32 @@ function stepAnchor(f: Formation, tx: number, ty: number, step: number): void {
   f.anchor = { x: f.anchor.x + dx * t, y: f.anchor.y + dy * t };
 }
 
+/** A tile the anchor may enter: walkable, no building, not an enemy gate. */
+function anchorPassable(state: GameState, f: Formation, x: number, y: number): boolean {
+  return navPassable(state, Math.floor(x), Math.floor(y)) && !enemyGateAt(state, Math.floor(x), Math.floor(y), f.owner);
+}
+
+/** Off-route anchor move (no A* route, or Fall Back): step only onto passable ground, sliding along
+ *  a wall on one axis — the anchor never crosses mountains, water or buildings (§I). */
+function stepAnchorPassable(state: GameState, f: Formation, nx: number, ny: number): void {
+  if (anchorPassable(state, f, nx, ny)) f.anchor = { x: nx, y: ny };
+  else if (anchorPassable(state, f, nx, f.anchor.y)) f.anchor = { x: nx, y: f.anchor.y };
+  else if (anchorPassable(state, f, f.anchor.x, ny)) f.anchor = { x: f.anchor.x, y: ny };
+}
+
+/** §I cohesion: true while more than half the live members are over LAG_DIST from their slots. */
+function membersLagging(state: GameState, f: Formation): boolean {
+  let n = 0, far = 0;
+  const lag2 = FORMATIONS.COHESION.LAG_DIST ** 2;
+  for (const e of state.entities) {
+    if (e.kind !== "unit" || e.hp <= 0 || e.formationId !== f.id || !e.slotOffset) continue;
+    n++;
+    const s = slotWorld(f.anchor, f.facing, e.slotOffset.dx, e.slotOffset.dy);
+    if ((e.x - s.x) ** 2 + (e.y - s.y) ** 2 > lag2) far++;
+  }
+  return far * 2 > n;
+}
+
 /** Advance every formation's anchor along its path this tick (before units chase their slots). */
 export function updateFormations(state: GameState, dt: number): void {
   for (const f of state.formations) updateFormationAnchor(state, f, dt);
@@ -71,14 +97,33 @@ function updateFormationAnchor(state: GameState, f: Formation, dt: number): void
     f.moveTarget = null; f.path = []; f.pathGoal = null; f.stationarySince = state.time;
     return;
   }
+  // §I: hold the shape while most members are still catching up — bounded, so a stuck unit can't
+  // freeze the army.
+  if (membersLagging(state, f)) {
+    f.cohesionWait = (f.cohesionWait ?? 0) + dt;
+    if (f.cohesionWait <= FORMATIONS.COHESION.MAX_WAIT) return;
+  } else f.cohesionWait = 0;
   const owner = f.owner as PlayerId;
   const goalMoved = !f.pathGoal || Math.hypot(f.pathGoal.x - goal.x, f.pathGoal.y - goal.y) > NAV.repathDist;
   if (goalMoved || f.path.length === 0) {
     f.pathGoal = { x: goal.x, y: goal.y };
     f.path = computePath(state, f.anchor.x, f.anchor.y, goal.x, goal.y, owner, formationClass(state, f));
   }
-  const wp: Vec2 = f.path.length > 0 ? f.path[0] : goal; // straight-line fallback if no route
-  stepAnchor(f, wp.x, wp.y, speed * dt);
+  if (f.path.length > 0) {
+    const wp: Vec2 = f.path[0];
+    stepAnchor(f, wp.x, wp.y, speed * dt); // A* waypoints and the segments between them are passable
+  } else {
+    // No route (goal walled off, or already in the goal tile): edge straight in, on passable ground only.
+    const dx = goal.x - f.anchor.x, dy = goal.y - f.anchor.y;
+    const d = Math.hypot(dx, dy);
+    const t = Math.min(1, (speed * dt) / d);
+    const before = f.anchor;
+    stepAnchorPassable(state, f, f.anchor.x + dx * t, f.anchor.y + dy * t);
+    if (f.anchor === before) { // walled off: this is as close as it gets — stop here
+      f.moveTarget = null; f.path = []; f.pathGoal = null; f.stationarySince = state.time;
+      return;
+    }
+  }
   if (f.path.length > 0 && Math.hypot(f.path[0].x - f.anchor.x, f.path[0].y - f.anchor.y) <= NAV.waypointReach) {
     f.path.shift();
   }
@@ -100,12 +145,9 @@ function updateFallBack(state: GameState, f: Formation, dt: number): void {
   f.facing = Math.atan2(ey - f.anchor.y, ex - f.anchor.x); // front stays toward the enemy
   const away = Math.atan2(f.anchor.y - ey, f.anchor.x - ex);
   const step = slowestSpeed(state, f) * FORMATIONS.FALL_BACK_SPEED * dt;
-  const nx = f.anchor.x + Math.cos(away) * step;
-  const ny = f.anchor.y + Math.sin(away) * step;
-  f.anchor = {
-    x: Math.max(0.5, Math.min(state.mapWidth - 0.5, nx)),
-    y: Math.max(0.5, Math.min(state.mapHeight - 0.5, ny)),
-  };
+  const nx = Math.max(0.5, Math.min(state.mapWidth - 0.5, f.anchor.x + Math.cos(away) * step));
+  const ny = Math.max(0.5, Math.min(state.mapHeight - 0.5, f.anchor.y + Math.sin(away) * step));
+  stepAnchorPassable(state, f, nx, ny); // backs up to a cliff or river and holds there, never through it
 }
 
 /** Drive one in-formation unit: fight from its slot on a leash if there's a target (§H), else hold the

@@ -235,6 +235,7 @@ Units are assigned to persistent **squads**, each with a role and a formation:
   - If the push objective hasn't been in sight for 45 s (`ATTACK_INTEL_TICKS`), main stages at home and files a scout request. The scout drops its tour and goes there first.
   - Once the AI has looked, it decides on fresh information.
   - If no look arrives within 30 s (`ATTACK_INTEL_WAIT_TICKS`), it launches anyway on projected odds × 0.8 (`STALE_INTEL_DISCOUNT`), assuming defenders it can't see.
+- **v4 REPEL hysteresis.** A REPEL keeps its last seen threat for 5 s (`REPEL_LINGER_TICKS`) after that threat drops out of sight. Before this, one enemy stepping in and out of view flipped main between REPEL and home every second or so; on screen the army stopped, turned and walked somewhere else.
 
 ## L. Formation tactics (formation vs formation)
 
@@ -261,6 +262,7 @@ Units are assigned to persistent **squads**, each with a role and a formation:
   - The candidates are the 25% of main's value nearest the Citadel.
   - The weight now scales a deterministic threshold. The old `rng() < weight` was re-rolled every 0.5 s, so it passed within seconds whatever the weight.
 - **v2 garrison:** the squad **holds** the point after capture (it used to merge back into main at once, leaving the point empty). It gives its survivors back to main and retreats only when its squad odds there drop below 0.6.
+- **v4 retry cooldown:** after a Citadel squad falls back, no new one is formed for 20 s (`CITADEL_RETRY_TICKS`). The launch read only counts enemies in sight, so from home it read 99 and re-sent the squad into the same losing fight every 0.5 s.
 - **v2 Frenzy:** read at main's contact point with squad odds, and never re-cast while Frenzy is active.
 
 ## N. Difficulty tiers

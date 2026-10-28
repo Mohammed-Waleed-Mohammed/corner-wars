@@ -5,21 +5,17 @@
 // subject to the low-power penalty (so a player can never get stuck unable to build the
 // Power Plant that would fix their low-power state). Completing a building recomputes power.
 
-import { BUILDING_STATS, CONSTRUCTION, HARVEST, REPAIR } from "../config/constants";
+import { BUILDING_STATS, CONSTRUCTION, FOOTPRINT, REPAIR } from "../config/constants";
 import type { Building, GameState, PlayerId, Unit } from "../core/types";
 import { createUnit } from "../state/entities";
 import { recomputePower } from "../state/gameState";
 import { workerBuildMult } from "../state/upgrades";
-import { navigateTo } from "./navigation";
+import { atFootprint, goToFootprint } from "./footprint";
 
-/** A worker counts toward a site once within contact range of its footprint. The extra
- *  margin over the navigate contact keeps a parked builder reliably "at" the site despite
- *  separation jostle. */
+/** A worker counts toward a site once within reach of its footprint's edge (16 §2). The parked
+ *  slack keeps a builder reliably "at" the site despite separation jostle. */
 function atBuildSite(w: Unit, site: Building): boolean {
-  const cx = site.x + site.width / 2;
-  const cy = site.y + site.height / 2;
-  const contact = Math.max(site.width, site.height) / 2 + HARVEST.dropoffPadding + 0.4;
-  return Math.hypot(cx - w.x, cy - w.y) <= contact;
+  return atFootprint(w, site, FOOTPRINT.PARKED_SLACK);
 }
 
 export function updateConstruction(state: GameState, dt: number): void {
@@ -86,16 +82,16 @@ export function updateBuilder(state: GameState, w: Unit, dt: number): void {
     // multi-placements) finish without leaving later segments paused; else fall back to harvest/idle.
     const next = nearestUnbuiltSite(state, w);
     w.buildTargetId = next ? next.id : null;
+    w.standSpot = null;
+    w.standFor = null;
     // Reset to idle (not "gathering") so the harvest loop re-initialises its phase cleanly on
     // release — otherwise a worker pulled mid-"mining" would resume that stale phase and mine
     // its old source from the build site without ever returning to it.
     w.state = "idle";
     return;
   }
-  const cx = site.x + site.width / 2;
-  const cy = site.y + site.height / 2;
-  const contact = Math.max(site.width, site.height) / 2 + HARVEST.dropoffPadding;
-  w.state = navigateTo(state, w, cx, cy, dt, contact) ? "gathering" : "moving";
+  // 16 §2: walk to the nearest free side of the site (not its centre) and build from its edge.
+  w.state = goToFootprint(state, w, site, dt, w.state === "gathering") ? "gathering" : "moving";
 }
 
 // ── Worker repair (16 §7) ────────────────────────────────────────────────────
@@ -140,13 +136,12 @@ export function updateRepairer(state: GameState, w: Unit, dt: number): void {
   const b = id != null ? state.entities.find((x) => x.id === id) : undefined;
   if (!b || b.kind !== "building" || b.owner !== w.owner || b.buildProgress < 1 || b.hp <= 0 || b.hp >= b.maxHp) {
     w.repairTarget = null; // done/gone — fall back to harvest/idle next frame
+    w.standSpot = null;
+    w.standFor = null;
     w.state = "idle";
     return;
   }
-  const cx = b.x + b.width / 2;
-  const cy = b.y + b.height / 2;
-  const contact = Math.max(b.width, b.height) / 2 + HARVEST.dropoffPadding;
-  w.state = navigateTo(state, w, cx, cy, dt, contact) ? "repairing" : "moving";
+  w.state = goToFootprint(state, w, b, dt, w.state === "repairing") ? "repairing" : "moving";
 }
 
 /** Nearest unbuilt friendly site within CONSTRUCTION.chainRadius of a just-freed Worker (§1 lines). */

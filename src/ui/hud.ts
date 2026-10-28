@@ -16,6 +16,7 @@ import { getSettings, onSettingsChange } from "./settings/settings";
 import { TechTree } from "./techTree";
 import { Alerts } from "./hud/alerts";
 import { CommandCard } from "./hud/commandCard";
+import { WorldTip } from "./hud/worldTip";
 import { POWER_ORDER } from "./hud/cards";
 import type { HudControls } from "./hud/controls";
 import { glyph, icon } from "./hud/glyphs";
@@ -59,6 +60,7 @@ export class Hud {
   private readonly tabs: ProductionTabs;
   private readonly alerts: Alerts;
   private ctrl: HudControls | null = null;
+  private readonly worldTip: WorldTip;
   private menuHandler: (() => void) | null = null;
 
   private gold: HTMLElement; private income: HTMLElement; private timer: HTMLElement; private dev: HTMLElement;
@@ -129,6 +131,7 @@ export class Hud {
       </div>`;
     parent.appendChild(root);
     this.rootEl = root;
+    this.worldTip = new WorldTip(root, localPlayerId);
 
     this.gold = q(root, "[data-gold]"); this.income = q(root, "[data-income]"); this.timer = q(root, "[data-timer]");
     this.dev = q(root, "[data-dev]"); this.powerText = q(root, "[data-powertext]"); this.powerFill = q(root, "[data-pfill]");
@@ -202,6 +205,7 @@ export class Hud {
     window.removeEventListener("keydown", this.onKey);
     this.disposeSettings();
     setMinimapScreenRect(null);
+    this.worldTip.destroy();
     this.rootEl.remove();
     this.techTree.destroyOverlay();
   }
@@ -295,6 +299,7 @@ export class Hud {
 
     this.card.update(state, info);
     this.selection.update(state, info);
+    this.worldTip.update(this.ctrl);
     this.tabs.update(state, info.selectedBuilding);
     this.alerts.update(state);
 

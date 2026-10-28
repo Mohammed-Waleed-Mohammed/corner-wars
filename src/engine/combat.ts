@@ -25,14 +25,13 @@ import { clamp } from "../core/math";
 import type { AnyEntity, Building, CombatType, Formation, GameState, Owner, Unit, Vec2 } from "../core/types";
 import { createProjectile, spawnEffect } from "../state/entities";
 import { isLowPower, recomputePower } from "../state/gameState";
-import { coverMult, defenseRangeOf, rangeOf, terrainSpeedMult } from "../state/terrain";
+import { coverMult, defenseRangeOf, rangeOf } from "../state/terrain";
 import { weaponDamageMult } from "../state/upgrades";
 import { defenseDamageDoctrineMult, defenseRangeBonus, unitDamageDoctrineMult } from "../state/doctrine";
 import { damageTakenMult, hostileDamageMult } from "../state/fields";
 import { FORMATION_DEFS } from "../sim/formations";
 import { updateUnitMovement } from "./movement";
 import { navigateTo } from "./navigation";
-import { navPassable } from "./pathfinding";
 import { entityHash } from "./spatial";
 
 const FRENZY_DMG_MULT = 1 + (CITADEL_POWERS.frenzy.damageBonus ?? 0);
@@ -183,19 +182,16 @@ export function formationEngage(state: GameState, u: Unit, f: Formation, slot: V
     }
     return true;
   }
-  // Not in range: shift toward the target but stay within LEASH of the slot (never chase off).
+  // Not in range: a unit still marching up to its slot (or pushed off it) walks back first — the
+  // caller routes it there with A*. Never snap it onto the leash circle: that teleported units
+  // across the map and through mountains.
+  if (Math.hypot(u.x - slot.x, u.y - slot.y) > leash) return false;
+  // Near the slot: shift toward the target, at most LEASH from the slot (never chase off), routed
+  // like any other move so it never cuts through terrain or buildings.
   const c = entityCenter(target);
-  const step = u.speed * speedMult * terrainSpeedMult(state, u) * dt; // 24 §B terrain speed
-  const ang = Math.atan2(c.y - u.y, c.x - u.x);
-  let nx = u.x + Math.cos(ang) * step;
-  let ny = u.y + Math.sin(ang) * step;
-  const off = Math.hypot(nx - slot.x, ny - slot.y);
-  if (off > leash) { // clamp back onto the leash circle around the slot
-    const a2 = Math.atan2(ny - slot.y, nx - slot.x);
-    nx = slot.x + Math.cos(a2) * leash;
-    ny = slot.y + Math.sin(a2) * leash;
-  }
-  if (navPassable(state, Math.floor(nx), Math.floor(ny))) { u.x = nx; u.y = ny; }
+  const toT = Math.hypot(c.x - slot.x, c.y - slot.y) || 1;
+  const k = Math.min(leash, toT) / toT;
+  navigateTo(state, u, slot.x + (c.x - slot.x) * k, slot.y + (c.y - slot.y) * k, dt, 0.15, u.speed * speedMult);
   u.state = "moving";
   return true;
 }

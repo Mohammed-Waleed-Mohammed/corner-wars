@@ -1,13 +1,16 @@
 // 30 §B — the 5×3 command card. 15 permanent buttons; their actions come from cards.ts, re-derived every
 // frame (cheap), with the DOM rebuilt only when the card changes. Positional hotkeys (KeyboardEvent.code)
-// fire exactly the slot whose key is printed on it. Hovering shows the tooltip panel above the card.
+// fire exactly the slot whose key is printed on it. Hovering shows the tooltip panel above the card, led by a
+// plain-words description of what the building or unit does. Sell arms on the first press and sells on
+// the second within SELL.confirmMs (Shift sells at once).
 
 import { ABILITIES, COMMANDERS, factionOf } from "../../config/commanders";
-import { BUILDING_LABEL, BUILDING_STATS, CITADEL_POWERS, HUD, POWER_INFO, PRODUCTION_QUEUE_MAX, UNIT_LABEL, UNIT_STATS } from "../../config/constants";
+import { BUILDING_DESC, BUILDING_LABEL, BUILDING_STATS, CITADEL_POWERS, HUD, POWER_INFO, PRODUCTION_QUEUE_MAX, SELL, UNIT_DESC, UNIT_LABEL, UNIT_STATS } from "../../config/constants";
 import { COMMANDER_INFO, UNIT_NAMES, abilityCooldownText, abilityText } from "../../content/factions";
 import type { GameState, Player, PlayerId } from "../../core/types";
 import { buildAvailability, unitAvailability } from "../../state/buildRules";
 import { unitBuildTime, unitCost } from "../../state/doctrine";
+import { canSell, sellRefund } from "../../engine/sell";
 import { portraitCanvas } from "../../render/portraits";
 import type { HudInfo } from "../hud";
 import { playUiSound } from "../uiSound";
@@ -47,6 +50,7 @@ export class CommandCard {
   private readonly tip: HTMLElement;
   private readonly local: PlayerId;
   private readonly openResearch: () => void;
+  private sellArmed: { id: number; at: number } | null = null; // first Sell press, awaiting the confirm
 
   constructor(grid: HTMLElement, tip: HTMLElement, local: PlayerId, openResearch: () => void) {
     this.tip = tip;
@@ -80,7 +84,8 @@ export class CommandCard {
     if (rootSig !== this.rootSig) { this.rootSig = rootSig; this.sub = null; }
     const card: CardId = this.sub ?? root;
     this.actions = cardSlots(card, { building: b, formations: info.formationOptions });
-    const sig = `${card}|${rootSig}|${this.player()?.commander ?? ""}`;
+    if (this.sellArmed && (this.sellArmed.id !== b?.id || performance.now() - this.sellArmed.at > SELL.confirmMs)) this.sellArmed = null;
+    const sig = `${card}|${rootSig}|${this.player()?.commander ?? ""}|${this.sellArmed ? "armed" : ""}`;
     if (sig !== this.sig) { this.sig = sig; this.rebuild(); }
     for (let i = 0; i < 15; i++) this.refresh(i);
     if (this.hover >= 0) this.renderTip();
@@ -134,8 +139,9 @@ export class CommandCard {
       case "cmd": return CMD_INFO[a.cmd].label;
       case "ability": return p?.commander ? COMMANDER_INFO[p.commander].abilityName : "Ability";
       case "power": return POWER_SHORT[a.key] ?? POWER_INFO[a.key]?.label ?? a.key;
-      case "open": return a.sub === "powers" ? "Powers" : "More…";
+      case "open": return a.sub === "powers" ? "Powers" : a.sub === "structures" ? "Build" : "More…";
       case "research": return "Research";
+      case "sell": return this.sellArmed ? "Confirm" : (this.info?.selectedBuilding?.buildProgress ?? 1) < 1 ? "Cancel" : "Sell";
       case "back": return "Back";
     }
   }
@@ -155,8 +161,9 @@ export class CommandCard {
         return c;
       }
       case "power": return icon(a.key === "artillery" ? "artillery_power" : (a.key as "reinforcements"), 28);
-      case "open": return a.sub === "powers" ? icon("citadel", 28, HUD.ENERGY) : glyph("more", 26);
+      case "open": return a.sub === "powers" ? icon("citadel", 28, HUD.ENERGY) : a.sub === "structures" ? glyph("build", 26) : glyph("more", 26);
       case "research": return icon("flask", 28);
+      case "sell": return glyph("sell", 26, HUD.TRIM_GOLD);
       case "back": return glyph("back", 26);
     }
   }
@@ -210,6 +217,14 @@ export class CommandCard {
       case "open":
         if (a.sub === "powers") { out.cost = String(Math.floor(p.commandEnergy)); out.costKind = "energy"; }
         break;
+      case "sell": {
+        const b = info.selectedBuilding;
+        out.enabled = !!b && canSell(b);
+        out.reason = out.enabled ? "" : "The Construction Yard can't be sold";
+        if (b && out.enabled) { out.cost = `+${sellRefund(b)}`; out.costKind = "gold"; }
+        out.active = !!this.sellArmed;
+        break;
+      }
       default: break;
     }
     return out;
@@ -222,6 +237,7 @@ export class CommandCard {
     const l = this.live(a);
     const navigation = a.kind === "open" || a.kind === "back" || a.kind === "research";
     if (!l.enabled && !navigation) { if (fromKey) playUiSound("ui_error"); return; }
+    if (a.kind === "sell") { this.sell(shift); if (fromKey) this.flash(i); return; }
     if (fromKey) { playUiSound("ui_click"); this.flash(i); }
     switch (a.kind) {
       case "place": c.enterPlacement(a.building); break;
@@ -242,6 +258,22 @@ export class CommandCard {
         break;
     }
     if (a.kind === "power" || a.kind === "ability") this.sub = null; // a power fired → back to the root card
+  }
+
+  /** First press arms (the button turns into "Confirm"); a second press within SELL.confirmMs — or a
+   *  Shift press — sells. Selling changes the selection, which resets the card. */
+  private sell(now: boolean): void {
+    const b = this.info?.selectedBuilding;
+    if (!b || !this.ctrl) return;
+    if (now || (this.sellArmed && this.sellArmed.id === b.id)) {
+      this.sellArmed = null;
+      this.ctrl.sellSelected();
+      playUiSound("ui_sell");
+    } else {
+      this.sellArmed = { id: b.id, at: performance.now() };
+      playUiSound("ui_click");
+    }
+    this.sig = "";
   }
 
   private flash(i: number): void {
@@ -266,6 +298,7 @@ export class CommandCard {
       case "place": {
         const s = BUILDING_STATS[a.building];
         title = BUILDING_LABEL[a.building];
+        lines.push(`<span class="ct-desc">${BUILDING_DESC[a.building]}</span>`);
         lines.push(`<b class="gold">${s.gold}</b> gold · ${s.buildTime}s · ${s.hp} HP`);
         if (s.power) lines.push(s.power > 0 ? `Power <b class="good">+${s.power}</b>` : `Uses <b>${-s.power}</b> power`);
         lines.push(`${s.width}×${s.height} tiles`);
@@ -274,6 +307,7 @@ export class CommandCard {
       case "train": {
         const s = UNIT_STATS[a.unit];
         if (title !== UNIT_LABEL[a.unit]) title += ` <span class="dim">(${UNIT_LABEL[a.unit]})</span>`;
+        lines.push(`<span class="ct-desc">${UNIT_DESC[a.unit]}</span>`);
         lines.push(`<b class="gold">${unitCost(p, a.unit)}</b> gold · ${Math.round(unitBuildTime(p, a.unit))}s`);
         lines.push(`HP ${s.hp} · DMG ${s.damage} · RNG ${s.range} · SPD ${s.speed}`);
         lines.push(`<span class="dim">Shift: queue 5</span>`);
@@ -283,8 +317,22 @@ export class CommandCard {
       case "cmd": lines.push(CMD_INFO[a.cmd].tip); break;
       case "ability": if (p.commander) { const ab = COMMANDERS[p.commander].ability; lines.push(abilityText(ab), `<span class="dim">${abilityCooldownText(ab)}</span>`); } break;
       case "power": lines.push(POWER_INFO[a.key]?.tooltip ?? "", `Costs <b class="energy">${CITADEL_POWERS[a.key].energy}</b> Command Energy`); break;
-      case "open": lines.push(a.sub === "powers" ? "Citadel powers — hold the Citadel to charge Command Energy." : "Your custom formations."); break;
+      case "open": lines.push(a.sub === "powers" ? "Citadel powers — hold the Citadel to charge Command Energy."
+        : a.sub === "structures" ? "Choose a structure to build. Your Workers go and put it up." : "Your custom formations."); break;
       case "research": lines.push("Open the research tree."); break;
+      case "sell": {
+        const b = this.info?.selectedBuilding;
+        if (!b) break;
+        const site = b.buildProgress < 1;
+        title = this.sellArmed ? "Press again to confirm" : site ? "Cancel construction" : `Sell ${BUILDING_LABEL[b.buildingType]}`;
+        if (canSell(b)) {
+          lines.push(site ? `Stop building it and get <b class="gold">${sellRefund(b)}</b> gold back.`
+            : `Tear it down for <b class="gold">${sellRefund(b)}</b> gold (half its price, less if damaged).`);
+          if (b.productionQueue.length || b.researchQueue?.length) lines.push("Anything queued here is refunded too.");
+          lines.push(`<span class="dim">Press twice to confirm · Shift sells at once</span>`);
+        }
+        break;
+      }
       case "back": lines.push("Back to the main card (Esc)."); break;
     }
     if (!l.enabled && l.reason) lines.push(`<span class="bad">${l.reason}</span>`);

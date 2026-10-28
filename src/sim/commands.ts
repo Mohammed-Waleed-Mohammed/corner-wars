@@ -19,6 +19,7 @@ import { planWallLine, wallLineTiles, footprintClear, withinBuildRadius } from "
 import { firePower } from "../engine/powers";
 import { useAbility } from "../engine/abilities";
 import { cancelProduction, enqueueUnit } from "../engine/production";
+import { sellBuilding } from "../engine/sell";
 import { buildAvailability } from "../state/buildRules";
 import { createBuilding } from "../state/entities";
 import { cancelResearch, enqueueResearch } from "../state/upgrades";
@@ -31,6 +32,7 @@ export type CommandType =
   | "QUEUE_UNIT" | "CANCEL_QUEUE" | "RESEARCH" | "REPAIR" | "HARVEST" | "USE_POWER"
   | "USE_ABILITY" // 27 §C commander ability (target point or null)
   | "FORM_UP" | "BREAK_FORMATION" | "FALL_BACK" // 19 formations
+  | "SELL_BUILDING" // 06 §Selling
   | "CONCEDE"; // 20 §J pause menu — surrender (deterministic: all peers execute it)
 
 export interface Command {
@@ -213,6 +215,11 @@ export function executeCommand(state: GameState, cmd: Command): void {
     case "FALL_BACK": {
       const f = state.formations.find((fm) => fm.id === pl.formationInstanceId && fm.owner === pid);
       if (f) f.fallingBack = true; // §H — withdrawal behavior lands in M6
+      break;
+    }
+    case "SELL_BUILDING": {
+      const b = ownedBuilding(state, pid, pl.buildingId);
+      if (b) sellBuilding(state, b); // validates (never a Construction Yard)
       break;
     }
     case "CONCEDE":

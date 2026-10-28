@@ -16,6 +16,22 @@
 - Structures are built from the **Construction Yard** (RA2 style): select the yard, choose a building, place it on a passable tile, it constructs over its build time. No build-radius restriction in the first version.
 - Each production building makes **one unit at a time**, with a **queue up to 5**.
 - The free Worker bundled with a Refinery makes expanding to a remote deposit a clean one-purchase package.
+- **Selecting the Construction Yard** shows a production card like the Barracks: Worker on Q, Rally on A, the queue in the selection panel. Its **Build…** button (T) opens the structure list (file 30 §B).
+- **Where Workers stand (16 §2d):** builders, repairers and Workers delivering gold walk to the nearest free tile beside the footprint — on their own side, not the far side — spread out so two don't share a tile, and they work from the footprint's edge.
+
+## Selling
+
+Any of your buildings **except the Construction Yard** can be sold (C&C style). Losing your Yards eliminates you, so the Yard can never be sold.
+
+| What | Refund |
+|---|---|
+| A finished building | **50%** of its price × its current health fraction (a building at half health returns 25%) |
+| A site under construction ("Cancel") | everything not yet built, plus 50% of what was: price × (1 − progress ÷ 2) — 100% at 0%, 50% at 100% |
+| Its queue | each queued unit or research is refunded first, exactly as a cancel (full if not started, 50% if in progress — file 15 §7) |
+
+- The building disappears at once. There is no wreck and no explosion, it never counts as razed or lost, and power is recomputed straight away. A "+gold" number floats over the spot.
+- Refunds are whole numbers (rounded down). It is a `SELL_BUILDING` command, so it runs identically on every peer.
+- **UI:** the **Sell** button sits on B in the building's card (Production, Lab and structure cards). The first press arms it: the button turns into **Confirm** for 3 s. A second press sells. Shift sells at once.
 
 ## Tech tree
 

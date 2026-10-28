@@ -7,6 +7,7 @@
 import { HARVEST, WORKER } from "../config/constants";
 import type { Building, GameState, GoldSource, Unit } from "../core/types";
 import { miningMult } from "../state/upgrades";
+import { goToFootprint } from "./footprint";
 import { navigateTo } from "./navigation";
 
 export function updateHarvest(state: GameState, w: Unit, dt: number): void {
@@ -59,10 +60,7 @@ export function updateHarvest(state: GameState, w: Unit, dt: number): void {
         w.state = "idle"; // owner has no drop-off (eliminated)
         return;
       }
-      const cx = drop.x + drop.width / 2;
-      const cy = drop.y + drop.height / 2;
-      const contact = Math.max(drop.width, drop.height) / 2 + HARVEST.dropoffPadding;
-      if (navigateTo(state, w, cx, cy, dt, contact)) {
+      if (goToFootprint(state, w, drop, dt, false)) { // 16 §2: deliver at the nearest free side
         const bonus = drop.buildingType === "refinery" ? 1 + WORKER.refineryBonus : 1;
         // Improved Mining I/II scales gather income (global multiplier, 15-logic §2).
         const mined = (w.carryingGold ?? 0) * bonus * miningMult(state.players[w.owner]);
@@ -70,6 +68,8 @@ export function updateHarvest(state: GameState, w: Unit, dt: number): void {
         state.players[w.owner].stats.goldMined += mined; // 20 §J
         w.carryingGold = 0;
         w.harvestPhase = "seeking";
+        w.standSpot = null; // release the delivery tile for the next worker
+        w.standFor = null;
       }
       break;
     }

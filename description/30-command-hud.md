@@ -75,16 +75,18 @@ Every successful RTS we studied converges on the same answer (SC2, AoE II/IV, WC
   | Bottom | Z X C V B |
 
 - **Every slot shows its key.**
-- **A command keeps its slot in every card.** Z is always the commander ability, X always opens Citadel powers, and B is Back inside a sub-card.
+- **A command keeps its slot in every card.** Z is always the commander ability, X always opens Citadel powers, B is Back inside a sub-card and **Sell** on a selected building, and T is **Build…** on the Yard and structure cards.
 - Shift + a training key (or Shift-click) queues 5.
 - Esc or B leaves a sub-card.
 
 | Card | When | Q W E R T | A S D F G | Z X C V B |
 |---|---|---|---|---|
-| **Build** | nothing selected; the Construction Yard, workers only, or a non-producing building selected; placing a structure | Power Plant · Refinery · Barracks · War Factory · Lab | Pillbox · Gun Turret · Anti-Armor Cannon · Missile Tower · Wall | Ability · Powers · Gate · Construction Yard · *Train Engineer (Yard selected only)* |
+| **Build** | nothing selected, workers only, or placing a structure | Power Plant · Refinery · Barracks · War Factory · Lab | Pillbox · Gun Turret · Anti-Armor Cannon · Missile Tower · Wall | Ability · Powers · Gate · Construction Yard · — |
 | **Army** | any combat unit selected | Spear · Line · Box · Column · *More formations… (custom)* | Attack-move · Stop · Guard · Fall back · Break formation | Ability · Powers · — · — · — |
-| **Production** | a finished Barracks or War Factory | its units, in `PRODUCES` order | Rally · — · — · — · — | Ability · Powers · — · — · — |
-| **Lab** | a finished Lab | Research tree… | Rally · — | Ability · Powers |
+| **Production** | a finished Construction Yard, Barracks or War Factory | its units, in `PRODUCES` order (the Yard: Worker, then **Build…** on T) | Rally · — · — · — · — | Ability · Powers · — · — · **Sell** (not on the Yard) |
+| **Lab** | a finished Lab | Research tree… | — | Ability · Powers · — · — · **Sell** |
+| **Structure** | any other building of yours (Power Plant, Refinery, defenses, walls, gates), or a site under construction | — · — · — · — · **Build…** (finished only) | — | Ability · Powers · — · — · **Sell** (a site: **Cancel**) |
+| **Structures** (sub-card) | T (Build…) on the Yard or a structure | as the Build card | as the Build card | Ability · Powers · Gate · Construction Yard · Back |
 | **Powers** (sub-card) | X | Artillery · Reinforcements · Frenzy · Repair · Ion | — | Ability · — · — · — · Back |
 | **Formations** (sub-card) | T in Army | custom formations 1–5 | custom 6–10 | Ability · — · — · — · Back |
 
@@ -99,6 +101,7 @@ Every successful RTS we studied converges on the same answer (SC2, AoE II/IV, WC
 
 **Tooltip:** hovering a slot shows a panel above the card, never over the battlefield's centre. It holds:
 - name and hotkey;
+- for a structure or unit, a **plain-words description** of what it does (`BUILDING_DESC` / `UNIT_DESC`, e.g. "Makes power (+100). Without enough power, your defenses switch off and training slows down.");
 - cost and build time;
 - key stats (HP / DMG / RNG / SPD for units; HP / power for buildings);
 - the reason it's disabled, if it is.
@@ -130,7 +133,7 @@ Removed in favour of the grid:
 | Nothing | three lines of controls help (select / orders / camera) |
 | One unit | 96 px live portrait · faction name (base name beneath) · HP bar with numbers · DMG / RNG / SPD · formation trait line |
 | Several units | portrait of the majority type with `×N` · a grid of one 32 px icon per unit, each with an HP bar, sorted by type, `+N` on overflow. Click: select only that unit. Shift-click: drop it. Ctrl-click: keep only that type |
-| Own building | portrait · name · HP bar · the queue (front item carries a progress bar; click or right-click cancels with the refund rule) · `n/max` · a status line (rally set, low power) |
+| Own building | portrait · name · HP bar · its plain-words description (one line, full text on hover) · the queue (front item carries a progress bar; click or right-click cancels with the refund rule) · `n/max` · a status line (rally set, low power) |
 | Placing | the structure's portrait · "PLACING …" · cost · "Left-click to place · Right-click or Esc to cancel" |
 
 ## D. Alerts
@@ -165,7 +168,17 @@ The tab of the selected building's type is highlighted.
 
 This keeps production visible without hunting for buildings (C&C Tiberium Wars and Stormgate do the same).
 
-## F. Acceptance
+## F. World tooltip (buildings)
+
+Rest the cursor on a building in the battlefield for **350 ms** and a small card appears beside the cursor (flipped to stay on screen):
+- the building's name, and whose it is (Yours / Enemy / Neutral, with the owner's colour);
+- its **plain-words description** — the same text as the command card;
+- health, or "Under construction · N%";
+- for your own buildings: the power it makes or uses, and what it is training.
+
+It never shows while placing, targeting a power or ability, guarding, attack-moving, setting a rally point or dragging. Another player's building only shows while it is in sight: a fogged last-known snapshot gets no tooltip (16 §2a).
+
+## G. Acceptance
 
 - [ ] No panel down the left edge. The top bar plus three bottom blocks are the only anchored chrome.
 - [ ] All 12 structures are reachable from the Build card at 1366×768 with no scrolling.
@@ -177,3 +190,6 @@ This keeps production visible without hunting for buildings (C&C Tiberium Wars a
 - [ ] Alerts appear, ping the minimap, and Space jumps to them.
 - [ ] Campaign objectives and dialogue sit at the top and never cover the bottom console or the screen centre.
 - [ ] The sim is untouched. Lockstep stays IN SYNC; the HUD is display-only and emits commands through the existing controller paths.
+- [ ] Selecting the Construction Yard shows Worker on Q (queue, Shift queues 5) and Build… on T; it has no Sell.
+- [ ] Every other building shows Sell (or Cancel for a site) on B; it arms on the first press and sells on the second.
+- [ ] Hovering a structure on the card or in the world shows its plain-words description.

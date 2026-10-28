@@ -131,6 +131,9 @@ This is what makes a formation behave like a disciplined army instead of a shape
 
 - **Facing:** set toward the move/attack order; the front faces the enemy. Box is omnidirectional.
 - **Cohesion:** the formation moves at the **speed of its slowest member**; an anchor follows the pathfinding route and each unit paths to its slot offset (local avoidance from files 15–16 applies). Narrow terrain compresses the shape temporarily; no auto-morphing.
+  - **The anchor waits for stragglers:** while more than half the members are over **3 tiles** from their slots, the anchor holds still, for at most **4 s** in a row (then it moves on, so one stuck unit cannot freeze the army).
+  - **The anchor stays on walkable ground:** it only ever moves along its A* route. With no route (goal walled off) or during Fall Back it steps only onto passable tiles, sliding along walls; it never crosses mountains, water or buildings.
+  - **Units never teleport:** every member reaches its slot by walking (A*). A member farther than LEASH from its slot walks back before it may shift toward a target (§H).
 - **Persistence:** moving, attacking, guarding, and losses all keep the formation intact. **Deaths leave holes; survivors hold position** (a bled Spear is still a Spear). **Re-form** (press the formation key again) recompacts survivors into a tight shape. Only **Break Formation** dissolves it.
 
 ---

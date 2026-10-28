@@ -4,7 +4,7 @@
 
 import { HUD_ANIM } from "../config/constants";
 
-type UiSoundId = "ui_click" | "ui_hover" | "ui_error" | "ui_open";
+type UiSoundId = "ui_click" | "ui_hover" | "ui_error" | "ui_open" | "ui_sell";
 type Player = { playUi: (id: UiSoundId) => void } | null;
 
 let player: Player = null;

@@ -765,6 +765,27 @@ export class InputController {
     if (ids.size) this.selectedIds = ids;
   }
 
+  /** 06 §Selling: sell (or cancel, if unfinished) the selected building. The sim validates it. */
+  sellSelected(): void {
+    const b = this.getSelectedBuilding();
+    if (b) this.emit("SELL_BUILDING", { buildingId: b.id });
+  }
+
+  /** 30 §F world tooltip: the building under the cursor — own, or another player's only while it is in
+   *  sight (16 §2a: no tooltip on a fogged last-known snapshot) — and only with no targeting mode active. */
+  buildingUnderCursor(): Building | null {
+    if (this.placementType || this.pendingPowerKey || this.pendingAbility || this.guardPending || this.attackPending || this.rallyPending) return null;
+    const tile = this.camera.screenToTile(this.input.mouse.x, this.input.mouse.y);
+    for (let i = this.state.entities.length - 1; i >= 0; i--) {
+      const e = this.state.entities[i];
+      if (e.kind !== "building" || e.hp <= 0) continue;
+      if (tile.x < e.x || tile.x >= e.x + e.width || tile.y < e.y || tile.y >= e.y + e.height) continue;
+      if (e.owner !== this.local && fogAt(this.state, Math.floor(e.x + e.width / 2), Math.floor(e.y + e.height / 2)) !== "visible") return null;
+      return e;
+    }
+    return null;
+  }
+
   /** Cancel a queue slot on the selected building (research for a Lab, else production); §7. */
   cancelQueueItem(index: number): void {
     const b = this.getSelectedBuilding();

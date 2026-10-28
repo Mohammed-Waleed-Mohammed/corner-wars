@@ -3,7 +3,7 @@
 // The body is rebuilt only when its mode/subject changes; HP and progress update every frame.
 
 import { factionOf } from "../../config/commanders";
-import { BUILDING_LABEL, BUILDING_STATS, HUD, PRODUCTION_QUEUE_MAX, RESEARCH, RESEARCH_QUEUE_MAX, TILE_SIZE, UNIT_LABEL } from "../../config/constants";
+import { BUILDING_DESC, BUILDING_LABEL, BUILDING_STATS, HUD, PRODUCTION_QUEUE_MAX, RESEARCH, RESEARCH_QUEUE_MAX, TILE_SIZE, UNIT_LABEL } from "../../config/constants";
 import { UNIT_NAMES } from "../../content/factions";
 import type { Building, BuildingType, GameState, Player, PlayerId, ResearchKey, Unit, UnitType } from "../../core/types";
 import { researchTime, unitBuildTime } from "../../state/doctrine";
@@ -136,7 +136,9 @@ export class SelectionPanel {
     }
     // building
     const b = info.selectedBuilding!;
-    this.body.append(el("div", "sp-title", BUILDING_LABEL[b.buildingType]), this.hpBar());
+    const desc = el("div", "sp-line sp-desc sp-ellipsis", BUILDING_DESC[b.buildingType]);
+    desc.title = BUILDING_DESC[b.buildingType];
+    this.body.append(el("div", "sp-title", BUILDING_LABEL[b.buildingType]), this.hpBar(), desc);
     if (b.buildProgress < 1) { this.status = el("div", "sp-line dim"); this.body.append(this.status); return; }
     const isLab = b.buildingType === "lab";
     const queue: string[] = isLab ? b.researchQueue ?? [] : b.productionQueue;
@@ -154,8 +156,12 @@ export class SelectionPanel {
         strip.append(chip);
       });
       strip.append(el("span", "sp-qcount", `${queue.length}/${isLab ? RESEARCH_QUEUE_MAX : PRODUCTION_QUEUE_MAX}`));
-      if (queue.length === 0) strip.append(el("span", "sp-line dim", isLab ? "Idle — open Research (Q)" : "Idle — train from the card (Q–T)"));
+      if (queue.length === 0) strip.append(el("span", "sp-line dim sp-ellipsis", isLab ? "Idle — open Research (Q)" : "Idle — train from the card (Q–T)"));
+      // The status rides at the end of the queue row so the description line still fits the panel.
+      this.status = el("span", "sp-line dim sp-qstatus");
+      strip.append(this.status);
       this.body.append(strip);
+      return;
     }
     this.status = el("div", "sp-line dim");
     this.body.append(this.status);
@@ -222,6 +228,7 @@ export class SelectionPanel {
           else if (PRODUCERS.includes(b.buildingType)) parts.push("Right-click the ground to set a rally point");
         }
         this.status.textContent = parts.join(" · ");
+        this.status.title = this.status.textContent;
       }
     }
   }

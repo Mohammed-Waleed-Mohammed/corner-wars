@@ -299,7 +299,11 @@ function runMainArmy(ctx: Ctx, s: Squad): void {
 
   // Territory defense: DEFEND stance, or a real raid on my territory while the army isn't committed
   // (scouts and small pokes are the HomeGuard's job).
-  const threat = territoryThreat(state, pid);
+  // §K v4 hysteresis: a REPEL keeps its last threat for REPEL_LINGER_TICKS after it drops out of
+  // sight, so one enemy stepping in and out of view doesn't flip main between REPEL and home.
+  let threat = territoryThreat(state, pid);
+  if (threat) s.lastThreat = { at: threat.at, value: threat.value, tick: state.tick };
+  else if (s.mission === "repel" && s.lastThreat && state.tick - s.lastThreat.tick < COMMANDER.REPEL_LINGER_TICKS) threat = s.lastThreat;
   const committed = s.mission === "attack" || s.mission === "flank" || s.mission === "raze" ||
     s.mission === "gather" || s.mission === "engage";
   if (cs.stance === "DEFEND" ||
@@ -575,7 +579,10 @@ function runCitadel(ctx: Ctx): void {
   let citadelSquad = cs.squads.find((s) => s.role === "citadel");
   const cpos = { x: state.citadel.x, y: state.citadel.y };
 
-  if (!citadelSquad && holder !== pid && cs.stance !== "DEFEND" && cs.stance !== "RECOVER" && main.unitIds.length >= 8) {
+  // §M v4: after a garrison falls back, wait before sending another — the launch read only counts
+  // enemies in sight, so without this it re-sent the squad into the same fight every 0.5 s.
+  const cooling = state.tick - (cs.citadelRetreatTick ?? -1e9) < COMMANDER.CITADEL_RETRY_TICKS;
+  if (!citadelSquad && !cooling && holder !== pid && cs.stance !== "DEFEND" && cs.stance !== "RECOVER" && main.unitIds.length >= 8) {
     // Candidate garrison: CITADEL_SQUAD_FRAC of main's value, nearest-to-the-Citadel first.
     const fighters = squadUnits(state, main).filter((u) => u.combatType !== "support")
       .sort((a, b) => dist(a, cpos) - dist(b, cpos));
@@ -611,6 +618,7 @@ function runCitadel(ctx: Ctx): void {
   const odds = contact ? squadOdds(state, pid, units, contact) : 99;
   if (contact && odds < COMMANDER.RETREAT_ODDS) {
     retreat(ctx, citadelSquad, odds, valueOf(units), "citadel lost");
+    cs.citadelRetreatTick = state.tick;
     main.unitIds.push(...citadelSquad.unitIds);
     cs.squads = cs.squads.filter((s) => s !== citadelSquad);
     return;

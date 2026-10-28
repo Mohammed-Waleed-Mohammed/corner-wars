@@ -69,6 +69,16 @@ export const HARVEST = {
   dropoffPadding: 0.6, // tiles beyond a building's half-extent counts as "at drop-off"
 } as const;
 
+// Reaching a building's side (16 §2): builders, repairers and gold deliveries walk to a free tile on the
+// footprint's ring (nearest reachable, spread across workers) and work from its edge.
+export const FOOTPRINT = {
+  REACH: 1.0, // tiles from the footprint's edge that count as "at" the building
+  PARKED_SLACK: 0.4, // extra reach for a worker already working there (separation jostle)
+  SPOT_ARRIVE: 0.2, // tiles — close enough to the chosen stand tile's centre
+  CLAIMED_PENALTY: 2.5, // tiles added to a stand tile's score per worker already headed there
+  MAX_TRIES: 4, // nearest stand tiles checked for a real A* route before giving up on reachability
+} as const;
+
 // Random neutral-deposit generation (03-resources-economy.md §"Random generation")
 export const RESOURCE_GEN = {
   minPerQuadrant: 2,
@@ -151,6 +161,7 @@ export const FORMATIONS = {
   ARRIVE: 0.35, // tiles — how close to a slot counts as "in position"
   TRAITS: { CHARGE_SPEED: 1.2, VOLLEY_DMG: 1.1, BRACE_TAKEN: 0.85, MARCH_SPEED: 1.15 },
   FALL_BACK_SPEED: 0.8, // §H: withdraw at 80% speed, facing the enemy
+  COHESION: { LAG_DIST: 3, MAX_WAIT: 4 }, // §I: anchor holds while >half the members are >3 tiles off their slots, ≤4 s
   BREAK_ALERT: { LOSS_FRACTION: 0.3, WINDOW_S: 10 }, // §J: >30% loss in 10s → "line breaking" alert
   HOTKEYS: { open: "f", break: "shift+f", fallBack: "v" },
 } as const;
@@ -276,20 +287,21 @@ export const BUILD_MAX_COUNT: Partial<Record<BuildingType, number>> = {
 // Movement-line feedback (16 §3).
 export const MOVE_LINE = { lifetime: 1.5 } as const; // seconds to fade
 
-// One-line descriptions for build/production tooltips (16 §6).
+// What each building does, in plain words: shown when hovering it on the command card or in the world,
+// and in the selection panel (16 §6, 30 §F).
 export const BUILDING_DESC: Record<BuildingType, string> = {
-  constructionYard: "Main base — build structures. Lose all to be eliminated.",
-  powerPlant: "+100 power to run your base.",
-  refinery: "Drop-off with +25% mining; includes a free Worker.",
-  barracks: "Trains infantry: Rifleman, Grenadier, Rocket.",
-  warFactory: "Builds vehicles: Scout, Tank, Heavy Tank, Artillery.",
-  lab: "Researches upgrades and unlocks advanced units/defenses.",
-  turret: "Balanced defense; shells at range 7.",
-  pillbox: "Cheap anti-infantry defense (+50% vs Infantry).",
-  antiArmorCannon: "Anti-armor defense (+50% vs Heavy).",
-  missileTower: "Long-range splash defense.",
-  wall: "Blocks movement; funnels attackers. Drag to build a line.",
-  gate: "Opens for your units, closed to enemies.",
+  constructionYard: "Your main base. Trains Workers and unlocks every other building. Lose all your Yards and you are out.",
+  powerPlant: "Makes power (+100). Without enough power, your defenses switch off and training slows down.",
+  refinery: "Workers drop their gold here and earn 25% more for it. Comes with one free Worker.",
+  barracks: "Trains foot soldiers: Riflemen, Grenadiers, Rocket Soldiers and Medics.",
+  warFactory: "Builds vehicles: Scout Buggies, Tanks, Heavy Tanks and Artillery. Can also make Workers.",
+  lab: "Researches upgrades that make your army stronger, and unlocks advanced units and defenses.",
+  turret: "A gun tower that shoots any enemy within 7 tiles. A good all-round defense.",
+  pillbox: "A cheap bunker that is best at gunning down enemy foot soldiers.",
+  antiArmorCannon: "A heavy gun that is best against tanks and other vehicles.",
+  missileTower: "Fires missiles a long way (9 tiles) that hurt every enemy in a small area.",
+  wall: "Blocks enemies and steers them toward your defenses. Drag to build a whole line.",
+  gate: "A piece of wall your own units can walk through. Enemies cannot.",
 };
 export const UNIT_DESC: Record<UnitType, string> = {
   worker: "Gathers gold, builds and repairs structures.",
@@ -620,6 +632,10 @@ export const GUARD = { radius: 8, chaseMultiplier: 1.5 } as const;
 
 // Queue cancel refunds (15-logic §7): full if not started, half if in progress.
 export const REFUND = { queued: 1.0, inProgress: 0.5 } as const;
+// Selling a structure (06 §Selling): a finished one returns `refund` of its price × its health; an
+// unfinished site returns what wasn't built plus `refund` of what was. The Construction Yard can't be
+// sold. confirmMs is UI-only: the Sell button arms on the first press and sells on a second within it.
+export const SELL = { refund: 0.5, confirmMs: 3000 } as const;
 
 // Input timing (15-logic §8/§9): double-click + right-drag-vs-order disambiguation.
 export const INPUT = {
@@ -634,6 +650,7 @@ export const EFFECTS = {
   hitLife: 0.1,
   tracerLife: 0.05,
   deathLife: 0.32,
+  sellLife: 1.2, // s the "+gold" number floats over a sold building
   hitFlashTime: 0.1, // s a struck entity flashes white
   lungeTime: 0.13, // s melee lunge animation
   lungeDist: 0.28, // tiles a melee attacker lunges forward
@@ -798,6 +815,8 @@ export const COMMANDER = {
   CITADEL_CONTEST: 0.8,
   CITADEL_ODDS: 1.0, // §M v2: contest only if projected FightOdds at the Citadel × citadelWeight ≥ this
   CITADEL_RADIUS: 10, // §M v2: radius used to read the fight around the Citadel
+  CITADEL_RETRY_TICKS: 600, // §M v4: after a Citadel squad falls back, no new one for 20 s (was re-sent every 0.5 s)
+  REPEL_LINGER_TICKS: 150, // §K v4: a REPEL holds 5 s after the threat drops out of sight before main re-plans
   THREAT_MIX_WEIGHT: 2.0, // §I v2: enemy force near my territory weighs this × into the counter-mix
   POWERS: { ARTY_CLUSTER: 6, ARTY_RADIUS: 3, FRENZY_ODDS: [0.8, 1.2] as const, REPAIR_COUNT: 5, REPAIR_FRAC: 0.5, ION_CLUSTER: 12, ION_RESERVE_AT: 25, ION_GAP: 15 },
   // §B personalities — parameter sets, not code (firstPush = Infinity: never initiates).
@@ -917,6 +936,7 @@ export const HUD = {
 
 // 21 §L micro-interaction timings — display-only; never touch the sim.
 export const HUD_ANIM = {
+  WORLD_TIP_DELAY_MS: 350, // 30 §F: rest the cursor on a building this long before its tooltip shows
   ENTRANCE_MS: 250, // console slide-in duration
   ENTRANCE_STAGGER_MS: 60, // status → sidebar → bottom
   ENTRANCE_SLIDE_PX: 12,

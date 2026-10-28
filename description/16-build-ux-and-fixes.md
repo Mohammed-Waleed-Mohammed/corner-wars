@@ -43,6 +43,16 @@ Contents: 1) Build facilitation · 2) Bug fixes (fog hover, win condition, AI & 
 **Rule:** units (AI **and** player) do **not** auto-target walls/gates. Walls are excluded from automatic target acquisition. A unit only attacks a wall when **(i)** the player explicitly orders an attack on it, or **(ii)** pathfinding finds the wall is **blocking the only route** to the unit's objective — then it targets the specific wall segment on the shortest blocked path and breaks through.
 - For the AI: run pathfinding to the intended target treating enemy walls as obstacles; if a path exists, **route around** and ignore adjacent walls; only if no path exists does it switch to "break the blocking wall." This stops the AI (and your units) from wasting time chewing on walls they could simply walk around.
 
+### d) Workers stand on the near, free side of a building
+**Symptom:** a worker sent to build walked round to the far side, or got stuck pressed against the building or a cliff and never started.
+**Cause:** builders, repairers and gold deliveries steered at the footprint's *centre*. A* then routed to the first free tile it found scanning from the top-left, whatever side the worker came from, and a worker parked a little short of the centre-based contact radius stayed "moving" forever.
+**Fix (`engine/footprint.ts`):**
+- The worker picks a **stand tile** on the ring of tiles around the footprint (sides and corners): free (walkable, no building, not an enemy gate), **nearest to the worker**, and +2.5 tiles of score for every other worker of that player already heading to the same tile, so a crew spreads around the building.
+- The nearest 4 candidates are checked with a real A* route, so a tile boxed in by cliffs is skipped; the route found is reused.
+- A worker already within **1 tile of the footprint's edge**, on a free tile, works from where it stands. "At the building" is measured to the edge (not the centre), with 0.4 tiles of slack once parked, so rectangular buildings and corners work.
+- The tile is picked again if something is built on it; it is released when the job ends.
+- Units caught inside a footprint (a structure placed on top of them) walk out by the nearest edge; a unit whose destination gets built over stops beside it.
+
 ---
 
 ## 3. Movement lines

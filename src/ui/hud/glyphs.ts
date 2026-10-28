@@ -4,7 +4,7 @@
 import { HUD } from "../../config/constants";
 import { renderIcon, type IconKind } from "../iconRenderer";
 
-export type GlyphName = "attack" | "stop" | "fallback" | "breakform" | "rally" | "back" | "more" | "menu" | "idle" | "army" | "alert";
+export type GlyphName = "attack" | "stop" | "fallback" | "breakform" | "rally" | "back" | "more" | "menu" | "idle" | "army" | "alert" | "sell" | "build";
 
 const cache = new Map<string, HTMLCanvasElement>();
 
@@ -88,6 +88,15 @@ function draw(g: CanvasRenderingContext2D, name: GlyphName): void {
     case "army": // three heads
       for (const [x, y] of [[6, 10], [12, 7], [18, 10]]) { g.beginPath(); g.arc(x, y, 2.6, 0, Math.PI * 2); g.stroke(); }
       line(g, 3, 19, 9, 15, 15, 15, 21, 19);
+      break;
+    case "sell": // a coin with an arrow leaving it (gold back)
+      g.beginPath(); g.arc(10, 14, 7, 0, Math.PI * 2); g.stroke();
+      line(g, 10, 10, 10, 18); line(g, 8, 11.5, 12, 11.5); line(g, 8, 16.5, 12, 16.5);
+      line(g, 15, 9, 21, 3); line(g, 16, 3, 21, 3, 21, 8);
+      break;
+    case "build": // a hammer
+      line(g, 6, 20, 15, 11);
+      g.beginPath(); g.moveTo(11, 7); g.lineTo(16, 2); g.lineTo(22, 8); g.lineTo(17, 13); g.closePath(); g.stroke();
       break;
     case "alert": // triangle with "!"
       line(g, 12, 3, 22, 20, 2, 20, 12, 3);

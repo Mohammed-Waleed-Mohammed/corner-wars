@@ -138,7 +138,7 @@ export class AudioManager {
   }
 
   /** 21 §L HUD interaction sounds — UI-side only (never emitted by the sim). */
-  playUi(id: "ui_click" | "ui_hover" | "ui_error" | "ui_open"): void {
+  playUi(id: "ui_click" | "ui_hover" | "ui_error" | "ui_open" | "ui_sell"): void {
     if (this.muted || !this.ctx || !this.master) return;
     const t = this.ctx.currentTime;
     switch (id) {
@@ -148,6 +148,11 @@ export class AudioManager {
       case "ui_open": {
         tone(this.ctx, this.master, t, 420, "triangle", 0.07, 0.09);
         tone(this.ctx, this.master, t + 0.06, 640, "triangle", 0.08, 0.09);
+        break;
+      }
+      case "ui_sell": { // two bright coin pings
+        tone(this.ctx, this.master, t, 990, "triangle", 0.06, 0.1);
+        tone(this.ctx, this.master, t + 0.07, 1480, "triangle", 0.1, 0.1);
         break;
       }
     }

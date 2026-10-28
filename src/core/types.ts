@@ -219,6 +219,8 @@ export interface Unit extends Entity {
   // Worker-built construction (engine-only, 15-logic §"worker-built construction"):
   buildTargetId?: number | null; // construction site this worker is assigned to build
   repairTarget?: number | null; // engine-only (16 §7): friendly building this worker is repairing
+  standSpot?: Vec2 | null; // engine-only (16 §2): free tile beside the building it works on / delivers to
+  standFor?: number | null; // engine-only: the building id `standSpot` was picked for
   healTarget?: number | null; // engine-only (19 §D): unit this Medic is currently healing
   // Formations (19): the formation this unit belongs to + its slot offset in formation-local space.
   formationId?: number | null;
@@ -365,6 +367,7 @@ export interface AISquad {
   lastOrderTick: number; // periodic re-issue of the squad order (keeps reinforcements flowing)
   retreatTick?: number; // 22 §K v2: tick of the last retreat (regroup hysteresis)
   valueAtRetreat?: number; // 22 §K v2: squad value when it retreated (must regrow before re-pushing)
+  lastThreat?: { at: Vec2; value: number; tick: number }; // 22 §K v4: last territory threat seen (REPEL hysteresis)
 }
 
 export interface AIBasePlan {
@@ -398,6 +401,7 @@ export interface CommanderState {
   nextDue?: { S: number; O: number; T: number };
   // §K v3: "look before you leap" — a push objective the AI hasn't seen lately is scouted first.
   scoutRequest?: { x: number; y: number; tick: number };
+  citadelRetreatTick?: number; // §M v4: tick the last Citadel squad fell back (CITADEL_RETRY_TICKS cooldown)
 }
 
 export interface Player {
@@ -467,6 +471,7 @@ export interface Formation {
   stationarySince: number | null; // engine-only: for Volley/Brace traits (M6)
   charging: boolean; // engine-only: Spear pre-contact (M6)
   fallingBack: boolean; // engine-only: Fall Back order active (M6)
+  cohesionWait?: number; // engine-only: seconds the anchor has held for stragglers (§I, capped by COHESION.MAX_WAIT)
   // §J readability: recent member-death timestamps (trimmed to the alert window) drive the
   // "line breaking" alert; `breaking` is true while >30% was lost inside BREAK_ALERT.WINDOW_S.
   lossTimes: number[];
