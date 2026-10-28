@@ -196,6 +196,9 @@ export const COUNTERS: Partial<Record<CombatType, CombatType>> = {
 };
 export const COUNTER_BONUS = 0.5; // +50%
 export const AGGRO_RADIUS = 6; // tiles (08-combat-formulas.md)
+// 31 §C perf: a unit re-scans for the nearest / best enemy every this many sim ticks (0.2 s at
+// 30 Hz), staggered by unit id; in between it keeps its current target while that stays valid.
+export const TARGET_RESCAN_TICKS = 6;
 // Walls/gates are excluded from auto-target acquisition (16 §2c). A unit only breaks a wall when
 // it's the blocking segment on an otherwise-impassable route — the nearest enemy wall within this.
 export const WALL_BREAK_RADIUS = 1.8; // tiles
@@ -523,6 +526,10 @@ export const NAV = {
   waypointReach: 0.35, // tiles — close enough to a waypoint to advance to the next
   maxAStarNodes: 16000, // hard cap on A* expansions (safety; raised for weighted terrain on 144² maps)
   repathCooldown: 0.4, // s — after a no-route result, wait this long before re-running A*
+  // 31 §C perf: A* nodes the unit movers may expand per sim tick, across all units. A unit over
+  // budget keeps walking its old route (or waits a tick) — a mass order spreads over a few ticks
+  // instead of freezing one frame (400 units re-pathing at once cost a 300 ms hitch).
+  expansionsPerTick: 24000,
 } as const;
 
 // ── Win conditions (01-overview.md, 08-combat) ──────────────────────────────

@@ -4,7 +4,9 @@
 //    visible region) per frame.
 //  • ANIMATED overlay (visible area only, cheap, batched): the biome's water style (water.ts), tufts
 //    swaying in a travelling wind wave, tree canopies swaying.
-//  • FOG cache: rebuilt when state.fogVersion bumps; blitted with smoothing (soft edges).
+//  • FOG cache: ONE PIXEL PER TILE, rebuilt (putImageData) when state.fogVersion bumps, drawn scaled up
+//    with smoothing — soft edges for free. It used to be a world-resolution canvas (32 px per tile:
+//    4608² px on a 144-tile map) refilled tile by tile; the minimap now reuses the same tiny canvas.
 
 import { FOG_ALPHA, TILE_SIZE } from "../../config/constants";
 import type { BiomeId, GameState, TerrainType } from "../../core/types";
@@ -24,6 +26,7 @@ let terrainBiome: BiomeId | null = null;
 let terrainArtVersion = -1;
 let lastBuild = 0;
 let fogCanvas: HTMLCanvasElement | null = null;
+let fogImage: ImageData | null = null;
 let fogFor: unknown = null;
 let lastFogVersion = -1;
 
@@ -145,32 +148,46 @@ export function drawTerrainAnim(ctx: CanvasRenderingContext2D, state: GameState,
 
 // ── fog ─────────────────────────────────────────────────────────────────────────────────────────
 
-export function drawFogLayer(ctx: CanvasRenderingContext2D, state: GameState, camera: Camera): void {
+/** The fog as a mapWidth × mapHeight canvas (one pixel per tile, black with the fog alpha). Rebuilt
+ *  only when the fog recomputes (state.fogVersion); shared by the world fog layer and the minimap. */
+export function fogTileCanvas(state: GameState): HTMLCanvasElement {
   const version = state.fogVersion ?? 0;
-  if (!fogCanvas || fogFor !== state.fog || lastFogVersion !== version) {
-    if (!fogCanvas || fogFor !== state.fog) fogCanvas = make(state);
+  const W = state.mapWidth, H = state.mapHeight;
+  if (!fogCanvas || fogFor !== state.fog || fogCanvas.width !== W || fogCanvas.height !== H || lastFogVersion !== version) {
+    if (!fogCanvas || fogCanvas.width !== W || fogCanvas.height !== H) {
+      fogCanvas = document.createElement("canvas");
+      fogCanvas.width = W;
+      fogCanvas.height = H;
+      fogImage = null;
+    }
     const fc = fogCanvas.getContext("2d")!;
-    fc.clearRect(0, 0, fogCanvas.width, fogCanvas.height);
-    for (let ty = 0; ty < state.mapHeight; ty++) {
+    fogImage ??= fc.createImageData(W, H);
+    const d = fogImage.data; // RGB stay 0 (black); only alpha varies
+    const aUnexplored = Math.round(FOG_ALPHA.unexplored * 255), aExplored = Math.round(FOG_ALPHA.explored * 255);
+    for (let ty = 0; ty < H; ty++) {
       const row = state.fog[ty];
-      for (let tx = 0; tx < state.mapWidth; tx++) {
+      for (let tx = 0; tx < W; tx++) {
         const st = row[tx];
-        if (st === "visible") continue;
-        fc.fillStyle = `rgba(0,0,0,${st === "unexplored" ? FOG_ALPHA.unexplored : FOG_ALPHA.explored})`;
-        fc.fillRect(tx * TS, ty * TS, TS, TS);
+        d[(ty * W + tx) * 4 + 3] = st === "visible" ? 0 : st === "unexplored" ? aUnexplored : aExplored;
       }
     }
+    fc.putImageData(fogImage, 0, 0);
     lastFogVersion = version;
     fogFor = state.fog;
   }
-  blit(ctx, fogCanvas, camera, true); // smoothing on → soft fog edges (24 §D)
+  return fogCanvas;
 }
 
-/** Blit the visible world region of an offscreen canvas to the viewport (clamped to the map). */
-function blit(ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement, camera: Camera, smooth: boolean): void {
-  const z = camera.zoom;
-  let sx = camera.x;
-  let sy = camera.y;
+export function drawFogLayer(ctx: CanvasRenderingContext2D, state: GameState, camera: Camera): void {
+  blit(ctx, fogTileCanvas(state), camera, true, TS); // smoothing on → soft fog edges (24 §D)
+}
+
+/** Blit the visible world region of an offscreen canvas to the viewport (clamped to the map). `scale`
+ *  is world px per canvas px (1 for world-resolution canvases, TILE_SIZE for a per-tile one). */
+function blit(ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement, camera: Camera, smooth: boolean, scale = 1): void {
+  const z = camera.zoom * scale; // viewport px per canvas px
+  let sx = camera.x / scale;
+  let sy = camera.y / scale;
   let sw = camera.viewportW / z;
   let sh = camera.viewportH / z;
   let dx = 0;

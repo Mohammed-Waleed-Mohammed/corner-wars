@@ -30,6 +30,7 @@ import { Camera } from "./render/camera";
 import { setFactionSource } from "./render/ownerFaction";
 import { renderGame } from "./render/renderer";
 import { buildFromMap, configurePlayers } from "./state/gameState";
+import { spawnStressArmies } from "./dev/stress";
 import { MAP_BY_ID, OFFICIAL_MAPS } from "./state/officialMaps";
 import { MapEditor } from "./ui/editor/editor";
 import { Hud } from "./ui/hud";
@@ -140,6 +141,13 @@ function bootMatch(opts: MatchOpts): void {
     // 20 §D match options (sim-side, identical on all peers): starting gold + per-AI difficulty.
     if (opts.startingGold != null) for (const p of state.players) if (!p.eliminated) p.gold = opts.startingGold;
     if (opts.difficulties) for (const p of state.players) if (p.ai && opts.difficulties[p.id]) p.ai.difficulty = opts.difficulties[p.id];
+    // Dev-only big-battle perf test (31 §A): `?stress=N[&clash]` spawns N units per player. The literal
+    // DEV guard lets the production build drop this block and the stress module entirely; never in MP.
+    if (import.meta.env.DEV && !opts.peer) {
+      const qs = new URLSearchParams(location.search);
+      const stress = Number(qs.get("stress") ?? 0);
+      if (stress > 0) spawnStressArmies(state, Math.min(400, stress), qs.has("clash"));
+    }
   }
   console.log(`The Fall of the Citadel — map "${opts.map.name}" (${opts.map.width}×${opts.map.height}, ${opts.map.maxPlayers}p)`);
 

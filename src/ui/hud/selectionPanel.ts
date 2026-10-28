@@ -14,6 +14,7 @@ import type { HudInfo } from "../hud";
 import { renderIcon } from "../iconRenderer";
 import type { HudControls } from "./controls";
 import { icon } from "./glyphs";
+import { pct, setClass, setHidden, setStyle, setText, setTitle } from "./domWrite";
 
 const PRODUCERS: BuildingType[] = ["constructionYard", "barracks", "warFactory"];
 const TYPE_ORDER: UnitType[] =["worker", "rifleman", "grenadier", "rocket", "medic", "scoutBuggy", "tank", "heavyTank", "artillery"];
@@ -41,7 +42,7 @@ export class SelectionPanel {
   // Live parts of the current body (updated per frame).
   private hpFill: HTMLElement | null = null;
   private hpText: HTMLElement | null = null;
-  private cells: { id: number; bar: HTMLElement }[] = [];
+  private cells: { id: number; bar: HTMLElement; el: HTMLElement }[] = [];
   private queueFront: HTMLElement | null = null;
   private status: HTMLElement | null = null;
 
@@ -72,7 +73,12 @@ export class SelectionPanel {
     const sig = mode === "placing" ? `placing:${info.placementType}`
       : mode === "building" ? `b:${b!.id}:${b!.buildProgress >= 1 ? 1 : 0}:${(b!.buildingType === "lab" ? b!.researchQueue ?? [] : b!.productionQueue).join(",")}`
       : mode === "unit" ? `u:${sel.single!.id}:${sel.traitLine}` : mode === "units" ? `us:${ids}` : "empty";
-    if (sig !== this.sig) { this.sig = sig; this.build(mode, state, info); }
+    if (sig !== this.sig) {
+      // Units dying out of a big selection: drop just their cells instead of rebuilding the whole grid
+      // (in a battle that rebuild — with an icon per unit — ran nearly every frame).
+      if (mode === "units" && this.sig.startsWith("us:") && this.pruneCells(sel.units)) this.sig = sig;
+      else { this.sig = sig; this.build(mode, state, info); }
+    }
     this.live(mode, state, info);
     this.drawPortrait(mode, state, info);
   }
@@ -129,7 +135,7 @@ export class SelectionPanel {
         cell.append(bar);
         cell.addEventListener("click", (e) => this.cellClick(u, units, e));
         grid.append(cell);
-        this.cells.push({ id: u.id, bar });
+        this.cells.push({ id: u.id, bar, el: cell });
       }
       if (units.length > shown.length) grid.append(el("span", "sp-more", `+${units.length - shown.length}`));
       return;
@@ -167,6 +173,20 @@ export class SelectionPanel {
     this.body.append(this.status);
   }
 
+  /** If every selected unit already has a cell (only removals) and nothing is hidden behind "+N",
+   *  remove the cells of the units that left and return true; otherwise the caller rebuilds. */
+  private pruneCells(units: Unit[]): boolean {
+    if (this.body.querySelector(".sp-more")) return false;
+    const keep = new Set<number>();
+    for (const u of units) keep.add(u.id);
+    const have = new Set(this.cells.map((c) => c.id));
+    for (const id of keep) if (!have.has(id)) return false;
+    this.cells = this.cells.filter((c) => { if (keep.has(c.id)) return true; c.el.remove(); return false; });
+    const title = this.body.querySelector<HTMLElement>(".sp-title");
+    if (title) title.textContent = `${units.length} units`;
+    return true;
+  }
+
   private hpBar(): HTMLElement {
     const wrap = el("div", "sp-hp hud-well");
     this.hpFill = el("div", "sp-hp-fill");
@@ -193,9 +213,9 @@ export class SelectionPanel {
     const subj: Unit | Building | null = mode === "unit" ? info.selection.single : mode === "building" ? info.selectedBuilding : null;
     if (subj && this.hpFill && this.hpText) {
       const f = subj.maxHp > 0 ? subj.hp / subj.maxHp : 1;
-      this.hpFill.style.width = `${Math.max(0, Math.min(1, f)) * 100}%`;
-      this.hpFill.className = `sp-hp-fill ${hpClass(f)}`;
-      this.hpText.textContent = `${Math.ceil(subj.hp)} / ${Math.ceil(subj.maxHp)}`;
+      setStyle(this.hpFill, "width", pct(f));
+      setClass(this.hpFill, `sp-hp-fill ${hpClass(f)}`);
+      setText(this.hpText, `${Math.ceil(subj.hp)} / ${Math.ceil(subj.maxHp)}`);
     }
     if (mode === "units" && this.cells.length) {
       const byId = new Map<number, Unit>();
@@ -203,8 +223,8 @@ export class SelectionPanel {
       for (const c of this.cells) {
         const u = byId.get(c.id);
         const f = u && u.maxHp > 0 ? u.hp / u.maxHp : 0;
-        c.bar.style.width = `${f * 100}%`;
-        c.bar.className = `sp-cell-hp ${hpClass(f)}`;
+        setStyle(c.bar, "width", pct(f));
+        setClass(c.bar, `sp-cell-hp ${hpClass(f)}`);
       }
     }
     if (mode === "building") {
@@ -215,7 +235,7 @@ export class SelectionPanel {
         if (q.length) {
           const total = isLab ? researchTime(this.player, q[0] as ResearchKey) : unitBuildTime(this.player, q[0] as UnitType);
           const t = isLab ? b.researchTimer ?? 0 : b.productionTimer;
-          this.queueFront.style.width = `${total > 0 ? Math.min(1, t / total) * 100 : 0}%`;
+          setStyle(this.queueFront, "width", pct(total > 0 ? t / total : 0));
         }
       }
       if (this.status) {
@@ -227,8 +247,8 @@ export class SelectionPanel {
           if (b.rallyPoint) parts.push("Rally set");
           else if (PRODUCERS.includes(b.buildingType)) parts.push("Right-click the ground to set a rally point");
         }
-        this.status.textContent = parts.join(" · ");
-        this.status.title = this.status.textContent;
+        setText(this.status, parts.join(" · "));
+        setTitle(this.status, this.status.textContent ?? "");
       }
     }
   }
@@ -241,8 +261,8 @@ export class SelectionPanel {
     if (mode === "placing") key = `place:${info.placementType}`;
     else if (mode === "building" && b) key = `b:${b.id}:${b.buildProgress >= 1 ? 1 : Math.floor(b.buildProgress * 10)}`;
     else if ((mode === "unit" || mode === "units") && sel.rep) { key = `u:${sel.rep.unitType}:${sel.rep.owner}`; if (sel.total > 1) badge = `×${sel.total}`; }
-    this.badge.textContent = badge;
-    this.badge.hidden = badge === "";
+    setText(this.badge, badge);
+    setHidden(this.badge, badge === "");
     if (key === this.portraitKey) return;
     this.portraitKey = key;
     const g = this.portrait.getContext("2d")!;

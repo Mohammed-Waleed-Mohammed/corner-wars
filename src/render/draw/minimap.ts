@@ -6,9 +6,10 @@
 // RADAR OFFLINE instead of a blank square. Click/drag-to-move stays in the controller via
 // minimapRect(), which now reports the well's on-screen rect (set by the HUD each layout change).
 
-import { COLORS, FOG_ALPHA, HUD, RENDER, ownerColor } from "../../config/constants";
+import { COLORS, HUD, RENDER, ownerColor } from "../../config/constants";
 import { BIOMES, biomeMapColors } from "../../content/biomes";
 import { fogAt } from "../../engine/fog";
+import { fogTileCanvas } from "./worldLayers";
 import { isLowPower } from "../../state/gameState";
 import { concealedFrom } from "../../state/terrain";
 import type { GameState } from "../../core/types";
@@ -70,6 +71,39 @@ function drawBezel(ctx: CanvasRenderingContext2D, w: number, h: number): void {
   }
 }
 
+// The static terrain picture, drawn once per map / biome / minimap size (31 §D perf: it used to
+// be re-filled tile by tile — thousands of fillRects — every frame).
+let base: HTMLCanvasElement | null = null;
+let baseKey = "";
+let baseFor: unknown = null;
+function terrainBase(state: GameState, w: number, h: number, dpr: number): HTMLCanvasElement {
+  const biome = BIOMES[state.biome] ? state.biome : "verdant";
+  const key = `${biome}:${w}x${h}@${dpr}`;
+  if (base && baseKey === key && baseFor === state.terrain) return base;
+  base ??= document.createElement("canvas");
+  base.width = Math.max(1, Math.round(w * dpr));
+  base.height = Math.max(1, Math.round(h * dpr));
+  const g = base.getContext("2d")!;
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const sx = w / state.mapWidth, sy = h / state.mapHeight;
+  const tileColor = biomeMapColors(biome); // 26: the biome's palette
+  g.fillStyle = tileColor.ground;
+  g.fillRect(0, 0, w, h);
+  // Terrain shading (24 §D: one flat colour per type).
+  for (let ty = 0; ty < state.mapHeight; ty++) {
+    const row = state.terrain[ty];
+    for (let tx = 0; tx < state.mapWidth; tx++) {
+      const t = row[tx];
+      if (t === "ground") continue;
+      g.fillStyle = tileColor[t];
+      g.fillRect(tx * sx, ty * sy, sx + 0.6, sy + 0.6);
+    }
+  }
+  baseKey = key;
+  baseFor = state.terrain;
+  return base;
+}
+
 /** Render the minimap into its own canvas context (already DPR-transformed), at 0,0..w,h. */
 export function drawMinimap(ctx: CanvasRenderingContext2D, state: GameState, camera: Camera, w: number, h: number): void {
   const sx = w / state.mapWidth;
@@ -103,20 +137,7 @@ export function drawMinimap(ctx: CanvasRenderingContext2D, state: GameState, cam
     return;
   }
 
-  const tileColor = biomeMapColors(BIOMES[state.biome] ? state.biome : "verdant"); // 26: the biome's palette
-  ctx.fillStyle = tileColor.ground;
-  ctx.fillRect(0, 0, w, h);
-
-  // Terrain shading (24 §D: one flat colour per type).
-  for (let ty = 0; ty < state.mapHeight; ty++) {
-    const row = state.terrain[ty];
-    for (let tx = 0; tx < state.mapWidth; tx++) {
-      const t = row[tx];
-      if (t === "ground") continue;
-      ctx.fillStyle = tileColor[t];
-      ctx.fillRect(px(tx), py(ty), sx + 0.6, sy + 0.6);
-    }
-  }
+  ctx.drawImage(terrainBase(state, w, h, ctx.getTransform().a || 1), 0, 0, w, h);
 
   // Gold deposits (once explored).
   ctx.fillStyle = COLORS.neutralGold;
@@ -145,17 +166,11 @@ export function drawMinimap(ctx: CanvasRenderingContext2D, state: GameState, cam
     }
   }
 
-  // Fog overlay (overlap padding only for opaque unexplored, to avoid alpha double-darkening).
-  for (let ty = 0; ty < state.mapHeight; ty++) {
-    const row = state.fog[ty];
-    for (let tx = 0; tx < state.mapWidth; tx++) {
-      const st = row[tx];
-      if (st === "visible") continue;
-      const opaque = st === "unexplored";
-      ctx.fillStyle = `rgba(0,0,0,${opaque ? FOG_ALPHA.unexplored : FOG_ALPHA.explored})`;
-      ctx.fillRect(px(tx), py(ty), opaque ? sx + 0.6 : sx, opaque ? sy + 0.6 : sy);
-    }
-  }
+  // Fog overlay: the shared one-pixel-per-tile fog canvas, scaled up (one drawImage).
+  const smooth = ctx.imageSmoothingEnabled;
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(fogTileCanvas(state), 0, 0, w, h);
+  ctx.imageSmoothingEnabled = smooth;
 
   // 19 §J: ping own "breaking" formations — a pulsing red ring at the anchor draws the eye.
   for (const f of state.formations) {

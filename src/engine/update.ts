@@ -15,7 +15,7 @@ import { updateAbilities } from "./abilities";
 import { updateMission } from "./campaign/director";
 import { updateCombatUnit, updateDefense, updateGates, updateGuard, removeDead } from "./combat";
 import { updateBuilder, updateConstruction, updateRepair, updateRepairer } from "./construction";
-import { DEFENSE_STATS } from "../config/constants";
+import { DEFENSE_STATS, NAV } from "../config/constants";
 import { updateEffects } from "./effects";
 import { updateFormationUnit, updateFormations } from "./formations";
 import { updateHarvest } from "./harvest";
@@ -36,6 +36,7 @@ export function updateGame(state: GameState, dt: number): void {
   if (state.winner !== null) return; // match over — freeze the sim
   state.time += dt;
   state.tick++;
+  state.navBudget = NAV.expansionsPerTick; // 31 §C: unit A* work allowed this tick
 
   // Snapshot positions for render interpolation (fixed-timestep loop lerps prev -> current).
   for (const e of state.entities) {

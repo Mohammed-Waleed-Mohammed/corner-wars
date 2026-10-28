@@ -10,6 +10,7 @@ import type { Building, GameState, PlayerId, Unit } from "../core/types";
 import { createUnit } from "../state/entities";
 import { recomputePower } from "../state/gameState";
 import { workerBuildMult } from "../state/upgrades";
+import { findEntityById } from "./combat";
 import { atFootprint, goToFootprint } from "./footprint";
 
 /** A worker counts toward a site once within reach of its footprint's edge (16 §2). The parked
@@ -76,7 +77,7 @@ export function updateConstruction(state: GameState, dt: number): void {
  *  its assignment once the site is finished, destroyed, or captured. */
 export function updateBuilder(state: GameState, w: Unit, dt: number): void {
   const sid = w.buildTargetId;
-  const site = sid != null ? state.entities.find((b) => b.id === sid) : undefined;
+  const site = sid != null ? findEntityById(state, sid) : undefined;
   if (!site || site.kind !== "building" || site.owner !== w.owner || site.buildProgress >= 1 || site.hp <= 0) {
     // Site gone/done — chain to the next nearby unbuilt friendly site so drag-built wall lines (and
     // multi-placements) finish without leaving later segments paused; else fall back to harvest/idle.
@@ -133,7 +134,7 @@ export function updateRepair(state: GameState, dt: number): void {
 /** A Worker assigned to repair walks to the building and parks while it repairs (mirrors updateBuilder). */
 export function updateRepairer(state: GameState, w: Unit, dt: number): void {
   const id = w.repairTarget;
-  const b = id != null ? state.entities.find((x) => x.id === id) : undefined;
+  const b = id != null ? findEntityById(state, id) : undefined;
   if (!b || b.kind !== "building" || b.owner !== w.owner || b.buildProgress < 1 || b.hp <= 0 || b.hp >= b.maxHp) {
     w.repairTarget = null; // done/gone — fall back to harvest/idle next frame
     w.standSpot = null;

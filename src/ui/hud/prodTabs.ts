@@ -8,6 +8,7 @@ import type { Building, BuildingType, GameState, PlayerId, ResearchKey, UnitType
 import { researchTime, unitBuildTime } from "../../state/doctrine";
 import type { HudControls } from "./controls";
 import { icon } from "./glyphs";
+import { pct, setStyle, setText, setTitle } from "./domWrite";
 
 const TAB_TYPES: BuildingType[] = ["constructionYard", "barracks", "warFactory", "lab"];
 
@@ -54,12 +55,12 @@ export class ProductionTabs {
         const t = isLab ? b.researchTimer ?? 0 : b.productionTimer;
         best = Math.max(best, total > 0 ? Math.min(1, t / total) : 0);
       }
-      tab.n.textContent = list.length > 1 ? `×${list.length}` : "";
-      tab.q.textContent = queued > 0 ? String(queued) : "";
-      tab.bar.style.width = `${best * 100}%`;
+      setText(tab.n, list.length > 1 ? `×${list.length}` : "");
+      setText(tab.q, queued > 0 ? String(queued) : "");
+      setStyle(tab.bar, "width", pct(best));
       tab.el.classList.toggle("busy", queued > 0);
       tab.el.classList.toggle("active", selected?.buildingType === tab.type);
-      tab.el.title = `${BUILDING_LABEL[tab.type]}${list.length > 1 ? ` ×${list.length}` : ""} — ${queued ? `${queued} queued` : "idle"}\nClick: select (again to cycle) · Double-click: also centre the camera`;
+      setTitle(tab.el, `${BUILDING_LABEL[tab.type]}${list.length > 1 ? ` ×${list.length}` : ""} — ${queued ? `${queued} queued` : "idle"}\nClick: select (again to cycle) · Double-click: also centre the camera`);
     }
   }
 

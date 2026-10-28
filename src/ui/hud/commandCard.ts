@@ -17,6 +17,7 @@ import { playUiSound } from "../uiSound";
 import { GRID_CODES, GRID_KEYS, cardSlots, rootCard, type CardId, type Cmd, type SlotAction, type SubCard } from "./cards";
 import type { HudControls } from "./controls";
 import { glyph, icon } from "./glyphs";
+import { pct, setClass, setDisabled, setStyle, setText } from "./domWrite";
 
 // One short word per structure so every label fits its button; the tooltip carries the full name.
 const SHORT: Partial<Record<string, string>> = {
@@ -119,15 +120,15 @@ export class CommandCard {
   private refresh(i: number): void {
     const s = this.slots[i];
     const a = this.actions[i];
-    if (!a) { s.el.disabled = true; s.cost.textContent = ""; s.count.textContent = ""; s.wipe.style.height = "0"; return; }
+    if (!a) { setDisabled(s.el, true); setText(s.cost, ""); setText(s.count, ""); setStyle(s.wipe, "height", "0%"); return; }
     const l = this.live(a);
-    s.el.disabled = false; // disabled buttons still need hover for their tooltip → style via class
+    setDisabled(s.el, false); // disabled buttons still need hover for their tooltip → style via class
     s.el.classList.toggle("is-disabled", !l.enabled);
     s.el.classList.toggle("active", l.active);
-    s.cost.textContent = l.cost;
-    s.cost.className = `cg-cost ${l.costKind}`;
-    s.count.textContent = l.count;
-    s.wipe.style.height = l.wipe > 0 ? `${Math.round(l.wipe * 100)}%` : "0";
+    setText(s.cost, l.cost);
+    setClass(s.cost, `cg-cost ${l.costKind}`);
+    setText(s.count, l.count);
+    setStyle(s.wipe, "height", l.wipe > 0 ? pct(Math.round(l.wipe * 100) / 100) : "0%");
   }
 
   private labelOf(a: SlotAction): string {

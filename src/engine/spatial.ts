@@ -1,4 +1,4 @@
-// Spatial hash for broad-phase neighbor queries (15-logic §6 performance). Entities are
+// Spatial hash for broad-phase neighbor queries (31 performance). Entities are
 // bucketed into coarse cells; a radius query returns everything in the overlapping cells
 // (a superset — callers still do the exact distance check). Rebuilt each fixed step. One
 // shared singleton serves combat targeting, Citadel capture, and separation, replacing the
@@ -24,9 +24,11 @@ export class SpatialHash {
     else this.cells.set(k, [e]);
   }
 
-  /** Rebuild from live entities. `unitsOnly` skips buildings (separation only needs units). */
+  /** Rebuild from live entities. `unitsOnly` skips buildings (separation only needs units). Buckets
+   *  are emptied, not discarded, so a rebuild allocates nothing once the occupied cells are known
+   *  (bounded by the map's cell count). */
   rebuild(state: GameState, unitsOnly = false): void {
-    this.cells.clear();
+    for (const bucket of this.cells.values()) bucket.length = 0;
     for (const e of state.entities) {
       if (e.hp <= 0) continue;
       if (e.kind === "building") {

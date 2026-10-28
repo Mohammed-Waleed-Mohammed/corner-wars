@@ -7,15 +7,15 @@
 
 import { SEPARATION } from "../config/constants";
 import type { AnyEntity, GameState, Unit } from "../core/types";
-import { navPassable } from "./pathfinding";
+import { navPassable, occupiedByBuilding } from "./pathfinding";
 import { unitHash } from "./spatial";
 
 const MAX_DIAMETER = 1.3; // largest collision diameter (heavy tank 0.6*2 = 1.2) + slack
 const scratch: AnyEntity[] = [];
-const pushes = new Map<Unit, { x: number; y: number }>(); // per-frame summed push, insertion-ordered (deterministic)
 
 export function updateSeparation(state: GameState): void {
-  pushes.clear();
+  // Pushes are summed on the units themselves (engine-only sepX/sepY): no per-tick allocations.
+  for (const u of state.entities) if (u.kind === "unit") { u.sepX = 0; u.sepY = 0; }
   for (const u of state.entities) {
     if (u.kind !== "unit" || u.hp <= 0) continue;
     unitHash.queryInto(u.x, u.y, MAX_DIAMETER, scratch);
@@ -26,29 +26,24 @@ export function updateSeparation(state: GameState): void {
     }
   }
   const max = SEPARATION.maxPushPerFrame;
-  for (const [u, p] of pushes) {
-    const m = Math.hypot(p.x, p.y);
+  for (const u of state.entities) {
+    if (u.kind !== "unit" || u.hp <= 0) continue;
+    const px = u.sepX ?? 0, py = u.sepY ?? 0;
+    if (px === 0 && py === 0) continue;
+    const m = Math.hypot(px, py);
     const k = m > max ? max / m : 1;
-    pushUnit(state, u, p.x * k, p.y * k);
+    pushUnit(state, u, px * k, py * k);
   }
   walkOutOfFootprints(state);
 }
 
-let occ = new Uint8Array(0);
 /** A unit standing inside a building footprint (a structure was placed on top of it) walks out to the
  *  nearest free tile at the separation rate instead of staying stuck inside the walls. */
 function walkOutOfFootprints(state: GameState): void {
-  const W = state.mapWidth;
-  if (occ.length !== W * state.mapHeight) occ = new Uint8Array(W * state.mapHeight);
-  else occ.fill(0);
-  for (const b of state.entities) {
-    if (b.kind !== "building" || b.hp <= 0 || b.buildingType === "gate") continue;
-    for (let y = b.y; y < b.y + b.height; y++) for (let x = b.x; x < b.x + b.width; x++) occ[y * W + x] = 1;
-  }
   for (const u of state.entities) {
     if (u.kind !== "unit" || u.hp <= 0) continue;
     const tx = Math.floor(u.x), ty = Math.floor(u.y);
-    if (tx < 0 || ty < 0 || tx >= W || ty >= state.mapHeight || !occ[ty * W + tx]) continue;
+    if (!occupiedByBuilding(state, tx, ty)) continue;
     const out = nearestFreeTile(state, u.x, u.y, tx, ty);
     if (!out) continue;
     const dx = out.x - u.x, dy = out.y - u.y;
@@ -61,8 +56,8 @@ function walkOutOfFootprints(state: GameState): void {
 }
 
 function addPush(u: Unit, dx: number, dy: number): void {
-  const p = pushes.get(u);
-  if (p) { p.x += dx; p.y += dy; } else pushes.set(u, { x: dx, y: dy });
+  u.sepX = (u.sepX ?? 0) + dx;
+  u.sepY = (u.sepY ?? 0) + dy;
 }
 
 function resolvePair(a: Unit, b: Unit): void {

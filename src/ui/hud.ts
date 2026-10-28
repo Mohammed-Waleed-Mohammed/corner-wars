@@ -20,6 +20,7 @@ import { WorldTip } from "./hud/worldTip";
 import { POWER_ORDER } from "./hud/cards";
 import type { HudControls } from "./hud/controls";
 import { glyph, icon } from "./hud/glyphs";
+import { pct, setDisabled, setHidden, setStyle, setText, setTitle } from "./hud/domWrite";
 import { ProductionTabs } from "./hud/prodTabs";
 import { SelectionPanel } from "./hud/selectionPanel";
 import "./hud/hud-layout.css";
@@ -251,7 +252,7 @@ export class Hud {
     // Gold: tweened readout (21 §L) + net income over ~1 s.
     this.displayGold += (p.gold - this.displayGold) * HUD_ANIM.TWEEN_RATE;
     if (Math.abs(this.displayGold - p.gold) < 1) this.displayGold = p.gold;
-    this.gold.textContent = Math.floor(this.displayGold).toLocaleString("en-US");
+    setText(this.gold, Math.floor(this.displayGold).toLocaleString("en-US"));
     if (!this.incomeInit) { this.lastSampleGold = p.gold; this.lastSampleTime = state.time; this.incomeInit = true; }
     if (state.time - this.lastSampleTime >= 1) {
       this.incomeRate = (p.gold - this.lastSampleGold) / (state.time - this.lastSampleTime);
@@ -264,36 +265,36 @@ export class Hud {
       window.setTimeout(() => this.income.classList.remove(cls), HUD_ANIM.INCOME_FLASH_MS);
     }
     this.lastIncomeShown = r;
-    this.income.textContent = `${r >= 0 ? "+" : ""}${r}/s`;
+    setText(this.income, `${r >= 0 ? "+" : ""}${r}/s`);
     this.income.classList.toggle("neg", r < 0);
 
     // Power: used/produced + bar; red on deficit, amber above 90%.
     const frac = p.powerProduced > 0 ? p.powerUsed / p.powerProduced : p.powerUsed > 0 ? 1.01 : 0;
-    this.powerText.textContent = `${p.powerUsed}/${p.powerProduced}`;
-    this.powerFill.style.width = `${Math.min(100, frac * 100)}%`;
+    setText(this.powerText, `${p.powerUsed}/${p.powerProduced}`);
+    setStyle(this.powerFill, "width", pct(frac));
     this.powerBox.classList.toggle("bad", frac > 1);
     this.powerBox.classList.toggle("warn", frac > 0.9 && frac <= 1);
 
     let n = 0;
     for (const e of state.entities) if (e.kind === "unit" && e.owner === this.local) n++;
     const cap = unitCap(p);
-    this.units.textContent = `${n}/${cap}`;
+    setText(this.units, `${n}/${cap}`);
     this.units.parentElement!.classList.toggle("warn", n >= cap * 0.9 && n < cap);
     this.units.parentElement!.classList.toggle("bad", n >= cap);
 
     const m = Math.floor(state.time / 60), sec = Math.floor(state.time % 60);
-    this.timer.textContent = `${m}:${sec < 10 ? "0" : ""}${sec}`;
-    this.dev.hidden = !info.debugVisible;
+    setText(this.timer, `${m}:${sec < 10 ? "0" : ""}${sec}`);
+    setHidden(this.dev, !info.debugVisible);
     if (info.debugVisible) {
       const cam = info.camera, ct = cam.screenToTile(cam.viewportW / 2, cam.viewportH / 2);
-      this.dev.textContent = `${Math.round(info.fps)} fps · ${Math.round(cam.zoom * 100)}% · ${ct.x.toFixed(0)},${ct.y.toFixed(0)} · ${info.selectedCount} sel`;
+      setText(this.dev, `${Math.round(info.fps)} fps · ${Math.round(cam.zoom * 100)}% · ${ct.x.toFixed(0)},${ct.y.toFixed(0)} · ${info.selectedCount} sel`);
     }
 
     this.updateCitadel(state);
     this.updateBuffs(state);
     this.updateGroups(info.armyBar);
     const idle = this.ctrl?.idleWorkerCount() ?? 0;
-    this.idleCount.textContent = idle > 0 ? String(idle) : "";
+    setText(this.idleCount, idle > 0 ? String(idle) : "");
     this.idleBtn.classList.toggle("lit", idle > 0);
     this.alertBtn.classList.toggle("lit", this.alerts.hasLatest);
 
@@ -316,14 +317,14 @@ export class Hud {
     const p = state.players[this.local];
     this.displayEnergy += (p.commandEnergy - this.displayEnergy) * HUD_ANIM.TWEEN_RATE;
     if (Math.abs(this.displayEnergy - p.commandEnergy) < 0.5) this.displayEnergy = p.commandEnergy;
-    this.energy.textContent = String(Math.floor(this.displayEnergy));
-    this.energyFill.style.width = `${(p.commandEnergy / CITADEL.maxEnergy) * 100}%`;
+    setText(this.energy, String(Math.floor(this.displayEnergy)));
+    setStyle(this.energyFill, "width", pct(p.commandEnergy / CITADEL.maxEnergy));
     const held = state.citadel.controllingPlayer === this.local;
     this.citadel.classList.toggle("held", held);
-    this.citadel.title = held ? "You hold the Citadel — Command Energy is charging" : "Command Energy — capture and hold the Citadel to charge it";
+    setTitle(this.citadel, held ? "You hold the Citadel — Command Energy is charging" : "Command Energy — capture and hold the Citadel to charge it");
     for (const b of this.powerBtns) {
       const ok = p.commandEnergy >= b.cost && !p.eliminated;
-      b.el.disabled = !ok;
+      setDisabled(b.el, !ok);
       b.el.classList.toggle("affordable", ok);
     }
   }
@@ -352,8 +353,8 @@ export class Hud {
     }
     for (const b of buffs) {
       const cd = this.buffCountdowns.get(b.id);
-      if (cd && b.countdown !== undefined) cd.textContent = `${Math.ceil(b.countdown)}s`;
-      if (b.kind === "citadel") { const chip = this.buffsEl.querySelector<HTMLElement>(`[data-buff="${b.id}"]`); if (chip) chip.title = b.tooltip; }
+      if (cd && b.countdown !== undefined) setText(cd, `${Math.ceil(b.countdown)}s`);
+      if (b.kind === "citadel") { const chip = this.buffsEl.querySelector<HTMLElement>(`[data-buff="${b.id}"]`); if (chip) setTitle(chip, b.tooltip); }
     }
   }
 

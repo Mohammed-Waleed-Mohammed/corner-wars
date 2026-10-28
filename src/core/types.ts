@@ -221,6 +221,8 @@ export interface Unit extends Entity {
   repairTarget?: number | null; // engine-only (16 §7): friendly building this worker is repairing
   standSpot?: Vec2 | null; // engine-only (16 §2): free tile beside the building it works on / delivers to
   standFor?: number | null; // engine-only: the building id `standSpot` was picked for
+  sepX?: number; // engine-only: this tick's summed separation push (separation.ts scratch)
+  sepY?: number;
   healTarget?: number | null; // engine-only (19 §D): unit this Medic is currently healing
   // Formations (19): the formation this unit belongs to + its slot offset in formation-local space.
   formationId?: number | null;
@@ -503,6 +505,7 @@ export interface GameState {
   humanLowPower?: boolean; // engine-only: last frame's human low-power state (for the cue)
   fogTimer?: number; // engine-only: accumulator for the periodic fog recompute
   fogVersion?: number; // engine-only: bumped when fog changes (render-cache invalidation)
+  navBudget?: number; // engine-only: A* expansions left this tick (NAV.expansionsPerTick; unset = unlimited)
   // 22 §C v3 — set ONLY on an AI perception view (never on the real state): enemy units this AI
   // remembers but can't currently see, at their last-seen spot. Strategic estimates (army value,
   // composition) count them; live tactical reads (contact, fight odds, threats) don't.

@@ -74,6 +74,7 @@ Key rules:
 - **Data-model extensions:** `description/10-data-model.md` calls its interfaces "a starting point." The code adds engine-only fields (marked in `core/types.ts`): `kind` discriminant, `moveTarget`, worker harvest fields, `attackMove`/`forcedTargetId`, building `width`/`height`/`buildProgress`/`attackTimer`, `Player.frenzyTimer`/`ai`, `GameState.seed`.
 - **Building anchor:** a building's `x,y` is the **top-left tile** of its footprint; the Citadel's `x,y` is its **center** (24,24).
 - Append `?seed=<n>` to the URL to reproduce a specific map layout (logged to console on load).
+- **Performance (file 31):** dev-only `?stress=N` (add `&clash` to fight at the Citadel) spawns N units per player in a skirmish for profiling. Passability goes through the per-tick nav grid in `engine/pathfinding.ts` (never scan `state.entities` for it); unit A* is budgeted per tick (`NAV.expansionsPerTick`); targets re-scan every `TARGET_RESCAN_TICKS`; `state.entities` must stay in ascending id order (`findEntityById` is a binary search); per-frame HUD writes go through `ui/hud/domWrite.ts`.
 - It is a git repository (main branch). Fog of war, A* pathfinding, upgrades, sound and online multiplayer have all been built since the first version of this file.
 
 ## World, factions, biomes, campaign (files 25–29)

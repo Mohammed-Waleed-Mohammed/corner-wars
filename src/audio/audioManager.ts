@@ -29,14 +29,26 @@ function tone(
   o.stop(t + dur + 0.02);
 }
 
+// One second of white noise per audio context, shared by every noise burst (a random slice of it is
+// played). It used to be regenerated sample by sample for every shot and explosion — in a big battle
+// that was thousands of Math.random() calls and a fresh AudioBuffer per sound.
+const noiseBuffers = new WeakMap<BaseAudioContext, AudioBuffer>();
+function noiseBuffer(ctx: AudioContext): AudioBuffer {
+  let buf = noiseBuffers.get(ctx);
+  if (!buf) {
+    buf = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+    noiseBuffers.set(ctx, buf);
+  }
+  return buf;
+}
+
 function noise(
   ctx: AudioContext, dest: AudioNode, t: number,
   dur: number, peak: number, filter?: BiquadFilterType, filterFreq?: number,
 ): void {
-  const len = Math.max(1, Math.floor(ctx.sampleRate * dur));
-  const buf = ctx.createBuffer(1, len, ctx.sampleRate);
-  const data = buf.getChannelData(0);
-  for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
+  const buf = noiseBuffer(ctx);
   const src = ctx.createBufferSource();
   src.buffer = buf;
   const g = env(ctx, dest, t, dur, peak);
@@ -49,7 +61,7 @@ function noise(
   } else {
     src.connect(g);
   }
-  src.start(t);
+  src.start(t, Math.random() * Math.max(0, buf.duration - dur), dur + 0.02);
   src.stop(t + dur + 0.02);
 }
 

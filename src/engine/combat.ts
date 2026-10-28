@@ -7,6 +7,7 @@
 
 import {
   AGGRO_RADIUS,
+  TARGET_RESCAN_TICKS,
   CITADEL_POWERS,
   COUNTER_BONUS,
   COUNTERS,
@@ -47,8 +48,20 @@ export function entityCenter(e: AnyEntity): Vec2 {
   return { x: e.x, y: e.y };
 }
 
+/** O(log n): state.entities is always in ascending id order (every entity is appended with a fresh
+ *  id from state.nextId; removals splice), so a binary search replaces the old linear scan that made
+ *  every forced target, projectile and builder lookup O(entities) per tick. */
 export function findEntityById(state: GameState, id: number): AnyEntity | undefined {
-  return state.entities.find((e) => e.id === id);
+  const a = state.entities;
+  let lo = 0, hi = a.length - 1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    const v = a[mid].id;
+    if (v === id) return a[mid];
+    if (v < id) lo = mid + 1;
+    else hi = mid - 1;
+  }
+  return undefined;
 }
 
 /** Apply damage and the visual feedback (hit-flash + spark). Death is reaped in removeDead.
@@ -146,7 +159,7 @@ export function pickFormationTarget(u: Unit, slot: Vec2, reach: number): AnyEnti
   let near: AnyEntity | null = null, nearD = Infinity;
   for (const e of formScratch) {
     if (e.hp <= 0 || !isEnemy(u.owner, e) || isWallLike(e)) continue;
-    const d = Math.hypot(pointNearest(e, slot).x - slot.x, pointNearest(e, slot).y - slot.y);
+    const d = distTo(e, slot.x, slot.y);
     if (d > reach) continue;
     if (typeMultFor(u.combatType, e) > 1 && d < counterD) { counterD = d; counter = e; }
     if (d < nearD) { nearD = d; near = e; }
@@ -163,7 +176,9 @@ export function formationEngage(state: GameState, u: Unit, f: Formation, slot: V
   const leash = FORMATIONS.LEASH;
   const range = rangeOf(state, u); // 24 §B: +1 from high ground
   const reach = leash + range;
-  const target = pickFormationTarget(u, slot, reach);
+  // 31 §C: pick a counter-first target on the rescan tick; in between keep the last one while valid.
+  const target = rescanTick(state, u) ? pickFormationTarget(u, slot, reach) : keptTarget(state, u, slot.x, slot.y, reach);
+  u.target = target ? target.id : null;
   if (!target) return false;
 
   let { dmgMult } = combatMults(state, u);
@@ -390,7 +405,10 @@ function resolveTarget(state: GameState, u: Unit): AnyEntity | null {
     }
   }
   // Long-range units (artillery r9) auto-engage at their range, not just the global aggro radius.
-  const t = nearestEnemy(u.owner, u, Math.max(AGGRO_RADIUS, rangeOf(state, u)));
+  const radius = Math.max(AGGRO_RADIUS, rangeOf(state, u));
+  // 31 §C: re-scan only on this unit's rescan tick; in between keep a still-valid target (or none).
+  if (!rescanTick(state, u)) return keptTarget(state, u, u.x, u.y, radius);
+  const t = nearestEnemy(u.owner, u, radius);
   u.target = t ? t.id : null;
   return t;
 }
@@ -430,8 +448,7 @@ function nearestEnemy(owner: Owner, from: Vec2, range: number): AnyEntity | null
   for (let i = 0; i < nearScratch.length; i++) {
     const e = nearScratch[i];
     if (e.hp <= 0 || !isEnemy(owner, e) || isWallLike(e)) continue; // §2c: never auto-target walls/gates
-    const p = pointNearest(e, from);
-    const d = Math.hypot(p.x - from.x, p.y - from.y);
+    const d = distTo(e, from.x, from.y);
     if (d <= range && d < bestD) {
       bestD = d;
       best = e;
@@ -440,14 +457,26 @@ function nearestEnemy(owner: Owner, from: Vec2, range: number): AnyEntity | null
   return best;
 }
 
-function pointNearest(e: AnyEntity, from: Vec2): Vec2 {
-  if (e.kind === "building") {
-    return { x: clamp(from.x, e.x, e.x + e.width), y: clamp(from.y, e.y, e.y + e.height) };
-  }
-  return { x: e.x, y: e.y };
+/** Distance from (x, y) to an entity (a building's nearest footprint point). Allocation-free: it runs
+ *  for every candidate of every target scan. */
+function distTo(e: AnyEntity, x: number, y: number): number {
+  if (e.kind === "building") return Math.hypot(clamp(x, e.x, e.x + e.width) - x, clamp(y, e.y, e.y + e.height) - y);
+  return Math.hypot(e.x - x, e.y - y);
 }
 
 function distToEntity(from: Vec2, e: AnyEntity): number {
-  const p = pointNearest(e, from);
-  return Math.hypot(p.x - from.x, p.y - from.y);
+  return distTo(e, from.x, from.y);
+}
+
+/** 31 §C: true on this unit's re-scan tick (every TARGET_RESCAN_TICKS, staggered by id). */
+function rescanTick(state: GameState, u: Unit): boolean {
+  return (state.tick + u.id) % TARGET_RESCAN_TICKS === 0;
+}
+
+/** The unit's current auto-target, if it is still a valid pick within `reach` of (x, y). */
+function keptTarget(state: GameState, u: Unit, x: number, y: number, reach: number): AnyEntity | null {
+  if (u.target == null) return null;
+  const t = findEntityById(state, u.target);
+  if (!t || t.hp <= 0 || !isEnemy(u.owner, t) || isWallLike(t)) return null;
+  return distTo(t, x, y) <= reach ? t : null;
 }

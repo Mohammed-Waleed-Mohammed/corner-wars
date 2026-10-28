@@ -288,9 +288,11 @@ function withFacing(
   angle: number,
   draw: () => void,
 ): void {
-  ctx.save();
+  // Undo the rotation by hand instead of save()/restore(): with hundreds of units the full state-stack
+  // copy was a visible share of frame time. The draw callbacks set every style they use.
   ctx.translate(x, y);
   ctx.rotate(angle);
   draw();
-  ctx.restore();
+  ctx.rotate(-angle);
+  ctx.translate(-x, -y);
 }

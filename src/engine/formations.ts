@@ -18,23 +18,36 @@ export function formationOf(state: GameState, u: Unit): Formation | null {
   return state.formations.find((f) => f.id === u.formationId) ?? null;
 }
 
+// Live members of every formation, indexed once per tick by updateFormations (perf: the anchor helpers
+// below used to scan every entity, once per formation per helper per tick).
+const members = new Map<number, Unit[]>();
+const NONE: Unit[] = [];
+function indexMembers(state: GameState): void {
+  for (const list of members.values()) list.length = 0;
+  for (const e of state.entities) {
+    if (e.kind !== "unit" || e.hp <= 0 || e.formationId == null) continue;
+    let list = members.get(e.formationId);
+    if (!list) { list = []; members.set(e.formationId, list); }
+    list.push(e);
+  }
+}
+function membersOf(f: Formation): Unit[] {
+  return members.get(f.id) ?? NONE;
+}
+
 /** §I cohesion: the whole shape moves at its slowest member's speed — and (24 §B) at the terrain
  *  factor under its anchor for its most restrictive movement class (tracked if any vehicle, else foot). */
 function slowestSpeed(state: GameState, f: Formation): number {
   let s = Infinity;
-  for (const e of state.entities) {
-    if (e.kind === "unit" && e.hp > 0 && e.formationId === f.id) s = Math.min(s, e.speed);
-  }
+  for (const e of membersOf(f)) s = Math.min(s, e.speed);
   const base = Number.isFinite(s) ? s : 2;
-  const factor = speedFactor(terrainAt(state, f.anchor.x, f.anchor.y), formationClass(state, f), state.biome);
+  const factor = speedFactor(terrainAt(state, f.anchor.x, f.anchor.y), formationClass(f), state.biome);
   return base * (factor > 0 ? factor : 1);
 }
 
 /** 24 §B: the class a formation paths and paces as — tracked if it holds any vehicle, else foot. */
-function formationClass(state: GameState, f: Formation): MoveClass {
-  for (const e of state.entities) {
-    if (e.kind === "unit" && e.hp > 0 && e.formationId === f.id && UNIT_MOVE_CLASS[e.unitType] !== "foot") return "tracked";
-  }
+function formationClass(f: Formation): MoveClass {
+  for (const e of membersOf(f)) if (UNIT_MOVE_CLASS[e.unitType] !== "foot") return "tracked";
   return "foot";
 }
 
@@ -60,11 +73,11 @@ function stepAnchorPassable(state: GameState, f: Formation, nx: number, ny: numb
 }
 
 /** §I cohesion: true while more than half the live members are over LAG_DIST from their slots. */
-function membersLagging(state: GameState, f: Formation): boolean {
+function membersLagging(f: Formation): boolean {
   let n = 0, far = 0;
   const lag2 = FORMATIONS.COHESION.LAG_DIST ** 2;
-  for (const e of state.entities) {
-    if (e.kind !== "unit" || e.hp <= 0 || e.formationId !== f.id || !e.slotOffset) continue;
+  for (const e of membersOf(f)) {
+    if (!e.slotOffset) continue;
     n++;
     const s = slotWorld(f.anchor, f.facing, e.slotOffset.dx, e.slotOffset.dy);
     if ((e.x - s.x) ** 2 + (e.y - s.y) ** 2 > lag2) far++;
@@ -74,6 +87,7 @@ function membersLagging(state: GameState, f: Formation): boolean {
 
 /** Advance every formation's anchor along its path this tick (before units chase their slots). */
 export function updateFormations(state: GameState, dt: number): void {
+  indexMembers(state);
   for (const f of state.formations) updateFormationAnchor(state, f, dt);
 }
 
@@ -99,7 +113,7 @@ function updateFormationAnchor(state: GameState, f: Formation, dt: number): void
   }
   // §I: hold the shape while most members are still catching up — bounded, so a stuck unit can't
   // freeze the army.
-  if (membersLagging(state, f)) {
+  if (membersLagging(f)) {
     f.cohesionWait = (f.cohesionWait ?? 0) + dt;
     if (f.cohesionWait <= FORMATIONS.COHESION.MAX_WAIT) return;
   } else f.cohesionWait = 0;
@@ -107,7 +121,7 @@ function updateFormationAnchor(state: GameState, f: Formation, dt: number): void
   const goalMoved = !f.pathGoal || Math.hypot(f.pathGoal.x - goal.x, f.pathGoal.y - goal.y) > NAV.repathDist;
   if (goalMoved || f.path.length === 0) {
     f.pathGoal = { x: goal.x, y: goal.y };
-    f.path = computePath(state, f.anchor.x, f.anchor.y, goal.x, goal.y, owner, formationClass(state, f));
+    f.path = computePath(state, f.anchor.x, f.anchor.y, goal.x, goal.y, owner, formationClass(f));
   }
   if (f.path.length > 0) {
     const wp: Vec2 = f.path[0];

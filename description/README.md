@@ -28,6 +28,7 @@ Each file is the **single source of truth** for its own system and numbers. The 
 | `28-campaign.md` | The 12-mission campaign: flow, difficulty, objective and event types, every mission |
 | `29-art-pipeline.md` | The Art Lab: guide images, exact prompts, automatic fixing and QA thresholds for terrain, portraits, faction buildings and units |
 | `30-command-hud.md` | The Command HUD: two bands (top bar + bottom console), the 5×3 grid command card and its hotkeys, selection panel, production tabs, alerts (replaces file 21's layout) |
+| `31-performance.md` | Big battles at 60 fps: how to measure (`?stress=N&clash`), the sim/render/HUD rules and budgets (nav grid, A* budget, re-target interval, per-tile fog, change-only HUD writes) |
 
 ## Conventions used everywhere
 

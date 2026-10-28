@@ -10,7 +10,7 @@ import { NAV } from "../config/constants";
 import { approach } from "../core/steering";
 import type { GameState, Owner, Unit } from "../core/types";
 import { moveClassOf, terrainSpeedMult } from "../state/terrain";
-import { computePath, enemyGateAt, navPassable } from "./pathfinding";
+import { computePath, enemyGateAt, navPassable, pathStats } from "./pathfinding";
 
 /** Tile a unit may step onto: passable terrain/buildings AND not an enemy gate (closed to it). */
 export function movePassable(state: GameState, x: number, y: number, owner: Owner): boolean {
@@ -39,10 +39,18 @@ export function navigateTo(
   const nextBlocked =
     u.path.length > 0 && !movePassable(state, Math.floor(u.path[0].x), Math.floor(u.path[0].y), u.owner);
   if (goalMoved || nextBlocked || (u.path.length === 0 && u.repathCooldown <= 0)) {
-    u.pathGoal = { x: gx, y: gy };
-    // owner-aware (own gates are passable) + class-weighted terrain costs (24 §B)
-    u.path = computePath(state, u.x, u.y, gx, gy, u.owner, moveClassOf(u));
-    if (u.path.length === 0) u.repathCooldown = NAV.repathCooldown; // no route — slow down retries
+    if (state.navBudget === undefined || state.navBudget > 0) {
+      u.pathGoal = { x: gx, y: gy };
+      // owner-aware (own gates are passable) + class-weighted terrain costs (24 §B)
+      u.path = computePath(state, u.x, u.y, gx, gy, u.owner, moveClassOf(u));
+      if (state.navBudget !== undefined) state.navBudget -= Math.max(1, pathStats.expansions);
+      if (u.path.length === 0) u.repathCooldown = NAV.repathCooldown; // no route — slow down retries
+    } else if (nextBlocked || u.path.length === 0) {
+      // This tick's A* budget is spent and there's no walkable route in hand: wait a tick rather
+      // than guess a straight line (a mass order spreads over a few ticks instead of one long frame).
+      if (nextBlocked) u.path = [];
+      return false;
+    } // else the goal drifted but the old route is still walkable: keep following it this tick
   }
 
   if (u.path.length > 0) {

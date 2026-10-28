@@ -2,6 +2,7 @@
 // cooldown and the Z hotkey. Lives in the top bar's centre dock (30 §A). Display-only: clicking calls
 // the handler (controller.activateAbility), which emits USE_ABILITY through the session.
 
+import { setHidden, setStyle, setText } from "./hud/domWrite";
 import "./commanderCard.css";
 import { ABILITIES, COMMANDERS } from "../config/commanders";
 import { COMMANDER_INFO, FACTIONS, abilityCooldownText, abilityText, doctrineText, fullName } from "../content/factions";
@@ -52,8 +53,8 @@ export class CommanderCard {
 
   update(state: GameState, targeting: boolean): void {
     const p = state.players[this.local];
-    if (!p?.commander) { this.root.hidden = true; return; }
-    this.root.hidden = false;
+    if (!p?.commander) { setHidden(this.root, true); return; }
+    setHidden(this.root, false);
     const id = p.commander;
     const info = COMMANDER_INFO[id];
     const fac = FACTIONS[info.faction];
@@ -78,8 +79,8 @@ export class CommanderCard {
     const ready = left <= 0 && !p.eliminated;
     this.btn.classList.toggle("ready", ready);
     this.btn.classList.toggle("targeting", targeting);
-    this.btn.style.setProperty("--cd", String(ready ? 0 : Math.min(1, left / total)));
-    this.cd.textContent = ready ? (targeting ? "TARGET" : "READY") : `${Math.ceil(left)}s`;
+    setStyle(this.btn, "--cd", String(ready ? 0 : Math.round(Math.min(1, left / total) * 200) / 200));
+    setText(this.cd, ready ? (targeting ? "TARGET" : "READY") : `${Math.ceil(left)}s`);
     const buff = p.abilityBuff;
     this.root.classList.toggle("buffed", !!buff && buff.until > state.time);
   }
