@@ -1,6 +1,6 @@
 // 22 §O — the F5 AI Commander overlay. Local + read-only: draws each AI's blackboard (personality,
 // stance, target, army values, top intents, squad roster) as stacked panels, plus on-map intent
-// lines (squad → objective) and the base-plan ghost (perimeter/walls/gates outlines). Only the peer
+// lines (squad → objective) and the base-plan ghost (wall ring, gates, planned towers). Only the peer
 // that runs the Commander (SP, or the MP host) has blackboards to draw — elsewhere it's a no-op.
 
 import { HUD, UNIT_STATS, ownerColor } from "../../config/constants";
@@ -30,6 +30,14 @@ export function drawAIOverlay(ctx: CanvasRenderingContext2D, state: GameState, c
       for (const g of cs.basePlan.gates) {
         const s = camera.tileToScreen(g.x, g.y);
         ctx.strokeRect(s.x, s.y, camera.zoom * 32, camera.zoom * 32);
+      }
+      // §G v4 planned towers: a ring at each spot (filled = core, built by every personality)
+      ctx.strokeStyle = ctx.fillStyle = col;
+      for (const d of cs.basePlan.plannedDefenses) {
+        const s = camera.tileToScreen(d.x + 0.5, d.y + 0.5);
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, camera.zoom * 10, 0, Math.PI * 2);
+        if (d.core) ctx.fill(); else ctx.stroke();
       }
       ctx.restore();
     }

@@ -373,11 +373,19 @@ export interface AISquad {
 }
 
 export interface AIBasePlan {
+  yardId: number; // the main yard this plan belongs to
   anchor: Vec2; // main yard center
-  perimeter: Vec2[]; // the wall path (§G.2)
-  gates: Vec2[]; // ≤3 gate tiles on used paths
-  walls: Vec2[]; // planned wall tiles (threat-facing subset for non-Turtles)
-  plannedDefenses: { type: BuildingType; x: number; y: number }[];
+  radius: number; // 22 §G v4: the wall ring's walking distance from the yard (0 = no plan possible)
+  perimeter: Vec2[]; // every ring tile (walls + gates + openings)
+  gates: Vec2[]; // gate tiles (2 per gate)
+  gateCenters: Vec2[]; // one per gate; [0] = the MAIN gate (toward the nearest enemy)
+  walls: Vec2[]; // wall tiles, nearest-the-main-gate first (the front closes first)
+  openings: Vec2[]; // ring tiles that can't take a wall (forest, shallows, bridge, gold) — towers cover them
+  plannedDefenses: { type: BuildingType; x: number; y: number; core: boolean }[]; // core = every personality builds it
+  dist: Int16Array | null; // walking distance from the yard (inside test for placement)
+  reserved: number[]; // tile indices kept free of buildings: the lanes from each gate to the yard
+  plannedTick: number;
+  frozen: boolean; // ring + gates locked once the first wall or gate is placed
 }
 
 export interface AILogEntry { tick: number; layer: "S" | "O" | "T"; msg: string; }

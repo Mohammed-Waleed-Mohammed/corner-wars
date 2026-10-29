@@ -159,13 +159,35 @@ Never voluntarily fight two wars: while stance is PRESSURE/ALL_IN on target T, i
 
 ## G. Base planning: layout, walls, gates, defenses (Operational)
 
-A deterministic **base plan** computed once per base (recomputed when the yard moves/expands):
+**v4 (replaces the bounding-rectangle plan).** The v1–v3 plan walled half of a rectangle drawn around the buildings. It ignored terrain, so walls came out as disconnected straight lines in the middle of fields, gates were chosen by distance alone, and low-budget personalities never built a single tower. The v4 plan reads the map. Code: `engine/commander/basePlan.ts`.
 
-1. **Building placement:** production/economy buildings placed on free tiles nearest the yard, in a compact spiral, respecting build radius; Power Plants placed on the side AWAY from the nearest enemy (protect the grid); the Lab deepest inside.
-2. **Perimeter:** compute the bounding rectangle of all base buildings +3 tiles margin, clipped to passable ground. The perimeter path = that rectangle's edge tiles.
-3. **Walls & gates:** budget permitting (personality %), place Wall segments along the perimeter **prioritizing the sides facing enemies** (by FrontDistance direction), with a **Gate** at each point where the perimeter crosses a used path (to my mines, toward map center) — max 3 gates. Respect the 60-segment cap; Turtle fills the whole perimeter, others wall only the threat-facing 50%.
-4. **Defenses:** at each gate: 1 Gun Turret inside; at the two threat-facing perimeter corners: 1 Pillbox each; after Advanced Defenses research: 1 Anti-Armor Cannon center-base if any enemy composition is >35% heavy, 1 Missile Tower if any enemy is >50% infantry+ranged blob. Defense spend obeys the personality budget.
-5. **Rebuild:** destroyed walls/defenses re-enter the build queue at 1.5× normal priority while stance ≠ RECOVER.
+1. **The base is a walking distance.** A 4-connected BFS over walkable terrain from the main yard's footprint gives every tile its walking distance d.
+   - Any path from inside (d < r) to outside (d > r) must step on a tile at d = r.
+   - With no diagonal corner cutting, a diagonal step can't slip between two such tiles either.
+   - So walling the ring at d = r (the tiles at r that have a neighbour at r + 1) **seals the base**.
+2. **The ring is the cheapest one**, for r between rIn and 18 (`WALL_R_MAX`).
+   - **rIn** keeps inside, with a clear tile to spare: every existing base building; the home gold field (the nearest pile and every pile within 4 tiles of it); and at least 150 buildable tiles (`BASE_AREA_MIN`). It is never below 9 (`WALL_R_MIN`).
+   - **Cost:** ring length + 6 per tile that can't take a wall (forest, shallows, bridge, a gold pile) + 0.6 × r. Over the 60-segment cap is heavily penalised.
+   - **Result:** between cliffs and water the ring lands on the chokepoint, a few tiles across. On open ground it's a short closed line from map edge or rock to rock.
+3. **Gates go where my own routes cross the ring.** Each is 2 tiles wide, so an army can get out. At most 3 (`GATES_MAX`); crossings within 4 tiles share one.
+   - **Destinations, in order:** the nearest enemy base (the MAIN gate, `gateCenters[0]`), the Citadel, other enemy bases, the two nearest gold fields outside the ring.
+   - **Placement:** for each destination, a full-map BFS from it. The gate is the ring tile on a shortest yard→destination path.
+4. **Towers.** Core towers are built by every personality, with gold kept back for nothing else:
+   - **Core (main gate):** a Gun Turret and a Pillbox 2–3 tiles inside, either side of the lane.
+   - **Core (gaps):** a Pillbox behind every gap that can't be walled.
+   - **Extras:** a Gun Turret inside every other gate; Pillboxes along the threat-facing wall at least 8 tiles apart (`DEF_WALL_SPACING`), and an Anti-Armor Cannon / Missile Tower at the main gate when the enemy's mix calls for them (>35% heavy / >50% infantry + ranged). Personalities with a defense budget below 0.1 (Rusher) build only the core towers and the wall.
+5. **Lanes and placement.**
+   - **Lanes:** the walk from each gate to the yard, 3 tiles wide, is reserved.
+   - **Inside first:** every new building goes inside the ring with one tile clear of it, never on a lane, compact around the yard (Power Plants away from the enemy, the Lab deepest).
+   - **Never seal ground (v4.6):** a building or tower may not cut any open ground inside the base off from the gates. A flood fill from the gate tiles, with the rest of the ring counted as wall, must reach as much as before. Before this rule, buildings packed around the yard sealed newly trained units into pockets.
+   - **Overflow:** only when the base is full does a building go outside, and never on the ring.
+6. **Build order** each operational tick:
+   1. one core tower;
+   2. the gates, before the wall closes;
+   3. up to 3 wall tiles, nearest the main gate first, so the front closes first;
+   4. extra towers.
+   - **Gold:** walls, gates and core towers keep 150 gold back (`DEF_GOLD_RESERVE`; none in DEFEND); extras need 400 to spare. The plan is the desired state, so anything destroyed re-enters the list.
+7. **Stability.** Until the first wall or gate is placed the plan is redone every 30 s (`PLAN_REFRESH_TICKS`) as the base grows. Then the ring and gates freeze; only the reactive towers follow the enemy's mix.
 
 ## H. Tech planning (Operational)
 
@@ -235,6 +257,12 @@ Units are assigned to persistent **squads**, each with a role and a formation:
   - If the push objective hasn't been in sight for 45 s (`ATTACK_INTEL_TICKS`), main stages at home and files a scout request. The scout drops its tour and goes there first.
   - Once the AI has looked, it decides on fresh information.
   - If no look arrives within 30 s (`ATTACK_INTEL_WAIT_TICKS`), it launches anyway on projected odds × 0.8 (`STALE_INTEL_DISCOUNT`), assuming defenders it can't see.
+- **v4 base defense outranks every push.** An enemy force worth ≥ 100 (`BASE_THREAT_MIN`) inside my wall counts as an attack on my base. That means within 3 tiles outside it (`BASE_WALL_SLACK`) where attackers chew on it, or within 20 tiles of the yard when no wall is planned (`BASE_DEFEND_RADIUS`).
+  - **The army comes home** if what's already there can't hold it: home guard, other units and powered towers at FightOdds < 1.6 (`BASE_HOLD_ODDS`). This applies however committed the push is; only the finishing blow on an enemy's last yard outranks it.
+  - **No more bracing.** Defenders fight **at the threatened point**, under their towers. They used to brace in a Box at the yard, where formation units only fire within their leash, so buildings at the edge of the base were destroyed while the army watched.
+  - **Long recalls go loose.** An army more than 15 tiles away (`DEFEND_LOOSE_DIST`) breaks formation so every unit runs home at its own speed.
+  - **The home guard** always engages inside the wall. For an outlying structure it still answers only at FightOdds ≥ 0.8.
+  - **Mustering:** the guard post and the retreat rally point are 4 tiles inside the main gate (`GATE_POST_DEPTH`).
 - **v4 REPEL hysteresis.** A REPEL keeps its last seen threat for 5 s (`REPEL_LINGER_TICKS`) after that threat drops out of sight. Before this, one enemy stepping in and out of view flipped main between REPEL and home every second or so; on screen the army stopped, turned and walked somewhere else.
 
 ## L. Formation tactics (formation vs formation)

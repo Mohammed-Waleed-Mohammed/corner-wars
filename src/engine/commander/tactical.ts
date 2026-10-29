@@ -203,13 +203,33 @@ function driveSquad(ctx: Ctx, s: Squad, objective: Vec2, attack: boolean): void 
   }
 }
 
-/** Where a beaten squad runs to: inside the threat-facing gate if the base is planned, else the yard. */
+/** Where a beaten squad runs to: inside the main gate if the base is planned, else the yard. */
 function rallyPoint(ctx: Ctx): Vec2 | null {
+  return gatePost(ctx) ?? baseCenter(ctx.state, ctx.pid);
+}
+
+/** §G v4: a spot a few tiles inside the main gate, on its lane — where defenders muster. */
+function gatePost(ctx: Ctx): Vec2 | null {
   const { state, cs, pid } = ctx;
   const home = baseCenter(state, pid);
-  const gate = cs.basePlan?.gates[0];
-  if (home && gate) return { x: (home.x * 2 + gate.x) / 3, y: (home.y * 2 + gate.y) / 3 }; // just inside
-  return home;
+  const gate = cs.basePlan?.gateCenters[0];
+  if (!home || !gate) return home;
+  const d = Math.hypot(home.x - gate.x, home.y - gate.y) || 1;
+  const k = Math.min(1, COMMANDER.GATE_POST_DEPTH / d);
+  return { x: gate.x + 0.5 + (home.x - gate.x - 0.5) * k, y: gate.y + 0.5 + (home.y - gate.y - 0.5) * k };
+}
+
+/** §K v4: is this point part of my base — inside the planned wall (with a little slack outside it, where
+ *  attackers chew on the wall), or near the yard when no wall is planned? */
+function baseThreatened(ctx: Ctx, at: Vec2, home: Vec2): boolean {
+  const plan = ctx.cs.basePlan;
+  const W = ctx.state.mapWidth;
+  const tx = Math.floor(at.x), ty = Math.floor(at.y);
+  if (plan?.dist && plan.radius > 0 && tx >= 0 && ty >= 0 && tx < W && ty < ctx.state.mapHeight) {
+    const d = plan.dist[ty * W + tx];
+    if (d >= 0 && d <= plan.radius + COMMANDER.BASE_WALL_SLACK) return true;
+  }
+  return dist(at, home) <= COMMANDER.BASE_DEFEND_RADIUS;
 }
 
 /** §K v2 retreat: MOVE (not attack-move — don't stop to trade) to the rally point. A rout (odds below
@@ -297,8 +317,6 @@ function runMainArmy(ctx: Ctx, s: Squad): void {
   const regrouping = s.mission === "regroup" && sinceRetreat < 4 * COMMANDER.REGROUP_TICKS &&
     (sinceRetreat < regroupLen || (!allIn && value < (s.valueAtRetreat ?? 0) * COMMANDER.REGROUP_GAIN));
 
-  // Territory defense: DEFEND stance, or a real raid on my territory while the army isn't committed
-  // (scouts and small pokes are the HomeGuard's job).
   // §K v4 hysteresis: a REPEL keeps its last threat for REPEL_LINGER_TICKS after it drops out of
   // sight, so one enemy stepping in and out of view doesn't flip main between REPEL and home.
   let threat = territoryThreat(state, pid);
@@ -306,26 +324,46 @@ function runMainArmy(ctx: Ctx, s: Squad): void {
   else if (s.mission === "repel" && s.lastThreat && state.tick - s.lastThreat.tick < COMMANDER.REPEL_LINGER_TICKS) threat = s.lastThreat;
   const committed = s.mission === "attack" || s.mission === "flank" || s.mission === "raze" ||
     s.mission === "gather" || s.mission === "engage";
-  if (cs.stance === "DEFEND" ||
-      (threat && !committed && threat.value >= COMMANDER.DEFEND_MIN_VALUE && home && dist(threat.at, home) < 30)) {
-    if (threat) {
-      const canWin = fightOdds(state, pid, threat.at, COMMANDER.LOCAL_ODDS_RADIUS, fighters, true) >= COMMANDER.RETREAT_ODDS;
-      const to = canWin ? threat.at : (home ?? threat.at);
-      if (s.mission !== "repel" || !s.objective || dist(s.objective, to) > 4) {
-        ensureFormation(ctx, s, canWin ? pickFormation(ctx, center, "meet") : "box", threat.at);
-        cmd(ctx, "ATTACK_MOVE", { unitIds: s.unitIds, x: to.x, y: to.y, spread: false });
-        s.mission = "repel";
-        s.objective = to;
-        s.lastOrderTick = state.tick;
-        aiLog(cs, state.tick, "T", `main ${canWin ? "REPEL" : "brace"} @(${to.x | 0},${to.y | 0}) threat ${threat.value | 0}`);
-      }
+  const repel = (to: Vec2, why: string): void => {
+    if (s.mission === "repel" && s.objective && dist(s.objective, to) <= 4) return;
+    // A long run home goes loose — every unit at its own speed, not the formation's slowest member;
+    // close by, the army meets the attack as a shape.
+    const f = myFormation(state, pid, s);
+    if (dist(center, to) > COMMANDER.DEFEND_LOOSE_DIST) { if (f) cmd(ctx, "BREAK_FORMATION", { formationInstanceId: f.id }); }
+    else ensureFormation(ctx, s, pickFormation(ctx, center, "meet"), to);
+    cmd(ctx, "ATTACK_MOVE", { unitIds: s.unitIds, x: to.x, y: to.y, spread: false });
+    s.mission = "repel";
+    s.objective = to;
+    s.lastOrderTick = state.tick;
+    aiLog(cs, state.tick, "T", `main DEFEND @(${to.x | 0},${to.y | 0}) — ${why}`);
+  };
+
+  // §K v4 BASE DEFENSE outranks every push (only the finishing blow above beats it). A threat inside
+  // my walls (or near the yard) brings the main army home whenever what is already there — home guard,
+  // other units, powered towers — can't hold it comfortably, however committed the push. The army
+  // fights AT the threatened point, under its towers; it no longer braces in a Box at the yard while
+  // the edge of the base burns.
+  if (threat && home && baseThreatened(ctx, threat.at, home) && threat.value >= COMMANDER.BASE_THREAT_MIN) {
+    const holdOdds = fightOdds(state, pid, threat.at, COMMANDER.LOCAL_ODDS_RADIUS, undefined, true);
+    const here = dist(center, threat.at) < COMMANDER.LOCAL_ODDS_RADIUS + 4;
+    if (cs.stance === "DEFEND" || !committed || here || holdOdds < COMMANDER.BASE_HOLD_ODDS) {
+      repel(threat.at, `base under attack (threat ${threat.value | 0}, home odds ${holdOdds.toFixed(2)})`);
       return;
     }
-    if (home && (s.mission !== "defend" || dist(center, home) > 10)) {
+  } else if (threat && !committed && threat.value >= COMMANDER.DEFEND_MIN_VALUE && home && dist(threat.at, home) < 30) {
+    // An outlying structure (an expansion) raided while the army is idle: meet the raid if it can win.
+    if (fightOdds(state, pid, threat.at, COMMANDER.LOCAL_ODDS_RADIUS, fighters, true) >= COMMANDER.RETREAT_ODDS) {
+      repel(threat.at, `outpost raided (threat ${threat.value | 0})`);
+      return;
+    }
+  }
+  if (cs.stance === "DEFEND") {
+    const post = gatePost(ctx) ?? home;
+    if (post && (s.mission !== "defend" || dist(center, post) > 10)) {
       ensureFormation(ctx, s, "box", null);
-      cmd(ctx, "ATTACK_MOVE", { unitIds: s.unitIds, x: home.x, y: home.y, spread: false });
+      cmd(ctx, "ATTACK_MOVE", { unitIds: s.unitIds, x: post.x, y: post.y, spread: false });
       s.mission = "defend";
-      s.objective = home;
+      s.objective = post;
     }
     return;
   }
@@ -501,17 +539,18 @@ function pickVictim(ctx: Ctx, target: PlayerId, from: Vec2): Building | null {
 
 // ── HomeGuard: Guard the threat-facing gate; answer raids anywhere in my territory (§J v2) ─────
 function runHomeGuard(ctx: Ctx, s: Squad): void {
-  const { state, cs, pid } = ctx;
+  const { state, pid } = ctx;
   const units = squadUnits(state, s);
   if (units.length === 0) return;
   const home = baseCenter(state, pid);
   if (!home) return;
-  const post = cs.basePlan?.gates[0] ?? home;
+  const post = gatePost(ctx) ?? home;
   const threat = territoryThreat(state, pid);
   if (threat) {
-    // Leave the post only for a fight the guard (+ my defenses there) can win; else brace at home.
+    // §K v4: inside my walls the guard always engages at the point of attack, beside its towers. An
+    // outlying structure gets help only in a fight the guard (+ my defenses there) can win.
     const odds = fightOdds(state, pid, threat.at, COMMANDER.LOCAL_ODDS_RADIUS, units, true);
-    const to = odds >= COMMANDER.GUARD_RESPOND_ODDS ? threat.at : home;
+    const to = baseThreatened(ctx, threat.at, home) || odds >= COMMANDER.GUARD_RESPOND_ODDS ? threat.at : home;
     if (s.mission !== "repel" || !s.objective || dist(s.objective, to) > 4) {
       if (to === home) ensureFormation(ctx, s, "box", null);
       cmd(ctx, "ATTACK_MOVE", { unitIds: s.unitIds, x: to.x, y: to.y, spread: false });

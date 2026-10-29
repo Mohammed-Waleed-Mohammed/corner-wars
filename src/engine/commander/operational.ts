@@ -4,9 +4,8 @@
 
 import { unitCost } from "../../state/doctrine";
 import { BUILDING_STATS, COMMANDER, DEFENSE_STATS, PRODUCES, REPAIR, RESEARCH, STRUCTURE_CAP, UNIT_STATS } from "../../config/constants";
-import type { Building, BuildingType, GameState, GoldSource, ResearchKey, Unit, UnitType, Vec2 } from "../../core/types";
+import type { AIBasePlan, Building, BuildingType, GameState, GoldSource, ResearchKey, Unit, UnitType, Vec2 } from "../../core/types";
 import { footprintClear, withinBuildRadius } from "../placement";
-import { isBuildable } from "../../state/terrain";
 import { isLowPower } from "../../state/gameState";
 import { isResearched, unitCap } from "../../state/upgrades";
 import {
@@ -15,6 +14,7 @@ import {
   type Composition,
 } from "./assess";
 import { aiLog, ensureSquad, pruneSquads, type Ctx } from "./commander";
+import { footprintInside, keepsBaseConnected, onRingOrLane, planBase } from "./basePlan";
 
 const cmd = (ctx: Ctx, type: string, payload: Record<string, unknown>): void =>
   ctx.submit({ type, playerId: ctx.pid, seq: 0, payload } as never);
@@ -334,134 +334,85 @@ function expandTo(ctx: Ctx, cy: Building): void {
   }
 }
 
-// ── §G base planning ──────────────────────────────────────────────────────────
-export function planBase(ctx: Ctx, cy: Building): void {
-  const { state, cs, pid } = ctx;
-  const mine = buildingsOf(state, pid).filter((b) => b.buildingType !== "wall" && b.buildingType !== "gate");
-  // bounding rect of base buildings near the yard +3 margin
-  const near = mine.filter((b) => Math.hypot(b.x - cy.x, b.y - cy.y) < 18);
-  let minX = 9999, minY = 9999, maxX = -9999, maxY = -9999;
-  for (const b of near) {
-    minX = Math.min(minX, b.x); minY = Math.min(minY, b.y);
-    maxX = Math.max(maxX, b.x + b.width); maxY = Math.max(maxY, b.y + b.height);
-  }
-  const M = COMMANDER.PERIMETER_MARGIN;
-  minX = Math.max(1, Math.floor(minX - M)); minY = Math.max(1, Math.floor(minY - M));
-  maxX = Math.min(state.mapWidth - 2, Math.ceil(maxX + M)); maxY = Math.min(state.mapHeight - 2, Math.ceil(maxY + M));
+// ── §G base planning: terrain-aware ring wall, gates on my routes, towers at the gates (basePlan.ts) ──
 
-  const perimeter: Vec2[] = [];
-  for (let x = minX; x <= maxX; x++) { perimeter.push({ x, y: minY }); perimeter.push({ x, y: maxY }); }
-  for (let y = minY + 1; y < maxY; y++) { perimeter.push({ x: minX, y }); perimeter.push({ x: maxX, y }); }
-  const passable = perimeter.filter((t) => isBuildable(state, t.x, t.y)); // 24 §A: walls only where structures can stand
-
-  // gates where the perimeter crosses used paths: toward my nearest mine + toward map center (max 3).
-  const anchor = { x: cy.x + cy.width / 2, y: cy.y + cy.height / 2 };
-  const gates: Vec2[] = [];
-  const addGateToward = (to: Vec2): void => {
-    if (gates.length >= COMMANDER.GATES_MAX) return;
-    let best: Vec2 | null = null, bd = Infinity;
-    for (const t of passable) {
-      // choose the perimeter tile nearest to the anchor→destination line
-      const d = Math.hypot(t.x - to.x, t.y - to.y) + Math.hypot(t.x - anchor.x, t.y - anchor.y) * 0.3;
-      if (d < bd) { bd = d; best = t; }
-    }
-    if (best && !gates.some((g) => Math.hypot(g.x - best!.x, g.y - best!.y) < 4)) gates.push(best);
-  };
-  const src = nearestSource(state, cy);
-  if (src) addGateToward({ x: src.x, y: src.y });
-  addGateToward({ x: state.mapWidth / 2, y: state.mapHeight / 2 });
-
-  // walls: threat-facing subset for non-Turtles (§G.3). Direction = toward the nearest enemy base.
-  const enemies = livingEnemies(state, pid);
-  let dir: Vec2 = { x: 0, y: 0 };
-  if (enemies.length) {
-    const nearestE = enemies.reduce((a, b) => (frontDistance(state, pid, a) < frontDistance(state, pid, b) ? a : b));
-    const c = baseCenter(state, nearestE);
-    if (c) { const len = Math.hypot(c.x - anchor.x, c.y - anchor.y) || 1; dir = { x: (c.x - anchor.x) / len, y: (c.y - anchor.y) / len }; }
-  }
-  const facing = passable
-    .map((t) => ({ t, dot: ((t.x - anchor.x) * dir.x + (t.y - anchor.y) * dir.y) / (Math.hypot(t.x - anchor.x, t.y - anchor.y) || 1) }))
-    .sort((a, b) => b.dot - a.dot);
-  const wallCount = cs.personality === "turtle" ? passable.length : Math.floor(passable.length * COMMANDER.NON_TURTLE_WALL_FRAC);
-  const walls = facing.slice(0, wallCount).map((f) => f.t)
-    .filter((t) => !gates.some((g) => Math.abs(g.x - t.x) <= 1 && Math.abs(g.y - t.y) <= 1));
-
-  // defenses (§G.4): turret inside each gate; pillboxes at the two threat-facing corners; reactive AA/missile.
-  const planned: { type: BuildingType; x: number; y: number }[] = [];
-  for (const g of gates) {
-    const inX = Math.round(g.x - dirTo(g, anchor).x * -2), inY = Math.round(g.y - dirTo(g, anchor).y * -2);
-    planned.push({ type: "turret", x: inX, y: inY });
-  }
-  const corners: Vec2[] = [
-    { x: minX, y: minY }, { x: maxX, y: minY }, { x: minX, y: maxY }, { x: maxX, y: maxY },
-  ].sort((a, b) => ((b.x - anchor.x) * dir.x + (b.y - anchor.y) * dir.y) - ((a.x - anchor.x) * dir.x + (a.y - anchor.y) * dir.y));
-  planned.push({ type: "pillbox", x: corners[0].x, y: corners[0].y });
-  planned.push({ type: "pillbox", x: corners[1].x, y: corners[1].y });
-  const enemyComps = enemies.map((e) => composition(state, e));
-  if (enemyComps.some((c) => c.heavy > COMMANDER.DEF_HEAVY_SHARE)) planned.push({ type: "antiArmorCannon", x: Math.round(anchor.x) + 2, y: Math.round(anchor.y) });
-  if (enemyComps.some((c) => c.infantry + c.ranged > COMMANDER.DEF_BLOB_SHARE)) planned.push({ type: "missileTower", x: Math.round(anchor.x) - 3, y: Math.round(anchor.y) });
-
-  cs.basePlan = { anchor, perimeter: passable, gates, walls, plannedDefenses: planned };
-}
-
-const dirTo = (from: Vec2, to: Vec2): Vec2 => {
-  const len = Math.hypot(to.x - from.x, to.y - from.y) || 1;
-  return { x: (to.x - from.x) / len, y: (to.y - from.y) / len };
-};
-
-/** §G.3/.4/.5 budgeted construction: one wall segment + one defense per operational tick while the
- *  personality's defense budget allows (income × budget accumulates into p-side gold headroom). */
+/** §G v4 construction, in priority order (one defense + a few wall tiles per operational tick):
+ *   1. CORE towers (main-gate turret + pillbox, a pillbox behind every gap) — every personality;
+ *   2. the gates, before the wall closes, so my own units always have a way out;
+ *   3. the wall ring, from the main gate outward;
+ *   4. extra towers within the personality's defense budget (or any time in DEFEND).
+ *  The plan is the desired state: anything destroyed simply re-enters the list. */
 function runDefensePlan(ctx: Ctx): void {
   const { state, cs, p, pid, pers } = ctx;
   const plan = cs.basePlan;
-  if (!plan) return;
-  const income = economyScore(state, pid);
-  const budgetGold = Math.max(BUILDING_STATS.wall.gold * 2, income * 2 * pers.defenseBudget * 20); // rolling allowance
-  const spendOK = (cost: number): boolean => p.gold - cost > 150 && cost <= budgetGold;
-  const rebuildBoost = cs.stance !== "RECOVER" ? COMMANDER.REBUILD_PRIORITY : 1;
-
-  // defenses first when rebuilding is boosted (destroyed plan items re-enter here automatically —
-  // the plan is desired state, and we always build the first missing item).
-  const myB = buildingsOf(state, pid);
-  const has = (type: BuildingType, x: number, y: number): boolean =>
-    myB.some((b) => b.buildingType === type && Math.abs(b.x - x) <= 2 && Math.abs(b.y - y) <= 2);
-
-  let placedDefense = false;
-  // §F v2: walls/defenses take a site slot only when one is free beyond the economy's — except a Turtle
-  // (walls ARE its plan) or anyone in DEFEND.
+  if (!plan || plan.radius <= 0) return;
+  // Walls/towers take a site slot only when one is free beyond the economy's — except a Turtle (walls
+  // ARE its plan) or anyone in DEFEND.
   if (!canStartSite(ctx, cs.stance === "DEFEND" || cs.personality === "turtle" ? 0 : -1)) return;
-  for (const d of plan.plannedDefenses) {
-    if (has(d.type, d.x, d.y)) continue;
-    const stat = BUILDING_STATS[d.type];
-    if (stat.unlock && !isResearched(p, stat.unlock === "advancedDefenses" ? "advancedDefenses" : (stat.unlock as ResearchKey))) continue;
-    if (!spendOK(stat.gold / rebuildBoost)) break;
-    const spot = spotNear(ctx, d, d.type);
-    if (!spot) continue;
-    cmd(ctx, "PLACE_BUILDING", { buildingType: d.type, x: spot.x, y: spot.y });
-    cs.intents.push(`defense: ${d.type}`);
-    placedDefense = true;
-    break;
+  const defend = cs.stance === "DEFEND";
+  const reserve = defend ? 0 : COMMANDER.DEF_GOLD_RESERVE;
+  const afford = (cost: number): boolean => p.gold - cost >= reserve;
+  const myB = buildingsOf(state, pid);
+  const near = (type: BuildingType, x: number, y: number, r: number): boolean =>
+    myB.some((b) => b.buildingType === type && Math.abs(b.x - x) <= r && Math.abs(b.y - y) <= r);
+  const legal = (x: number, y: number, w: number, h: number): boolean =>
+    footprintClear(state, x, y, w, h) && withinBuildRadius(state, pid, x, y, w, h);
+  const place = (type: BuildingType, x: number, y: number): void => {
+    cmd(ctx, "PLACE_BUILDING", { buildingType: type, x, y });
+    if (type === "wall" || type === "gate") plan.frozen = true; // the ring is now committed
+  };
+
+  // 1 + 4: towers (core first; extras only with budget or in DEFEND)
+  const extrasOK = defend || pers.defenseBudget >= COMMANDER.DEF_EXTRA_MIN_BUDGET;
+  for (const core of [true, false]) {
+    if (!core && !extrasOK) break;
+    for (const d of plan.plannedDefenses) {
+      if (d.core !== core || near(d.type, d.x, d.y, 2)) continue;
+      const stat = BUILDING_STATS[d.type];
+      if (stat.unlock && !isResearched(p, stat.unlock as ResearchKey)) continue;
+      if (!afford(stat.gold + (core ? 0 : COMMANDER.DEF_EXTRA_RESERVE))) return; // save up for it; walls wait too
+      const spot = legal(d.x, d.y, 1, 1) && keepsBaseConnected(plan, state, d.x, d.y, 1, 1) ? { x: d.x, y: d.y } : spotNear(ctx, d, d.type);
+      if (!spot) continue;
+      place(d.type, spot.x, spot.y);
+      cs.intents.push(`${core ? "core " : ""}defense: ${d.type}`);
+      return;
+    }
+    if (core) break; // extras come after the gates and walls below
   }
 
-  // then walls (respect the 60-cap), a couple of segments per tick.
   const wallsOwned = myB.filter((b) => b.buildingType === "wall" || b.buildingType === "gate").length;
   if (wallsOwned >= STRUCTURE_CAP.wallsPerPlayer) return;
+  // 2: gates
+  for (const g of plan.gates) {
+    if (near("gate", g.x, g.y, 0)) continue;
+    if (!afford(BUILDING_STATS.gate.gold) || !legal(g.x, g.y, 1, 1)) continue;
+    place("gate", g.x, g.y);
+    cs.intents.push("gate");
+    return;
+  }
+  // 3: walls, a few tiles per tick, front first
   let placed = 0;
   for (const w of plan.walls) {
-    if (placed >= 2 || (placedDefense && placed >= 1)) break;
-    if (!spendOK(BUILDING_STATS.wall.gold)) break;
-    if (!footprintClear(state, w.x, w.y, 1, 1) || !withinBuildRadius(state, pid, w.x, w.y, 1, 1)) continue;
-    cmd(ctx, "PLACE_BUILDING", { buildingType: "wall", x: w.x, y: w.y });
+    if (placed >= COMMANDER.WALLS_PER_TICK || wallsOwned + placed >= STRUCTURE_CAP.wallsPerPlayer) break;
+    if (!afford(BUILDING_STATS.wall.gold)) break;
+    if (!legal(w.x, w.y, 1, 1)) continue;
+    place("wall", w.x, w.y);
     placed++;
   }
-  for (const g of plan.gates) {
-    if (!spendOK(BUILDING_STATS.gate.gold)) break;
-    if (!footprintClear(state, g.x, g.y, 1, 1) || !withinBuildRadius(state, pid, g.x, g.y, 1, 1)) continue;
-    if (myB.some((b) => b.buildingType === "gate" && Math.abs(b.x - g.x) <= 1 && Math.abs(b.y - g.y) <= 1)) continue;
-    cmd(ctx, "PLACE_BUILDING", { buildingType: "gate", x: g.x, y: g.y });
-    break;
+  if (placed > 0) { cs.intents.push(`walls +${placed}`); return; }
+  // 4: extra towers once the ring is up
+  if (!extrasOK) return;
+  for (const d of plan.plannedDefenses) {
+    if (d.core || near(d.type, d.x, d.y, 2)) continue;
+    const stat = BUILDING_STATS[d.type];
+    if (stat.unlock && !isResearched(p, stat.unlock as ResearchKey)) continue;
+    if (!afford(stat.gold + COMMANDER.DEF_EXTRA_RESERVE)) return;
+    const spot = legal(d.x, d.y, 1, 1) && keepsBaseConnected(plan, state, d.x, d.y, 1, 1) ? { x: d.x, y: d.y } : spotNear(ctx, d, d.type);
+    if (!spot) continue;
+    place(d.type, spot.x, spot.y);
+    cs.intents.push(`defense: ${d.type}`);
+    return;
   }
-  if (placed > 0) cs.intents.push(`walls +${placed}`);
 }
 
 // ── §H tech planning ──────────────────────────────────────────────────────────
@@ -677,6 +628,7 @@ export function findSpot(ctx: Ctx, cy: Building, type: BuildingType): Vec2 | nul
     if (c) { const len = Math.hypot(anchor.x - c.x, anchor.y - c.y) || 1; away = { x: (anchor.x - c.x) / len, y: (anchor.y - c.y) / len }; }
   }
   const bias = type === "powerPlant" ? 1 : type === "lab" ? 1.5 : 0; // §G.1 safe-side weighting
+  const plan = ctx.cs.basePlan && ctx.cs.basePlan.radius > 0 ? ctx.cs.basePlan : null;
   const ox = Math.round(anchor.x - w / 2), oy = Math.round(anchor.y - h / 2);
   let best: Vec2 | null = null, bestScore = -Infinity;
   for (let r = 2; r <= 14; r++) {
@@ -685,17 +637,35 @@ export function findSpot(ctx: Ctx, cy: Building, type: BuildingType): Vec2 | nul
         if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
         const x = ox + dx, y = oy + dy;
         if (!footprintClear(state, x, y, w, h) || !withinBuildRadius(state, pid, x, y, w, h)) continue;
+        if (plan && !footprintInside(plan, state, x, y, w, h)) continue; // §G v4: inside the wall, off the lanes
         const score = -r + bias * (dx * away.x + dy * away.y);
-        if (score > bestScore) { bestScore = score; best = { x, y }; }
+        if (score > bestScore && (!plan || keepsBaseConnected(plan, state, x, y, w, h))) { bestScore = score; best = { x, y }; } // §G v4.6
       }
     }
     if (best && bias === 0) return best; // compact spiral: first ring with space wins
   }
-  return best;
+  if (best || !plan) return best;
+  // the base is full: build outside the wall rather than not at all — but never on the ring or a lane
+  for (let r = 2; r <= 16; r++) {
+    for (let dx = -r; dx <= r; dx++) for (let dy = -r; dy <= r; dy++) {
+      if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+      const x = ox + dx, y = oy + dy;
+      if (footprintClear(state, x, y, w, h) && withinBuildRadius(state, pid, x, y, w, h) && clearOfPlan(plan, state, x, y, w, h) &&
+          keepsBaseConnected(plan, state, x, y, w, h)) return { x, y };
+    }
+  }
+  return null;
+}
+
+/** Footprint touches neither the planned wall ring nor a reserved gate lane (§G v4). */
+function clearOfPlan(plan: AIBasePlan, state: GameState, x: number, y: number, w: number, h: number): boolean {
+  for (let ty = y; ty < y + h; ty++) for (let tx = x; tx < x + w; tx++) if (onRingOrLane(plan, state, tx, ty)) return false;
+  return true;
 }
 
 function spotNear(ctx: Ctx, at: Vec2, type: BuildingType): Vec2 | null {
   const { state, pid } = ctx;
+  const plan = ctx.cs.basePlan && ctx.cs.basePlan.radius > 0 ? ctx.cs.basePlan : null;
   const stat = BUILDING_STATS[type];
   const w = stat.width, h = stat.height;
   const ox = Math.round(at.x - w / 2), oy = Math.round(at.y - h / 2);
@@ -704,7 +674,9 @@ function spotNear(ctx: Ctx, at: Vec2, type: BuildingType): Vec2 | null {
       for (let dy = -r; dy <= r; dy++) {
         if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
         const x = ox + dx, y = oy + dy;
-        if (footprintClear(state, x, y, w, h) && withinBuildRadius(state, pid, x, y, w, h)) return { x, y };
+        if (!footprintClear(state, x, y, w, h) || !withinBuildRadius(state, pid, x, y, w, h)) continue;
+        if (plan && (!clearOfPlan(plan, state, x, y, w, h) || !keepsBaseConnected(plan, state, x, y, w, h))) continue; // never on the wall line, a gate lane, or sealing off ground
+        return { x, y };
       }
     }
   }

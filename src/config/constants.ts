@@ -750,13 +750,29 @@ export const COMMANDER = {
   SUPPLY_AT_CAP_FRAC: 0.85,
   SUPPLY_MIN_GOLD: 600,
   EXPAND_PACKAGE: { workers: 2, pillboxes: 1 },
-  // §G base planning
-  PERIMETER_MARGIN: 3,
-  GATES_MAX: 3,
-  NON_TURTLE_WALL_FRAC: 0.5,
+  // §G v4 base planning: a terrain-aware ring wall (engine/commander/basePlan.ts)
+  WALL_R_MIN: 9, // smallest ring, in walking tiles from the yard
+  WALL_R_MAX: 18, // largest ring considered
+  BASE_AREA_MIN: 150, // buildable tiles the base needs inside its ring
+  HOME_MINE_DIST: 12, // gold within this walk of the yard is the home mine — kept inside (+3 tiles)
+  OPENING_COST: 6, // ring score per tile that can't take a wall (forest, shallows, bridge, gold)
+  GATES_MAX: 3, // gates (2 tiles wide each) on my routes: nearest enemy (main), the Citadel, outlying gold
+  GATE_MERGE: 4, // routes crossing the ring this close (Manhattan) share one gate
+  DEF_WALL_SPACING: 8, // extra pillboxes along the front wall stand at least this far apart
   DEF_HEAVY_SHARE: 0.35,
   DEF_BLOB_SHARE: 0.5,
-  REBUILD_PRIORITY: 1.5,
+  PLAN_REFRESH_TICKS: 900, // re-plan every 30 s until the first wall/gate commits the ring
+  DEF_GOLD_RESERVE: 150, // walls, gates and core towers keep this much gold back (0 in DEFEND)
+  DEF_EXTRA_RESERVE: 400, // extra towers wait until this much is left over after paying
+  DEF_EXTRA_MIN_BUDGET: 0.1, // personalities below this defense budget build only core towers + walls
+  WALLS_PER_TICK: 3, // wall tiles placed per operational tick
+  // §K v4 base defense
+  BASE_THREAT_MIN: 100, // enemy value inside my base that calls for a defense
+  BASE_HOLD_ODDS: 1.6, // a committed army stays out only if what's home holds the threat at least this well
+  BASE_DEFEND_RADIUS: 20, // with no wall planned, "my base" = this close to the yard
+  BASE_WALL_SLACK: 3, // attackers this far outside my wall (chewing on it) count as inside the base
+  GATE_POST_DEPTH: 4, // defenders muster this many tiles inside the main gate
+  DEFEND_LOOSE_DIST: 15, // an army farther than this from the attack breaks formation and runs home at full speed
   // §H tech
   TECH_INCOME_T1: 20,
   TECH_INCOME_T2: 35,
