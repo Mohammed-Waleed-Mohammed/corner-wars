@@ -94,7 +94,7 @@ export class SelectionPanel {
       const row = (keys: string, text: string): void => { const r = el("div", "sp-help-row"); r.append(el("span", "sp-kbd", keys), el("span", "", text)); help.append(r); };
       row("Left-drag", "select units · double-click selects every unit of that type");
       row("Right-click", "move / attack · Ctrl + right-click attack-moves");
-      row("Q–T · A–G", "build from the card on the right · arrows / edge / middle-drag move the camera");
+      row("Letters", "the key on each card button is a letter of its name (Refinery = R) · arrows / edge / middle-drag move the camera");
       this.body.append(help);
       return;
     }
@@ -162,7 +162,7 @@ export class SelectionPanel {
         strip.append(chip);
       });
       strip.append(el("span", "sp-qcount", `${queue.length}/${isLab ? RESEARCH_QUEUE_MAX : PRODUCTION_QUEUE_MAX}`));
-      if (queue.length === 0) strip.append(el("span", "sp-line dim sp-ellipsis", isLab ? "Idle — open Research (Q)" : "Idle — train from the card (Q–T)"));
+      if (queue.length === 0) strip.append(el("span", "sp-line dim sp-ellipsis", isLab ? "Idle — open Research (R)" : "Idle — train from the card"));
       // The status rides at the end of the queue row so the description line still fits the panel.
       this.status = el("span", "sp-line dim sp-qstatus");
       strip.append(this.status);

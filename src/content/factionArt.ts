@@ -55,11 +55,12 @@ export const FACTION_LOOK: Record<FactionId, FactionLook> = {
   },
 };
 
-/** The 9 unit types and the 10 building types that get faction art (walls and gates stay generic). */
+/** The 9 unit types and the 11 building types that get faction art (walls and gates stay generic). */
 export const ART_UNIT_TYPES: readonly UnitType[] = ["worker", "rifleman", "grenadier", "rocket", "medic", "scoutBuggy", "tank", "heavyTank", "artillery"];
 export type ArtBuildingType = Exclude<BuildingType, "wall" | "gate">;
 export const ART_BUILDING_TYPES: readonly ArtBuildingType[] = [
   "constructionYard", "powerPlant", "refinery", "barracks", "warFactory", "lab", "turret", "pillbox", "antiArmorCannon", "missileTower",
+  "resonanceTap",
 ];
 
 /** File stem for a type: "constructionYard" → "construction_yard". */
@@ -120,6 +121,7 @@ export const BUILDING_ART: Record<ArtBuildingType, BuildingArtSpec> = {
   pillbox: { noun: "a Pillbox", look: "a low squat bunker seen from straight above: a thick octagonal concrete or iron roof with firing slits around the edge" },
   antiArmorCannon: { noun: "an Anti-Armor Cannon", look: "a heavy anti-tank gun emplacement seen from straight above: a sandbagged or armoured round base and one very long, thick barrel pointing to the top" },
   missileTower: { noun: "a Missile Tower", look: "a square missile tower seen from straight above: a launcher box with a grid of missile tubes (missile tips visible), radar on the roof" },
+  resonanceTap: { noun: "a Resonance Tap", look: "a resonance tap seen from straight above: a round pit in the middle holding a glowing cyan crystal core, a ring of four tall conductor pylons around it, thick cables running out to a small control hut in one corner" },
 };
 
 /** Per-faction flavour line for a building or a unit (appended to the type's look). */

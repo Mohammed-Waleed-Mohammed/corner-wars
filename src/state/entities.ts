@@ -14,7 +14,7 @@ import type {
   UnitType,
 } from "../core/types";
 import { buildingHpDoctrineMult, unitHpDoctrineMult, unitRangeBonus } from "./doctrine";
-import { maxHpMult, moveSpeedMult } from "./upgrades";
+import { maxHpMult, moveSpeedMult, structureHpMult } from "./upgrades";
 
 export function createUnit(
   state: GameState,
@@ -76,7 +76,8 @@ export function createBuilding(
   complete = true,
 ): Building {
   const s = BUILDING_STATS[buildingType];
-  const maxHp = s.hp * buildingHpDoctrineMult(owner !== "neutral" ? state.players[owner] : null); // 27 §B Bastion Doctrine
+  const pl = owner !== "neutral" ? state.players[owner] : null;
+  const maxHp = s.hp * buildingHpDoctrineMult(pl) * structureHpMult(pl, buildingType); // 27 §B Bastion Doctrine × 32 §B Reinforced
   return {
     id: state.nextId++,
     kind: "building",

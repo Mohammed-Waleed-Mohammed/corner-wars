@@ -33,11 +33,14 @@ export function deriveBuffs(state: GameState, pid: PlayerId): Buff[] {
   if (u.streamlinedProduction) out.push({ id: "prod", short: "Prod", tooltip: RESEARCH.streamlinedProduction.effect, kind: "upgrade" });
   if (u.fieldLogistics) out.push({ id: "spd", short: "Spd", tooltip: RESEARCH.fieldLogistics.effect, kind: "upgrade" });
   if (u.combatStims) out.push({ id: "stims", short: "Stims", tooltip: RESEARCH.combatStims.effect, kind: "upgrade" });
+  if (u.reinforcedStructures) out.push({ id: "reinf", short: "Fort+", tooltip: RESEARCH.reinforcedStructures.effect, kind: "upgrade" });
+  if (u.deepResonance) out.push({ id: "deepres", short: "Res+", tooltip: RESEARCH.deepResonance.effect, kind: "upgrade" });
 
   // Unlocked tech.
   if (p.unlocks.advancedVehicles) out.push({ id: "unlock-hv", short: "HTank", tooltip: RESEARCH.advancedVehicles.effect, kind: "unlock" });
   if (p.unlocks.siegeDoctrine) out.push({ id: "unlock-siege", short: "Arty", tooltip: RESEARCH.siegeDoctrine.effect, kind: "unlock" });
   if (p.unlocks.advancedDefenses) out.push({ id: "unlock-def", short: "Def+", tooltip: RESEARCH.advancedDefenses.effect, kind: "unlock" });
+  if (p.unlocks.resonanceTapping) out.push({ id: "unlock-tap", short: "Tap", tooltip: RESEARCH.resonanceTapping.effect, kind: "unlock" });
 
   // Citadel control — active bonuses + current Command Energy.
   if (state.citadel.controllingPlayer === pid) {

@@ -111,49 +111,7 @@
 
 
 /* ═══ §K — overlays on the console chrome ═════════════════════════════════════ */
-/* K.1 tech tree modal (overrides the file-18 styles; zero border-radius) */
-.tt-overlay { position: fixed; inset: 0; z-index: 20; display: flex; align-items: center; justify-content: center;
-  background: rgba(0, 0, 0, 0.65); backdrop-filter: none; }
-.tt-overlay[hidden] { display: none; }
-.tt-card { width: min(920px, 95vw); max-height: min(640px, 90vh); border-radius: 0; padding: 0;
-  box-shadow: 0 14px 44px rgba(0, 0, 0, 0.6); display: flex; }
-.tt-inner { flex: 1; display: flex; flex-direction: column; padding: var(--hud-pad); min-height: 0; }
-.tt-head { display: flex; align-items: center; gap: 12px; padding: 4px 2px 8px; }
-.tt-title { font-size: 12px; }
-.tt-gold { margin-left: auto; font-family: var(--hud-display); font-size: 13px; font-weight: 700;
-  color: var(--hud-text-gold); font-variant-numeric: tabular-nums; }
-.tt-close { background: none; border: none; color: var(--hud-text-dim); font-size: 16px; cursor: pointer; padding: 2px 6px; }
-.tt-close:hover { color: var(--hud-text); }
-.tt-body { position: relative; flex: 1; overflow-y: auto; min-height: 0; }
-.tt-arrows { position: absolute; inset: 0; pointer-events: none; }
-.tt-cats { position: relative; display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 12px 22px; }
-.tt-cat-title { display: flex; align-items: center; gap: 6px; margin: 0 0 6px; text-transform: uppercase; }
-.tt-cat-title canvas { display: block; }
-.tt-chain { display: flex; align-items: stretch; gap: 26px; margin-bottom: 8px; flex-wrap: wrap; }
-.tt-node {
-  position: relative; width: 150px; height: 64px; padding: 6px 8px 6px 6px; border: none; border-radius: 0;
-  background: var(--hud-bg-chip); color: var(--hud-text); cursor: default; text-align: left;
-  display: flex; gap: 6px; align-items: flex-start; overflow: hidden; flex: 0 0 auto; opacity: 1;
-  box-shadow: none;
-}
-.tt-node-glyph { flex: 0 0 auto; line-height: 0; margin-top: 2px; }
-.tt-node-glyph canvas { display: block; }
-.tt-node-body { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
-.tt-node-name { font-family: var(--hud-display); font-size: 12px; font-weight: 700; line-height: 1.1;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.tt-node-effect { font-size: 10px; color: var(--hud-text-dim); line-height: 1.15; }
-.tt-node-meta { font-family: var(--hud-display); font-size: 10px; font-weight: 700; color: var(--hud-text-gold);
-  font-variant-numeric: tabular-nums; }
-.tt-node-state { position: absolute; right: 5px; bottom: 4px; display: inline-flex; align-items: center; gap: 3px;
-  font-family: var(--hud-display); font-size: 8px; font-weight: 700; color: var(--hud-text-dim); }
-.tt-node-state canvas { display: block; }
-.tt-node-prog { position: absolute; left: 0; bottom: 0; height: 3px; width: 0%; background: var(--hud-trim-gold); }
-.tt-node.done { border-left: 3px solid var(--hud-good); background: var(--hud-bg-chip); opacity: 1; }
-.tt-node.locked { opacity: 0.4; }
-.tt-node.avail.clickable { cursor: pointer; }
-.tt-node.avail.clickable:hover { outline: 1px solid var(--hud-trim-gold); outline-offset: -1px; filter: brightness(1.08); }
-.tt-node.queued { outline: 1px solid var(--hud-trim-gold-dim); outline-offset: -1px; }
-.tt-node.inprogress .tt-node-prog { transition: width 0.1s linear; }
+/* K.1 tech tree: see ui/techTree.css (32 §C) */
 
 /* K.2 pause + post-match cards */
 .pause-overlay, .post-overlay { z-index: 20; }
@@ -216,7 +174,6 @@
 /* ═══ §L — micro-interactions (layout-independent parts) ═══════════════════════════════════ */
 /* Income flash (§L): GOOD/BAD blink when the rate jumps by more than ±5. */
 @keyframes income-flash { 0%, 100% { filter: none; } 50% { filter: brightness(1.9); } }
-.tt-node.avail.clickable:active { transform: translateY(1px); }
 
 /* §A mute button: chamfered 34px square. */
 .mute-btn {

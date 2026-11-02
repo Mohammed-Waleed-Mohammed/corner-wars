@@ -132,6 +132,8 @@ interface UserSettings {
 
 ## I. Lab tech-tree UI (fix)
 
+> **Superseded by file 32 §C** (the Research board: branches as rows, tiers as columns, a details panel and the Lab queue).
+
 Replace the flat list with a proper, readable tech tree.
 
 - **Grouped by category** with headers: Economy · Construction & Production · Weapons · Armor · Mobility · Supply Lines.

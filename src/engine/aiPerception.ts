@@ -177,7 +177,7 @@ function maskPlayer(pl: Player, known: AnyEntity[], sawPlantDie: boolean): Playe
     powerProduced: produced,
     powerUsed: used,
     upgrades,
-    unlocks: { advancedVehicles: false, siegeDoctrine: false, advancedDefenses: false },
+    unlocks: { advancedVehicles: false, siegeDoctrine: false, advancedDefenses: false, resonanceTapping: false },
     ai: undefined,
   };
 }

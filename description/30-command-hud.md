@@ -14,7 +14,7 @@ The build menu scrolled at 768 px tall. Building and unit orders lived on opposi
 Every successful RTS we studied converges on the same answer (SC2, AoE II/IV, WC3, CoH, and C&C 3 from Tiberium Wars on):
 - **a thin top bar** for global state;
 - **a bottom console** with the minimap in one corner, the selection in the middle and a **5×3 command grid** in the other corner;
-- **positional grid hotkeys**.
+- **grid hotkeys** (we started with positional QWERT/ASDFG/ZXCVB keys and moved to letters from each button's name, §B.1).
 
 ## A. Screen map
 
@@ -25,9 +25,9 @@ Every successful RTS we studied converges on the same answer (SC2, AoE II/IV, WC
 │                                              (game world)                                                   │
 │ [alert feed]                                                                                                │
 ├──────────────┬─[1][2][3] control groups ──────────────────────────────┬─[Yard][Barracks][Factory][Lab]──────┤
-│   MINIMAP    │ SELECTION: portrait · name · HP · stats / unit grid /   │  Q  W  E  R  T                      │
-│        [idle]│            queue                                        │  A  S  D  F  G   command card 5×3   │
-│        [army]│                                                         │  Z  X  C  V  B                      │
+│   MINIMAP    │ SELECTION: portrait · name · HP · stats / unit grid /   │  [ ][ ][ ][ ][ ]                    │
+│        [idle]│            queue                                        │  [ ][ ][ ][ ][ ]  command card 5×3  │
+│        [army]│                                                         │  [ ][ ][ ][ ][ ]  keys: §B.1        │
 │        [!]   │                                                         │                                     │
 └──────────────┴─────────────────────────────────────────────────────────┴─────────────────────────────────────┘
 ```
@@ -64,31 +64,60 @@ Every successful RTS we studied converges on the same answer (SC2, AoE II/IV, WC
   - Each anchored container is transform-scaled from its own corner.
   - At 1080p the opaque HUD covers about 17% of the screen.
 
-## B. The command card and grid hotkeys
+## B. The command card and its hotkeys
 
-- 15 slots in 5 columns × 3 rows. **Hotkeys go by physical key position** (`KeyboardEvent.code`), so the grid works on any keyboard layout:
-
-  | Row | Keys |
-  |---|---|
-  | Top | Q W E R T |
-  | Middle | A S D F G |
-  | Bottom | Z X C V B |
-
-- **Every slot shows its key.**
-- **A command keeps its slot in every card.** Z is always the commander ability, X always opens Citadel powers, B is Back inside a sub-card and **Sell** on a selected building, and T is **Build…** on the Yard and structure cards.
+- 15 slots in 5 columns × 3 rows. **Every slot shows its key** (top-left badge).
+- **Z** is always the commander ability and **X** always opens Citadel powers. **Esc** leaves a sub-card (one level at a time); on the root card it opens the pause menu.
 - Shift + a training key (or Shift-click) queues 5.
-- Esc or B leaves a sub-card.
 
-| Card | When | Q W E R T | A S D F G | Z X C V B |
-|---|---|---|---|---|
-| **Build** | nothing selected, workers only, or placing a structure | Power Plant · Refinery · Barracks · War Factory · Lab | Pillbox · Gun Turret · Anti-Armor Cannon · Missile Tower · Wall | Ability · Powers · Gate · Construction Yard · — |
-| **Army** | any combat unit selected | Spear · Line · Box · Column · *More formations… (custom)* | Attack-move · Stop · Guard · Fall back · Break formation | Ability · Powers · — · — · — |
-| **Production** | a finished Construction Yard, Barracks or War Factory | its units, in `PRODUCES` order (the Yard: Worker, then **Build…** on T) | Rally · — · — · — · — | Ability · Powers · — · — · **Sell** (not on the Yard) |
-| **Lab** | a finished Lab | Research tree… | — | Ability · Powers · — · — · **Sell** |
-| **Structure** | any other building of yours (Power Plant, Refinery, defenses, walls, gates), or a site under construction | — · — · — · — · **Build…** (finished only) | — | Ability · Powers · — · — · **Sell** (a site: **Cancel**) |
-| **Structures** (sub-card) | T (Build…) on the Yard or a structure | as the Build card | as the Build card | Ability · Powers · Gate · Construction Yard · Back |
-| **Powers** (sub-card) | X | Artillery · Reinforcements · Frenzy · Repair · Ion | — | Ability · — · — · — · Back |
-| **Formations** (sub-card) | T in Army | custom formations 1–5 | custom 6–10 | Ability · — · — · — · Back |
+### B.1 Name-based keys
+
+A button's key is a **letter of its name**: Refinery = **R**, Barracks = **B**, Attack = **A**, Research = **R**. This replaced positional QWERT/ASDFG/ZXCVB keys, which players found hard to remember ("why is Refinery W?").
+
+- **How a letter is picked** (`assignKeys` in `ui/hud/cards.ts`, recomputed whenever the card changes):
+  - First each word's first letter, then the word's other letters, in order.
+  - Z and X are reserved.
+  - A letter is never used twice on one card.
+  - The fallback is the first free letter of the alphabet.
+- **Who picks first:** orders (Attack, Stop, Guard), then what you build, train, research or call down, then formations, then the buttons that open sub-cards, then Fall back / Break formation / Rally, then Sell. So Stop keeps S and the Spear formation takes P.
+- **Fixed for a given card:** the keys depend only on the card and its labels. Unit names come from your faction (file 27), so each faction's unit names decide their letters.
+- **Sell** keeps its letter while it shows "Confirm", so the second press lands on the same key.
+- **Matching:** keys match the **typed character** (`KeyboardEvent.key`), so they follow the keyboard layout.
+- **Priority:** the HUD listens in the capture phase, so a card letter beats any other single-key shortcut. M mutes only when the card has no M button.
+- **Ignored:** while typing in a field, and while the pause menu, the post-match screen or the Research board is open. The board takes Esc and Enter for itself.
+
+Current keys:
+
+| Card | When | Buttons (key) |
+|---|---|---|
+| **Build** | nothing selected, workers only | **E** Economy · **P** Production · **D** Defense · **W** Walls · Z · X |
+| **Economy** (B.2) | E | **P** Power Plant · **R** Refinery · **T** Resonance Tap · **Y** Construction Yard · Z · X · Esc |
+| **Production** (B.2) | P | **B** Barracks · **F** War Factory · **L** Lab · Z · X · Esc |
+| **Defense** (B.2) | D | **P** Pillbox · **T** Gun Turret · **A** Anti-Armor Cannon · **M** Missile Tower · Z · X · Esc |
+| **Walls** (B.2) | W | **W** Wall · **G** Gate · Z · X · Esc |
+| **Army** | any combat unit selected | **A** Attack-move · **S** Stop · **G** Guard · **P** Spear · **L** Line · **B** Box · **C** Column · *More… (custom)* · **F** Fall back · **R** Break formation · Z · X |
+| **Production** (building) | a finished Yard, Barracks or War Factory | its units in `PRODUCES` order (letters from their names) · **R** Rally · **S** Sell (not on the Yard) · the Yard adds **B** Build… |
+| **Lab** | a finished Lab | **R** Research (opens the board, file 32 §C) · **S** Sell · Z · X |
+| **Structure** | any other building of yours, or a site | **B** Build… (finished only) · **S** Sell (a site: **C** Cancel) · Z · X |
+| **Structures** (sub-card) | Build… on the Yard or a structure | as the Build card · Esc |
+| **Powers** (sub-card) | X | **A** Artillery · **R** Reinforce · **F** Frenzy · **E** Repair · **I** Ion · Z · Esc |
+| **Formations** (sub-card) | More… in Army | custom formations (letters from their names) · Z · Esc |
+
+### B.2 Build categories
+
+The Build card shows **four categories**, not twelve structures. Each opens its own card with the structures inside (`BUILD_CATEGORIES`):
+
+| Category | Structures |
+|---|---|
+| **Economy** | Power Plant · Refinery · Resonance Tap · Construction Yard (expansion) |
+| **Production** | Barracks · War Factory · Lab |
+| **Defense** | Pillbox · Gun Turret · Anti-Armor Cannon · Missile Tower |
+| **Walls** | Wall · Gate |
+
+- Hovering a category lists what's inside, with prices and what each one needs.
+- While placing, the placed structure's category card stays open with that structure highlighted.
+- Esc cancels the placement first, then steps back to the Build card.
+- Any structure is two keys away: **E R** places a Refinery, **D T** a Gun Turret, **P B** a Barracks.
 
 **Each button shows:**
 - the icon (procedural, file 21 §E);
@@ -106,7 +135,7 @@ Every successful RTS we studied converges on the same answer (SC2, AoE II/IV, WC
 - key stats (HP / DMG / RNG / SPD for units; HP / power for buildings);
 - the reason it's disabled, if it is.
 
-**Camera:** arrow keys, edge scrolling (on by default), middle-drag, right-drag and the minimap. **WASD no longer pans**, because those keys are grid slots.
+**Camera:** arrow keys, edge scrolling (on by default), middle-drag, right-drag and the minimap. **WASD doesn't pan**, because those letters belong to card buttons.
 
 **Other keys:**
 
@@ -118,13 +147,8 @@ Every successful RTS we studied converges on the same answer (SC2, AoE II/IV, WC
 | `` ` `` | all combat units |
 | Space | latest alert (in a campaign, Space advances an active dialogue line first) |
 | Esc | cancel / back / pause |
-| M | mute |
+| M | mute (unless the card has an M button) |
 | F3–F6 | debug overlays |
-
-Removed in favour of the grid:
-- the old mnemonic build keys;
-- G for Guard and V for Fall back;
-- the F → 1–4 formation menu and Shift+F.
 
 ## C. Selection panel (centre block)
 
@@ -181,8 +205,8 @@ It never shows while placing, targeting a power or ability, guarding, attack-mov
 ## G. Acceptance
 
 - [ ] No panel down the left edge. The top bar plus three bottom blocks are the only anchored chrome.
-- [ ] All 12 structures are reachable from the Build card at 1366×768 with no scrolling.
-- [ ] Every command-card key works by position and is shown on its button. Z and X work in every card.
+- [ ] Every structure is two keys away (category, then structure) from the Build card at 1366×768, with no scrolling.
+- [ ] Every command-card key is a letter of its button's name, unique on its card, and shown on the button. Z and X work in every card.
 - [ ] W/A/S/D never move the camera; the arrows do.
 - [ ] The minimap is at least 150 px on screen at 1366×768, and clicks and drags on it pan the camera.
 - [ ] Multi-selection grid clicks (plain, Shift, Ctrl) behave as in §C.
@@ -190,6 +214,6 @@ It never shows while placing, targeting a power or ability, guarding, attack-mov
 - [ ] Alerts appear, ping the minimap, and Space jumps to them.
 - [ ] Campaign objectives and dialogue sit at the top and never cover the bottom console or the screen centre.
 - [ ] The sim is untouched. Lockstep stays IN SYNC; the HUD is display-only and emits commands through the existing controller paths.
-- [ ] Selecting the Construction Yard shows Worker on Q (queue, Shift queues 5) and Build… on T; it has no Sell.
-- [ ] Every other building shows Sell (or Cancel for a site) on B; it arms on the first press and sells on the second.
+- [ ] Selecting the Construction Yard shows its Worker (queue, Shift queues 5) and Build…; it has no Sell.
+- [ ] Every other building shows Sell (S; Cancel, C, for a site); it arms on the first press and sells on a second press of the same key.
 - [ ] Hovering a structure on the card or in the world shows its plain-words description.

@@ -27,10 +27,11 @@ function createPlayer(id: PlayerId): Player {
     abilityCooldown: 0,
     abilityBuff: null,
     stats: { produced: 0, lost: 0, goldMined: 0, buildingsRazed: 0, citadelSeconds: 0 },
-    unlocks: { advancedVehicles: false, siegeDoctrine: false, advancedDefenses: false },
+    unlocks: { advancedVehicles: false, siegeDoctrine: false, advancedDefenses: false, resonanceTapping: false },
     upgrades: {
       mining: 0, weapons: 0, armor: 0, supplyLines: 0,
       constructionCrews: false, streamlinedProduction: false, fieldLogistics: false, combatStims: false,
+      deepResonance: false, reinforcedStructures: false,
     },
     // AI players (1-3) get a brain; stagger first decisions so they don't all fire together.
     ai: id === 0 ? undefined : { mode: "expand", decisionTimer: id * 0.15, attackClock: 0 },

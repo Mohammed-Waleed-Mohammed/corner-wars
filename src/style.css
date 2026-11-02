@@ -1018,56 +1018,7 @@ canvas {
 .settings-note { font-size: 11px; color: var(--muted); line-height: 1.5; margin: 4px 0 16px; }
 .settings-actions { display: flex; justify-content: flex-end; }
 
-/* Tech-tree overlay (18 §I) */
-.tt-overlay { position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center;
-  background: rgba(0, 0, 0, 0.55); backdrop-filter: blur(2px); }
-.tt-overlay[hidden] { display: none; }
-.tt-card { width: min(960px, 95vw); max-height: 90vh; overflow-y: auto; background: var(--panel, #1a1d23);
-  border: 1px solid var(--panel-border, #2b313b); border-radius: 12px; padding: 18px 22px;
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5); font-family: var(--sans); }
-.tt-head { display: flex; align-items: center; gap: 14px; margin-bottom: 6px; }
-.tt-title { margin: 0; font-size: 20px; color: var(--text); }
-.tt-gold { margin-left: auto; font-size: 14px; font-weight: 700; color: var(--gold, #f5c518); }
-.tt-close { background: none; border: none; color: var(--muted); font-size: 18px; cursor: pointer; padding: 2px 6px; }
-.tt-close:hover { color: var(--text); }
-.tt-legend { font-size: 11px; color: var(--muted); margin: 0 0 12px; display: flex; gap: 12px; flex-wrap: wrap; }
-.tt-legend .tt-key.done { color: var(--hp-full, #22c55e); }
-.tt-legend .tt-key.avail { color: var(--accent, #4ea1ff); }
-.tt-legend .tt-key.locked { color: #6b7280; }
-.tt-cats { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px 18px; }
-.tt-cat-title { font-size: 12px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); margin: 0 0 8px; }
-.tt-chain { display: flex; align-items: stretch; gap: 6px; margin-bottom: 8px; flex-wrap: wrap; }
-.tt-arrow { align-self: center; color: #6b7280; font-size: 15px; }
-.tt-node { position: relative; flex: 1 1 120px; min-width: 120px; text-align: left; cursor: default;
-  background: #0f1216; border: 1px solid var(--panel-border, #2b313b); border-radius: 8px; padding: 8px 10px;
-  color: var(--text); display: flex; flex-direction: column; gap: 2px; overflow: visible; }
-.tt-node .tt-name { font-weight: 700; font-size: 13px; }
-.tt-node .tt-effect { font-size: 11.5px; color: var(--muted); }
-.tt-node .tt-meta { font-size: 11px; color: #8b93a1; }
-.tt-node .tt-badge { font-size: 10.5px; margin-top: 3px; font-weight: 700; letter-spacing: 0.02em; }
-.tt-node.done { border-color: rgba(34, 197, 94, 0.5); background: rgba(34, 197, 94, 0.08); }
-.tt-node.done .tt-badge { color: var(--hp-full, #22c55e); }
-.tt-node.queued { border-color: rgba(78, 161, 255, 0.5); background: rgba(78, 161, 255, 0.06); }
-.tt-node.queued .tt-badge { color: var(--accent, #4ea1ff); }
-.tt-node.avail { border-color: rgba(78, 161, 255, 0.35); }
-.tt-node.avail .tt-badge { color: #8b93a1; }
-.tt-node.clickable { cursor: pointer; border-color: var(--accent, #4ea1ff); box-shadow: 0 0 0 1px rgba(78, 161, 255, 0.25); }
-.tt-node.clickable:hover { background: rgba(78, 161, 255, 0.12); }
-.tt-node.clickable .tt-badge { color: var(--accent, #4ea1ff); }
-.tt-node.locked { opacity: 0.55; }
-.tt-node.locked .tt-badge { color: #6b7280; }
-.tt-prog { height: 3px; margin-top: 5px; background: #2b313b; border-radius: 2px; overflow: hidden; opacity: 0; }
-.tt-node.inprogress .tt-prog { opacity: 1; }
-.tt-progfill { height: 100%; background: var(--accent, #4ea1ff); transition: width 0.1s linear; }
-.tt-tip { position: absolute; bottom: calc(100% + 6px); left: 0; z-index: 5; width: max-content; max-width: 260px;
-  background: #0b0d10; border: 1px solid var(--panel-border, #2b313b); border-radius: 8px; padding: 8px 10px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5); opacity: 0; pointer-events: none; transition: opacity 0.1s; }
-.tt-node:hover .tt-tip { opacity: 1; }
-.tt-tip-title { font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin-bottom: 5px; }
-.tt-tip-row { font-size: 11.5px; color: var(--muted); margin-bottom: 3px; line-height: 1.4; }
-.tt-tip-row.here { color: var(--text); }
-.tt-tip-row b { color: var(--text); }
-.tt-tip-meta { color: #6b7280; }
+/* Tech-tree overlay: see ui/techTree.css (32 §C) */
 
 /* ═══ 20 — UI/UX overhaul: screen system + design language ═══════════════════ */
 :root {

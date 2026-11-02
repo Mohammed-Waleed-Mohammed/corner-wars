@@ -165,6 +165,36 @@ function lab(g: G, f: FactionId, r: R): void {
   emblem(g, f, r.x + r.w * 0.2, r.y + r.h * 0.2, u * 0.16);
 }
 
+/** 32 §A Resonance Tap: a glowing crystal core in a round pit, four conductor pylons, cables to a
+ *  control hut. The core glows cyan for everyone; the Choir's grows violet crystals around it. */
+function resonanceTap(g: G, f: FactionId, r: R): void {
+  const P = look(f).palette, u = Math.min(r.w, r.h);
+  const cx = r.x + r.w * 0.47, cy = r.y + r.h * 0.47;
+  // control hut in a corner + cables to the pylons
+  block(g, f, r.x + r.w * 0.66, r.y + r.h * 0.66, r.w * 0.26, r.h * 0.26, roofTone(f), 31);
+  g.strokeStyle = "#141414"; g.lineWidth = Math.max(1, u * 0.025);
+  for (const [px, py] of [[0.2, 0.2], [0.74, 0.2], [0.2, 0.74]] as const) {
+    g.beginPath(); g.moveTo(r.x + r.w * px, r.y + r.h * py); g.lineTo(r.x + r.w * 0.72, r.y + r.h * 0.72); g.stroke();
+  }
+  // the pit and the glowing core
+  disc(g, cx, cy, u * 0.27, f === "halcyon" ? "#1c1c22" : f === "choir" ? "#1e1214" : "#3a3f46", P.dark);
+  const glow = g.createRadialGradient(cx, cy, u * 0.02, cx, cy, u * 0.24);
+  glow.addColorStop(0, "#e6feff"); glow.addColorStop(0.35, "#5eead4"); glow.addColorStop(1, "rgba(34,211,238,0)");
+  g.fillStyle = glow; g.beginPath(); g.arc(cx, cy, u * 0.24, 0, Math.PI * 2); g.fill();
+  crystals(g, cx, cy + u * 0.04, u * 0.13, 33);
+  if (f === "choir") { crystals(g, cx - u * 0.16, cy + u * 0.12, u * 0.08, 34); crystals(g, cx + u * 0.15, cy - u * 0.1, u * 0.07, 35); }
+  // four conductor pylons on the rim
+  for (let k = 0; k < 4; k++) {
+    const a = Math.PI / 4 + (k * Math.PI) / 2, px = cx + Math.cos(a) * u * 0.33, py = cy + Math.sin(a) * u * 0.33;
+    if (f === "halcyon") hex(g, px, py, u * 0.06, "#2a2a30", P.accent);
+    else disc(g, px, py, u * 0.06, f === "cantons" ? "#8a7a5a" : shade(P.mid, 1.1), P.dark);
+    disc(g, px, py, u * 0.025, "#67e8f9", "#0e7490");
+  }
+  if (f === "concord") stripe(g, f, r.x + r.w * 0.1, r.y + r.h * 0.9, r.w * 0.5, u * 0.04);
+  if (f === "cantons") rust(g, r.x + r.w * 0.78, r.y + r.h * 0.76, u * 0.06, 36);
+  emblem(g, f, r.x + r.w * 0.79, r.y + r.h * 0.79, u * 0.14);
+}
+
 /** 1×1 defences share a fortified ring base. */
 function ringBase(g: G, f: FactionId, r: R): { cx: number; cy: number; R: number } {
   const P = look(f).palette, u = Math.min(r.w, r.h), cx = r.x + r.w / 2, cy = r.y + r.h / 2;
@@ -226,13 +256,13 @@ function missileTower(g: G, f: FactionId, r: R): void {
 }
 
 const DRAW: Record<ArtBuildingType, (g: G, f: FactionId, r: R) => void> = {
-  constructionYard, powerPlant, refinery, barracks, warFactory, lab, turret, pillbox, antiArmorCannon, missileTower,
+  constructionYard, powerPlant, refinery, barracks, warFactory, lab, turret, pillbox, antiArmorCannon, missileTower, resonanceTap,
 };
 
 /** Draw a faction building into the rectangle (x, y, w, h) — the building fills it. */
 export function drawFactionBuilding(g: G, f: FactionId, type: ArtBuildingType, x: number, y: number, w: number, h: number): void {
   const r: R = { x, y, w, h };
-  const big = type === "constructionYard" || type === "powerPlant" || type === "refinery" || type === "barracks" || type === "warFactory" || type === "lab";
+  const big = type === "constructionYard" || type === "powerPlant" || type === "refinery" || type === "barracks" || type === "warFactory" || type === "lab" || type === "resonanceTap";
   if (big) pad(g, f, r);
   DRAW[type](g, f, r);
   if (f === "choir" && big) banner(g, x + w * 0.02, y + h * 0.3, Math.min(w, h) * 0.07, Math.min(w, h) * 0.22);

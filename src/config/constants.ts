@@ -205,7 +205,7 @@ export const WALL_BREAK_RADIUS = 1.8; // tiles
 
 // ── Buildings (06-buildings.md, 04-power.md) ────────────────────────────────
 // `power` is NET: positive = produced, negative = consumed.
-export type UnlockKey = "advancedVehicles" | "siegeDoctrine" | "advancedDefenses";
+export type UnlockKey = "advancedVehicles" | "siegeDoctrine" | "advancedDefenses" | "resonanceTapping";
 export interface BuildingStat {
   hp: number;
   gold: number;
@@ -227,6 +227,8 @@ export const BUILDING_STATS: Record<BuildingType, BuildingStat> = {
   barracks: { hp: 700, gold: 200, buildTime: 20, power: -20, width: 2, height: 2, sight: 7, letter: "B" },
   warFactory: { hp: 800, gold: 350, buildTime: 28, power: -40, width: 3, height: 2, sight: 7, requires: "barracks", letter: "W" },
   lab: { hp: 700, gold: 500, buildTime: 30, power: -30, width: 2, height: 2, sight: 7, requires: "barracks", letter: "L" },
+  // 32 §A late-game gold: no mine, no workers — expensive, power-hungry, max 4.
+  resonanceTap: { hp: 650, gold: 1500, buildTime: 45, power: -60, width: 2, height: 2, sight: 7, unlock: "resonanceTapping", letter: "RT" },
   // Defenses (15-logic §3). turret = "Gun Turret" (general-purpose). All 1×1.
   turret: { hp: 600, gold: 200, buildTime: 15, power: -20, width: 1, height: 1, sight: 8, letter: "T" },
   pillbox: { hp: 400, gold: 150, buildTime: 10, power: -10, width: 1, height: 1, sight: 6, letter: "Pb" },
@@ -273,7 +275,7 @@ export const PRODUCES: Partial<Record<BuildingType, UnitType[]>> = {
 // building is done by Workers at the placed site (15-logic worker-built construction).
 export const CONSTRUCTS: Partial<Record<BuildingType, BuildingType[]>> = {
   constructionYard: [
-    "powerPlant", "refinery", "barracks", "warFactory", "lab",
+    "powerPlant", "refinery", "resonanceTap", "barracks", "warFactory", "lab",
     "pillbox", "turret", "antiArmorCannon", "missileTower", "wall", "gate",
     "constructionYard", // expansion base (16 §5, maxCount 2)
   ],
@@ -285,7 +287,15 @@ export const CONSTRUCTS: Partial<Record<BuildingType, BuildingType[]>> = {
 export const BUILD_MAX_COUNT: Partial<Record<BuildingType, number>> = {
   constructionYard: 2,
   lab: 1,
+  resonanceTap: 4, // 32 §A
 };
+
+// 32 §A the Resonance Tap's income: gold per second while finished; halved under low power; ×1.5 with
+// Deep Resonance. 4 Taps at 6 g/s = 24 g/s, about the take of 12 mining workers, with no mine at all.
+export const RESONANCE_TAP = { goldPerSec: 4, deepMult: 1.5, lowPowerMult: 0.5 } as const;
+// 32 §B Reinforced Structures: max HP of walls, gates and the four towers.
+export const REINFORCED_HP_MULT = 1.25;
+export const REINFORCED_TYPES: ReadonlySet<BuildingType> = new Set<BuildingType>(["wall", "gate", "pillbox", "turret", "antiArmorCannon", "missileTower"]);
 
 // Movement-line feedback (16 §3).
 export const MOVE_LINE = { lifetime: 1.5 } as const; // seconds to fade
@@ -305,6 +315,7 @@ export const BUILDING_DESC: Record<BuildingType, string> = {
   missileTower: "Fires missiles a long way (9 tiles) that hurt every enemy in a small area.",
   wall: "Blocks enemies and steers them toward your defenses. Drag to build a whole line.",
   gate: "A piece of wall your own units can walk through. Enemies cannot.",
+  resonanceTap: "Draws gold straight from the Resonance Grid, no mine or workers needed: +4 gold every second. Uses a lot of power.",
 };
 export const UNIT_DESC: Record<UnitType, string> = {
   worker: "Gathers gold, builds and repairs structures.",
@@ -323,7 +334,7 @@ export const BUILDING_LABEL: Record<BuildingType, string> = {
   constructionYard: "Construction Yard", powerPlant: "Power Plant", refinery: "Refinery",
   barracks: "Barracks", warFactory: "War Factory", lab: "Lab", turret: "Gun Turret",
   pillbox: "Pillbox", antiArmorCannon: "Anti-Armor Cannon", missileTower: "Missile Tower",
-  wall: "Wall", gate: "Gate",
+  wall: "Wall", gate: "Gate", resonanceTap: "Resonance Tap",
 };
 export const UNIT_LABEL: Record<UnitType, string> = {
   worker: "Worker", rifleman: "Rifleman", grenadier: "Grenadier", rocket: "Rocket",
@@ -332,50 +343,64 @@ export const UNIT_LABEL: Record<UnitType, string> = {
 };
 export const UNLOCK_LABEL: Record<UnlockKey, string> = {
   advancedVehicles: "Advanced Vehicles", siegeDoctrine: "Siege Doctrine", advancedDefenses: "Advanced Defenses",
+  resonanceTapping: "Resonance Tapping",
 };
 
-// Lab research (15-logic §2). One at a time, queue up to 3; effects are per-player multipliers
-// (applied in state/upgrades.ts). `requires` is a prerequisite research key (tiering).
+// Lab research (15-logic §2, re-planned in 32 §B). One at a time, queue up to 3; effects are per-player
+// multipliers or unlocks (applied in state/upgrades.ts). The tree is six BRANCHES × four TIERS: `requires`
+// is the research before it (usually in the same branch), `needsBuilding` a structure you must own.
 export const RESEARCH_QUEUE_MAX = 3;
-// Tech-tree categories (18 §I) — the grouping headers, in display order.
-export const RESEARCH_CATEGORIES = [
-  "Economy", "Construction & Production", "Weapons", "Armor", "Mobility", "Supply Lines", "Support", "Unlocks",
-] as const;
-export type ResearchCategory = (typeof RESEARCH_CATEGORIES)[number];
+export const RESEARCH_BRANCHES = ["Economy", "Industry", "Armory", "Vehicles", "Fortification", "Logistics"] as const;
+export type ResearchBranch = (typeof RESEARCH_BRANCHES)[number];
+export const RESEARCH_BRANCH_INFO: Record<ResearchBranch, string> = {
+  Economy: "More gold: faster mining, then gold from the Resonance Grid once the mines run dry.",
+  Industry: "Build and train faster.",
+  Armory: "Stronger weapons and armour for every unit, and better field medicine.",
+  Vehicles: "Unlock the heavy hitters. Needs a War Factory.",
+  Fortification: "Tougher walls and towers, then the advanced towers.",
+  Logistics: "A bigger army and faster marching.",
+};
 export interface ResearchDef {
   label: string;
   gold: number;
   time: number; // seconds
+  branch: ResearchBranch; // 32 §B: the row it lives in
+  tier: 1 | 2 | 3 | 4; // 32 §B: the column (costs and times rise by tier)
   requires?: ResearchKey;
-  category: ResearchCategory; // 18 §I: which tech-tree group it lives in
-  effect: string;             // 18 §I: exact effect string, shown verbatim in the tree/tooltip
+  needsBuilding?: BuildingType; // 32 §B: a finished structure you must own to start it
+  effect: string; // shown verbatim in the tree and tooltips
+  info: string; // one plain sentence for the tree's details panel
 }
 export const RESEARCH: Record<ResearchKey, ResearchDef> = {
-  mining1: { label: "Improved Mining I", gold: 300, time: 30, category: "Economy", effect: "+15% gather rate" },
-  mining2: { label: "Improved Mining II", gold: 600, time: 45, requires: "mining1", category: "Economy", effect: "+30% gather rate" },
-  constructionCrews: { label: "Construction Crews", gold: 350, time: 35, category: "Construction & Production", effect: "+25% Worker build speed" },
-  streamlinedProduction: { label: "Streamlined Production", gold: 450, time: 40, category: "Construction & Production", effect: "+20% production speed" },
-  weapons1: { label: "Weapons I", gold: 400, time: 40, category: "Weapons", effect: "+10% unit damage" },
-  weapons2: { label: "Weapons II", gold: 700, time: 55, requires: "weapons1", category: "Weapons", effect: "+20% unit damage" },
-  armor1: { label: "Armor I", gold: 400, time: 40, category: "Armor", effect: "+10% unit max HP" },
-  armor2: { label: "Armor II", gold: 700, time: 55, requires: "armor1", category: "Armor", effect: "+20% unit max HP" },
-  fieldLogistics: { label: "Field Logistics", gold: 500, time: 45, category: "Mobility", effect: "+15% unit move speed" },
-  supply1: { label: "Supply Lines I", gold: 350, time: 35, category: "Supply Lines", effect: "+30 unit cap (→110)" },
-  supply2: { label: "Supply Lines II", gold: 600, time: 50, requires: "supply1", category: "Supply Lines", effect: "+30 unit cap (→140)" },
-  supply3: { label: "Supply Lines III", gold: 900, time: 65, requires: "supply2", category: "Supply Lines", effect: "+30 unit cap (→170)" },
-  advancedVehicles: { label: "Advanced Vehicles", gold: 600, time: 50, category: "Unlocks", effect: "Enables the Heavy Tank" },
-  siegeDoctrine: { label: "Siege Doctrine", gold: 400, time: 40, category: "Unlocks", effect: "Enables Artillery" },
-  advancedDefenses: { label: "Advanced Defenses", gold: 500, time: 45, category: "Unlocks", effect: "Enables Anti-Armor Cannon + Missile Tower" },
-  combatStims: { label: "Combat Stims", gold: 450, time: 45, category: "Support", effect: "Medic heal 4→6 HP/s" },
+  // Economy
+  mining1: { label: "Improved Mining I", gold: 300, time: 30, branch: "Economy", tier: 1, effect: "+15% gold per trip", info: "Workers carry 15% more gold back from every trip." },
+  mining2: { label: "Improved Mining II", gold: 600, time: 45, branch: "Economy", tier: 2, requires: "mining1", effect: "+30% gold per trip", info: "Workers carry 30% more gold back from every trip." },
+  resonanceTapping: { label: "Resonance Tapping", gold: 1200, time: 70, branch: "Economy", tier: 3, requires: "mining2", effect: "Unlocks the Resonance Tap", info: "Lets you build Resonance Taps: +4 gold every second each, no mine or workers needed (up to 4)." },
+  deepResonance: { label: "Deep Resonance", gold: 1600, time: 90, branch: "Economy", tier: 4, requires: "resonanceTapping", effect: "Resonance Taps +50%", info: "Every Resonance Tap makes 6 gold a second instead of 4." },
+  // Industry
+  constructionCrews: { label: "Construction Crews", gold: 350, time: 35, branch: "Industry", tier: 1, effect: "+25% Worker build speed", info: "Workers put up buildings 25% faster." },
+  streamlinedProduction: { label: "Streamlined Production", gold: 450, time: 40, branch: "Industry", tier: 2, requires: "constructionCrews", effect: "+20% production speed", info: "Every building trains its units 20% faster." },
+  // Armory
+  weapons1: { label: "Weapons I", gold: 400, time: 40, branch: "Armory", tier: 1, effect: "+10% unit damage", info: "Every unit deals 10% more damage." },
+  weapons2: { label: "Weapons II", gold: 700, time: 55, branch: "Armory", tier: 2, requires: "weapons1", effect: "+20% unit damage", info: "Every unit deals 20% more damage." },
+  armor1: { label: "Armor I", gold: 400, time: 40, branch: "Armory", tier: 1, effect: "+10% unit max HP", info: "Every unit has 10% more health." },
+  armor2: { label: "Armor II", gold: 700, time: 55, branch: "Armory", tier: 2, requires: "armor1", effect: "+20% unit max HP", info: "Every unit has 20% more health." },
+  combatStims: { label: "Combat Stims", gold: 450, time: 45, branch: "Armory", tier: 3, requires: "armor2", effect: "Medic heal 4→6 HP/s", info: "Field Medics heal 6 health a second instead of 4." },
+  // Vehicles
+  advancedVehicles: { label: "Advanced Vehicles", gold: 600, time: 50, branch: "Vehicles", tier: 2, needsBuilding: "warFactory", effect: "Unlocks the Heavy Tank", info: "The War Factory can build Heavy Tanks." },
+  siegeDoctrine: { label: "Siege Doctrine", gold: 700, time: 55, branch: "Vehicles", tier: 3, requires: "advancedVehicles", needsBuilding: "warFactory", effect: "Unlocks Artillery", info: "The War Factory can build long-range Artillery." },
+  // Fortification
+  reinforcedStructures: { label: "Reinforced Structures", gold: 350, time: 35, branch: "Fortification", tier: 1, effect: "Walls, gates, towers +25% HP", info: "Walls, gates and every defensive tower get 25% more health, existing ones too." },
+  advancedDefenses: { label: "Advanced Defenses", gold: 500, time: 45, branch: "Fortification", tier: 2, requires: "reinforcedStructures", effect: "Unlocks AT Cannon + Missile Tower", info: "You can build the Anti-Armor Cannon and the Missile Tower." },
+  // Logistics
+  supply1: { label: "Supply Lines I", gold: 350, time: 35, branch: "Logistics", tier: 1, effect: "+30 unit cap (→110)", info: "Your army can be 30 units bigger (110)." },
+  supply2: { label: "Supply Lines II", gold: 600, time: 50, branch: "Logistics", tier: 2, requires: "supply1", effect: "+30 unit cap (→140)", info: "Your army can be 30 more units bigger (140)." },
+  supply3: { label: "Supply Lines III", gold: 900, time: 65, branch: "Logistics", tier: 3, requires: "supply2", effect: "+30 unit cap (→170)", info: "Your army can be 30 more units bigger (170)." },
+  fieldLogistics: { label: "Field Logistics", gold: 500, time: 45, branch: "Logistics", tier: 2, requires: "supply1", effect: "+15% unit move speed", info: "Every unit moves 15% faster." },
 };
-// Research offered by each building (only the Lab), in command-card order.
+// Research offered by each building (only the Lab), in tree order.
 export const RESEARCHES: Partial<Record<BuildingType, ResearchKey[]>> = {
-  lab: [
-    "mining1", "mining2", "weapons1", "weapons2", "armor1", "armor2",
-    "fieldLogistics", "constructionCrews", "streamlinedProduction",
-    "supply1", "supply2", "supply3", "combatStims",
-    "advancedVehicles", "siegeDoctrine", "advancedDefenses",
-  ],
+  lab: Object.keys(RESEARCH) as ResearchKey[],
 };
 
 // ── Worker-built construction (15-logic) ────────────────────────────────────
@@ -612,6 +637,7 @@ export const BUILDING_ACCENT: Record<BuildingType, string> = {
   missileTower: "#a855f7", // long-range → purple
   wall: "#6b7280",
   gate: "#9ca3af",
+  resonanceTap: "#22d3ee", // 32 §A Resonance → cyan
 };
 
 // ── Render sizes (11-visuals-assets.md; 1 tile = 32px) ──────────────────────
@@ -774,6 +800,11 @@ export const COMMANDER = {
   GATE_POST_DEPTH: 4, // defenders muster this many tiles inside the main gate
   DEFEND_LOOSE_DIST: 15, // an army farther than this from the attack breaks formation and runs home at full speed
   // §H tech
+  RESONANCE_AFTER_S: 720, // 32 §A: research Resonance Tapping after 12 min…
+  RESONANCE_MINED_LEFT: 0.35, // …or once the gold I mine is down to this share
+  RESONANCE_MIN_S: 480, // …but never before 8 min (an early home mine running low is the expansion rule's job)
+  RESONANCE_SAVE_SLACK: 100, // 32 §D: saving for a step = its price + this
+  TAP_GOLD_RESERVE: 300, // a Resonance Tap is placed only with this much left over
   TECH_INCOME_T1: 20,
   TECH_INCOME_T2: 35,
   ADV_VEHICLES_INCOME: 30,

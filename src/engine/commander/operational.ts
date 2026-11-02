@@ -3,11 +3,11 @@
 // legality are enforced inside executeCommand like any human order.
 
 import { unitCost } from "../../state/doctrine";
-import { BUILDING_STATS, COMMANDER, DEFENSE_STATS, PRODUCES, REPAIR, RESEARCH, STRUCTURE_CAP, UNIT_STATS } from "../../config/constants";
-import type { AIBasePlan, Building, BuildingType, GameState, GoldSource, ResearchKey, Unit, UnitType, Vec2 } from "../../core/types";
+import { BUILD_MAX_COUNT, BUILDING_STATS, COMMANDER, DEFENSE_STATS, PRODUCES, REPAIR, RESEARCH, STRUCTURE_CAP, UNIT_STATS } from "../../config/constants";
+import type { AIBasePlan, Building, BuildingType, GameState, GoldSource, Player, ResearchKey, Unit, UnitType, Vec2 } from "../../core/types";
 import { footprintClear, withinBuildRadius } from "../placement";
 import { isLowPower } from "../../state/gameState";
-import { isResearched, unitCap } from "../../state/upgrades";
+import { hasResearchBuilding, isResearched, unitCap } from "../../state/upgrades";
 import {
   armyValue, baseCenter, buildingsOf, claimedSources, combatUnitsOf, composition, compositionNear, defenseScore,
   economyScore, enemyValueNear, fightersOf, frontDistance, livingEnemies, mainYard, territoryThreat, unitsOf,
@@ -230,11 +230,13 @@ function runEconomy(ctx: Ctx, cy: Building): void {
   const projected = p.powerProduced - p.powerUsed + queuedPlants * BUILDING_STATS.powerPlant.power;
   // never more than one plant in the pipeline — projected already counts it, and low power must
   // not stack half-built plants it can't crew.
-  if ((projected < COMMANDER.POWER_SURPLUS_MIN || isLowPower(state, pid)) && queuedPlants === 0 && canStartSite(ctx, 1)) {
+  let plantQueued = queuedPlants > 0;
+  if ((projected < COMMANDER.POWER_SURPLUS_MIN || isLowPower(state, pid)) && !plantQueued && canStartSite(ctx, 1)) {
     const spot = findSpot(ctx, cy, "powerPlant");
     if (spot && p.gold >= BUILDING_STATS.powerPlant.gold) {
       cmd(ctx, "PLACE_BUILDING", { buildingType: "powerPlant", x: spot.x, y: spot.y });
       cs.intents.push("power plant (surplus)");
+      plantQueued = true;
     }
   }
 
@@ -271,9 +273,34 @@ function runEconomy(ctx: Ctx, cy: Building): void {
     expandTo(ctx, cy);
   }
 
+  // 32 §A late-game gold: once Resonance Tapping is in, build Taps (up to the cap) — they keep the army
+  // coming after the mines run dry. Power first: the surplus rule above keeps only +20, so a plant goes
+  // down for the Tap's 60 (Taps still being built don't draw power yet, so count them here). Late in the
+  // match the next Resonance research, or the Tap's price, is held back (saveFor) — set here, before the
+  // defense plan, research and production spend anything this tick (32 §D).
+  const late = lateEconomy(ctx);
+  const saveKey = resonanceSaveKey(ctx);
+  cs.saveFor = saveKey ? RESEARCH[saveKey].gold + COMMANDER.RESONANCE_SAVE_SLACK : 0;
+  const tapStat = BUILDING_STATS.resonanceTap;
+  const taps = buildingsOf(state, pid).filter((b) => b.buildingType === "resonanceTap");
+  if (p.unlocks.resonanceTapping && taps.length < (BUILD_MAX_COUNT.resonanceTap ?? 0)) {
+    const tapSites = taps.filter((b) => b.buildProgress < 1).length;
+    const spare = projected + (tapSites + 1) * tapStat.power;
+    if (spare < COMMANDER.POWER_SURPLUS_MIN) {
+      if (!plantQueued && canStartSite(ctx, 1) && p.gold >= BUILDING_STATS.powerPlant.gold) {
+        const spot = findSpot(ctx, cy, "powerPlant");
+        if (spot) { cmd(ctx, "PLACE_BUILDING", { buildingType: "powerPlant", x: spot.x, y: spot.y }); cs.intents.push("power plant (tap)"); }
+      }
+    } else if (tapSites === 0 && p.gold >= tapStat.gold + (late ? COMMANDER.RESONANCE_SAVE_SLACK : COMMANDER.TAP_GOLD_RESERVE) && canStartSite(ctx, 1)) {
+      const spot = findSpot(ctx, cy, "resonanceTap");
+      if (spot) { cmd(ctx, "PLACE_BUILDING", { buildingType: "resonanceTap", x: spot.x, y: spot.y }); cs.intents.push("resonance tap"); }
+    }
+    if (tapSites === 0 && late) cs.saveFor = Math.max(cs.saveFor, tapStat.gold + COMMANDER.RESONANCE_SAVE_SLACK);
+  }
+
   // Cap management: Supply Lines at ≥85% cap with gold banked.
   const units = unitsOf(state, pid).length;
-  if (units >= unitCap(p) * COMMANDER.SUPPLY_AT_CAP_FRAC && p.gold > COMMANDER.SUPPLY_MIN_GOLD) {
+  if (units >= unitCap(p) * COMMANDER.SUPPLY_AT_CAP_FRAC && spendable(ctx) > COMMANDER.SUPPLY_MIN_GOLD) {
     queueResearchLine(ctx, ["supply1", "supply2", "supply3"]);
   }
 }
@@ -351,7 +378,7 @@ function runDefensePlan(ctx: Ctx): void {
   if (!canStartSite(ctx, cs.stance === "DEFEND" || cs.personality === "turtle" ? 0 : -1)) return;
   const defend = cs.stance === "DEFEND";
   const reserve = defend ? 0 : COMMANDER.DEF_GOLD_RESERVE;
-  const afford = (cost: number): boolean => p.gold - cost >= reserve;
+  const afford = (cost: number): boolean => spendable(ctx) - cost >= reserve; // 32 §D: above any late-economy reserve
   const myB = buildingsOf(state, pid);
   const near = (type: BuildingType, x: number, y: number, r: number): boolean =>
     myB.some((b) => b.buildingType === type && Math.abs(b.x - x) <= r && Math.abs(b.y - y) <= r);
@@ -441,17 +468,60 @@ function runTech(ctx: Ctx): void {
   const medics = combatUnitsOf(state, pid).filter((u) => u.combatType === "support").length;
   if (medics >= COMMANDER.STIMS_MEDICS) wants.push("combatStims");
   wants.push("mining1", "constructionCrews");
+  // 32 §B: walls and towers are the base plan's backbone — Turtles harden them early, everyone later.
+  if (cs.personality === "turtle" || income > COMMANDER.TECH_INCOME_T2) wants.push("reinforcedStructures");
+  // 32 §A: late game, once the gold I mine runs low, or with a strong economy, reach for the Resonance
+  // Grid. In the first two cases the next step is saved for (runEconomy set saveFor) and skips the budget.
+  if (lateEconomy(ctx) || income > COMMANDER.TECH_INCOME_T2) wants.push("resonanceTapping", "deepResonance");
+  wants.push("streamlinedProduction");
+  const saveKey = resonanceSaveKey(ctx);
 
   const budget = p.gold * (techer ? pers.techBudget * 2 : pers.techBudget) + 200;
-  for (const key of wants) {
-    if (isResearched(p, key)) continue;
+  for (const want of wants) {
+    // 32 §B: walk back to the first missing step of the chain (the tree has more prerequisites now).
+    const key = firstMissing(p, want);
+    if (isResearched(p, key) || !hasResearchBuilding(state, pid, key)) continue;
     const d = RESEARCH[key];
-    if (d.requires && !isResearched(p, d.requires)) continue;
-    if (d.gold > budget || d.gold > p.gold - 100) continue;
+    // the step being saved for may use the savings; anything else only what lies above them
+    if (key === saveKey ? d.gold > p.gold - 100 : d.gold > budget || d.gold > spendable(ctx) - 100) continue;
     cmd(ctx, "RESEARCH", { labId: lab.id, upgradeId: key });
     cs.intents.push(`research ${key}`);
     return;
   }
+  if (saveKey) cs.intents.push(`saving for ${saveKey}`);
+}
+
+/** 32 §D: the Resonance research worth holding gold back for — late in the match, with an idle Lab:
+ *  the next step towards Resonance Tapping, then towards Deep Resonance once two Taps stand. */
+function resonanceSaveKey(ctx: Ctx): ResearchKey | null {
+  const { state, p, pid } = ctx;
+  if (!lateEconomy(ctx)) return null;
+  const lab = buildingsOf(state, pid).find((b) => b.buildingType === "lab" && b.buildProgress >= 1);
+  if (!lab || (lab.researchQueue?.length ?? 0) > 0) return null;
+  const goal: ResearchKey = p.unlocks.resonanceTapping && countAll(ctx, "resonanceTap") >= 2 ? "deepResonance" : "resonanceTapping";
+  return isResearched(p, goal) ? null : firstMissing(p, goal);
+}
+
+/** The research to start for `key`: itself, or the earliest unresearched step of its chain. */
+function firstMissing(p: Player, key: ResearchKey): ResearchKey {
+  while (RESEARCH[key].requires && !isResearched(p, RESEARCH[key].requires!)) key = RESEARCH[key].requires!;
+  return key;
+}
+
+/** 32 §A: time to invest in the Resonance Grid — the match is long, or the gold I mine is running
+ *  out. (Before my first drop-off claims a field there's nothing to judge, so that alone doesn't count.) */
+function lateEconomy(ctx: Ctx): boolean {
+  const claimed = claimedSources(ctx.state, ctx.pid);
+  const left = claimed.reduce((a, g) => a + g.goldRemaining, 0) / Math.max(1, claimed.reduce((a, g) => a + g.maxGold, 0));
+  const t = ctx.state.time;
+  return t > COMMANDER.RESONANCE_AFTER_S || (t > COMMANDER.RESONANCE_MIN_S && claimed.length > 0 && left < COMMANDER.RESONANCE_MINED_LEFT);
+}
+
+/** Gold the army may spend: everything above the late-economy reserve — all of it while defending,
+ *  recovering or committed to an all-in push. */
+function spendable(ctx: Ctx): number {
+  const { cs, p } = ctx;
+  return cs.stance === "DEFEND" || cs.stance === "RECOVER" || cs.stance === "ALL_IN" ? p.gold : p.gold - (cs.saveFor ?? 0);
 }
 
 function queueResearchLine(ctx: Ctx, line: ResearchKey[]): void {
@@ -575,7 +645,7 @@ function runProduction(ctx: Ctx): void {
     for (const b of sorted) {
       if (!canBuild(b, u) || b.productionQueue.length >= 4) continue;
       possible = true;
-      if (p.gold < unitCost(p, u) + 60) return "broke";
+      if (spendable(ctx) < unitCost(p, u) + 60) return "broke"; // 32 §D: never dips into saveFor
       cmd(ctx, "QUEUE_UNIT", { buildingId: b.id, unitType: u });
       return "queued";
     }
@@ -606,7 +676,7 @@ function runProduction(ctx: Ctx): void {
 
   // second Barracks when gold floats with full queues (§I).
   const allFull = producers.length > 0 && producers.every((b) => b.productionQueue.length >= 3);
-  if (p.gold > COMMANDER.SECOND_BARRACKS_FLOAT && allFull && countAll(ctx, "barracks") < 3 && canStartSite(ctx)) {
+  if (spendable(ctx) > COMMANDER.SECOND_BARRACKS_FLOAT && allFull && countAll(ctx, "barracks") < 3 && canStartSite(ctx)) {
     const cy = mainYard(state, pid);
     const spot = cy ? findSpot(ctx, cy, "barracks") : null;
     if (spot) { cmd(ctx, "PLACE_BUILDING", { buildingType: "barracks", x: spot.x, y: spot.y }); cs.intents.push("more production"); }

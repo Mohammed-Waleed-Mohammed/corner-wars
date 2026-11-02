@@ -24,7 +24,7 @@ export type IconKind =
 const UNIT_KINDS = new Set<string>(["worker", "rifleman", "rocket", "tank", "grenadier", "scoutBuggy", "heavyTank", "artillery", "medic"]);
 const BUILDING_KINDS = new Set<string>([
   "constructionYard", "powerPlant", "refinery", "barracks", "warFactory", "lab", "turret",
-  "wall", "gate", "pillbox", "antiArmorCannon", "missileTower",
+  "wall", "gate", "pillbox", "antiArmorCannon", "missileTower", "resonanceTap",
 ]);
 
 // NOTE: "artillery" is both a unit and a citadel power — the power uses the key "artillery_power".

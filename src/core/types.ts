@@ -28,6 +28,7 @@ export type BuildingType =
   | "barracks"
   | "warFactory"
   | "lab" // 15-logic §2 — research building
+  | "resonanceTap" // 32 §A — late-game gold from the Resonance Grid, no mine needed
   | "turret" // Gun Turret (general-purpose defense)
   // 15-logic §1/§3 — walls/gates + defenses:
   | "wall"
@@ -44,7 +45,9 @@ export type ResearchKey =
   | "fieldLogistics"
   | "supply1" | "supply2" | "supply3"
   | "advancedVehicles" | "siegeDoctrine" | "advancedDefenses"
-  | "combatStims"; // 19 §D — Medic heal 4→6 HP/s
+  | "combatStims" // 19 §D — Medic heal 4→6 HP/s
+  | "resonanceTapping" | "deepResonance" // 32 §A — the Resonance Tap and its +50% output
+  | "reinforcedStructures"; // 32 §B — +25% HP for walls, gates and towers
 
 export type UnitState = "idle" | "moving" | "attacking" | "gathering" | "guarding" | "repairing" | "healing";
 // "void" (18 §A) = outside the playable shape — not rendered as terrain, not pathable; lets maps be
@@ -412,6 +415,7 @@ export interface CommanderState {
   // §K v3: "look before you leap" — a push objective the AI hasn't seen lately is scouted first.
   scoutRequest?: { x: number; y: number; tick: number };
   citadelRetreatTick?: number; // §M v4: tick the last Citadel squad fell back (CITADEL_RETRY_TICKS cooldown)
+  saveFor?: number; // 32 §D: gold held back from the army for the next late-economy step (0 = none)
 }
 
 export interface Player {
@@ -433,7 +437,7 @@ export interface Player {
   stats: PlayerStats;
   ai?: AIBrain; // engine-only: present for AI players (1-3)
   // Lab research (15-logic §2): unlock gates + per-player upgrade levels (global multipliers).
-  unlocks: { advancedVehicles: boolean; siegeDoctrine: boolean; advancedDefenses: boolean };
+  unlocks: { advancedVehicles: boolean; siegeDoctrine: boolean; advancedDefenses: boolean; resonanceTapping: boolean };
   upgrades: {
     mining: number; // 0..2 (+15% / +30% gather)
     weapons: number; // 0..2 (+10% / +20% damage)
@@ -443,6 +447,8 @@ export interface Player {
     streamlinedProduction: boolean; // +20% production speed
     fieldLogistics: boolean; // +15% move speed
     combatStims: boolean; // 19 §D: Medic heal 4→6 HP/s
+    deepResonance: boolean; // 32 §A: Resonance Taps +50%
+    reinforcedStructures: boolean; // 32 §B: walls, gates, towers +25% HP
   };
 }
 

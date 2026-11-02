@@ -24,6 +24,8 @@ Balance intent: walls *delay*, never *deny*. A 250-HP wall costs a Tank ~14 s to
 
 ## 2. The Lab — upgrades & unlocks
 
+> **Superseded in part by file 32 §B:** the research list, prices, prerequisites and grouping below are replaced by the six-branch, four-tier tree there (adds Resonance Tapping, Deep Resonance and Reinforced Structures). The tradeoff principle and the queue rules still hold.
+
 A research building that improves stats and unlocks advanced units/defenses. The core design principle: **teching is a tradeoff** — gold spent on research is gold not spent on army, so a teching player is temporarily weaker. Percentages are modest so nothing is a runaway, and every player has equal access.
 
 | Building | Footprint | HP | Gold | Build | Power | Requires |

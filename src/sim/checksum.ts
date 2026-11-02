@@ -71,9 +71,10 @@ export function checksum(state: GameState): number {
     h = mix(h, p.eliminated ? 1 : 0);
     const u = p.upgrades;
     h = mix(h, u.mining + u.weapons * 10 + u.armor * 100 + u.supplyLines * 1000);
-    h = mix(h, (u.constructionCrews ? 1 : 0) + (u.streamlinedProduction ? 2 : 0) + (u.fieldLogistics ? 4 : 0));
+    h = mix(h, (u.constructionCrews ? 1 : 0) + (u.streamlinedProduction ? 2 : 0) + (u.fieldLogistics ? 4 : 0) +
+      (u.combatStims ? 8 : 0) + (u.deepResonance ? 16 : 0) + (u.reinforcedStructures ? 32 : 0));
     const k = p.unlocks;
-    h = mix(h, (k.advancedVehicles ? 1 : 0) + (k.siegeDoctrine ? 2 : 0) + (k.advancedDefenses ? 4 : 0));
+    h = mix(h, (k.advancedVehicles ? 1 : 0) + (k.siegeDoctrine ? 2 : 0) + (k.advancedDefenses ? 4 : 0) + (k.resonanceTapping ? 8 : 0));
     // 27 §G: commander, ability cooldown and any active player-wide buff.
     h = mix(h, p.commander ? COMMANDER_IDS.indexOf(p.commander) + 1 : 0);
     h = mix(h, Math.round(p.abilityCooldown * 100));

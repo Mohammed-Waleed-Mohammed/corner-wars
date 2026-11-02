@@ -7,12 +7,15 @@ import {
   COMBAT_PACE,
   MEDIC,
   REFUND,
+  REINFORCED_HP_MULT,
+  REINFORCED_TYPES,
   RESEARCH,
+  RESONANCE_TAP,
   RESEARCH_QUEUE_MAX,
   SUPPLY_LINE_CAP_BONUS,
   UNIT_STATS,
 } from "../config/constants";
-import type { Building, GameState, Player, PlayerId, ResearchKey } from "../core/types";
+import type { Building, BuildingType, GameState, Player, PlayerId, ResearchKey } from "../core/types";
 import { miningDoctrineMult, researchCost, researchTime, unitHpDoctrineMult } from "./doctrine";
 
 // ── Multipliers (read a player's researched upgrades) ────────────────────────
@@ -24,6 +27,10 @@ export const workerBuildMult = (p: Player): number => (p.upgrades.constructionCr
 export const productionUpgradeMult = (p: Player): number => (p.upgrades.streamlinedProduction ? 1.2 : 1);
 export const unitCap = (p: Player): number => BASE_UNIT_CAP + SUPPLY_LINE_CAP_BONUS * p.upgrades.supplyLines;
 export const medicHealPerS = (p: Player): number => (p.upgrades.combatStims ? MEDIC.STIM_HEAL_PER_S : MEDIC.HEAL_PER_S); // 19 §D
+
+export const structureHpMult = (p: Player | null, type: BuildingType): number =>
+  p && p.upgrades.reinforcedStructures && REINFORCED_TYPES.has(type) ? REINFORCED_HP_MULT : 1; // 32 §B
+export const tapGoldPerSec = (p: Player): number => RESONANCE_TAP.goldPerSec * (p.upgrades.deepResonance ? RESONANCE_TAP.deepMult : 1);
 
 // ── Research state ───────────────────────────────────────────────────────────
 export function isResearched(p: Player, key: ResearchKey): boolean {
@@ -45,7 +52,17 @@ export function isResearched(p: Player, key: ResearchKey): boolean {
     case "siegeDoctrine": return p.unlocks.siegeDoctrine;
     case "advancedDefenses": return p.unlocks.advancedDefenses;
     case "combatStims": return u.combatStims;
+    case "resonanceTapping": return p.unlocks.resonanceTapping;
+    case "deepResonance": return u.deepResonance;
+    case "reinforcedStructures": return u.reinforcedStructures;
   }
+}
+
+/** 32 §B a research's structure requirement (e.g. a War Factory for the Vehicles branch): met? */
+export function hasResearchBuilding(state: GameState, owner: PlayerId, key: ResearchKey): boolean {
+  const need = RESEARCH[key].needsBuilding;
+  if (!need) return true;
+  return state.entities.some((e) => e.kind === "building" && e.owner === owner && e.buildingType === need && e.buildProgress >= 1 && e.hp > 0);
 }
 
 /** Can `key` be queued at this Lab right now? (not done, not queued, prereq met-or-queued,
@@ -58,6 +75,7 @@ export function canEnqueueResearch(state: GameState, lab: Building, key: Researc
   if (q.includes(key) || q.length >= RESEARCH_QUEUE_MAX) return false;
   const def = RESEARCH[key];
   if (def.requires && !isResearched(p, def.requires) && !q.includes(def.requires)) return false;
+  if (!hasResearchBuilding(state, lab.owner, key)) return false;
   return p.gold >= researchCost(p, key);
 }
 
@@ -139,6 +157,19 @@ export function applyResearch(state: GameState, owner: PlayerId, key: ResearchKe
     case "siegeDoctrine": p.unlocks.siegeDoctrine = true; break;
     case "advancedDefenses": p.unlocks.advancedDefenses = true; break;
     case "combatStims": u.combatStims = true; break;
+    case "resonanceTapping": p.unlocks.resonanceTapping = true; break;
+    case "deepResonance": u.deepResonance = true; break;
+    case "reinforcedStructures": u.reinforcedStructures = true; rescaleStructures(state, owner); break;
+  }
+}
+
+/** 32 §B Reinforced Structures: raise existing walls, gates and towers by the same fraction (keeping
+ *  their damage share), as new ones are built with it. */
+function rescaleStructures(state: GameState, owner: PlayerId): void {
+  for (const e of state.entities) {
+    if (e.kind !== "building" || e.owner !== owner || !REINFORCED_TYPES.has(e.buildingType)) continue;
+    e.maxHp *= REINFORCED_HP_MULT;
+    e.hp *= REINFORCED_HP_MULT;
   }
 }
 

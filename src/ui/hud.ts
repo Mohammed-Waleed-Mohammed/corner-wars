@@ -160,7 +160,7 @@ export class Hud {
       const info = POWER_INFO[key];
       const btn = document.createElement("button");
       btn.className = "ht-power-btn hud-chamfer-sm";
-      btn.title = `${info.label} — ${cost} energy\n${info.tooltip}\n(X then Q–T on the command card)`;
+      btn.title = `${info.label} — ${cost} energy\n${info.tooltip}\n(X, then the power's letter on the command card)`;
       btn.append(icon(key === "artillery" ? "artillery_power" : (key as "reinforcements"), 20));
       const c = document.createElement("span"); c.className = "ht-power-cost"; c.textContent = String(cost);
       btn.append(c);
@@ -169,7 +169,7 @@ export class Hud {
       this.powerBtns.push({ el: btn, key, cost });
     }
 
-    this.techTree = new TechTree((key) => this.ctrl?.researchFromSelected(key));
+    this.techTree = new TechTree((key) => this.ctrl?.researchFromSelected(key), (i) => this.ctrl?.cancelQueueItem(i));
     this.card = new CommandCard(q(root, "[data-grid]"), q(root, "[data-tip]"), localPlayerId, () => this.techTree.openTree());
     this.selection = new SelectionPanel(q(root, "[data-sel]"), localPlayerId);
     this.tabs = new ProductionTabs(q(root, "[data-tabs]"), localPlayerId);
@@ -182,7 +182,7 @@ export class Hud {
     this.minimapCanvas.addEventListener("mousedown", () => this.reportMinimapRect()); // before the forwarded press
 
     window.addEventListener("resize", this.onResize);
-    window.addEventListener("keydown", this.onKey);
+    window.addEventListener("keydown", this.onKey, { capture: true }); // 30 §B.1: card letters win over other single-key shortcuts (M = mute)
     this.disposeSettings = onSettingsChange(() => { this.applyScale(); this.layoutMinimap(); });
     this.applyScale();
     requestAnimationFrame(() => this.layoutMinimap());
@@ -203,7 +203,7 @@ export class Hud {
 
   destroy(): void {
     window.removeEventListener("resize", this.onResize);
-    window.removeEventListener("keydown", this.onKey);
+    window.removeEventListener("keydown", this.onKey, { capture: true });
     this.disposeSettings();
     setMinimapScreenRect(null);
     this.worldTip.destroy();

@@ -30,6 +30,7 @@ import { updateFog } from "./fog";
 import { entityHash, unitHash } from "./spatial";
 import { isLowPower } from "../state/gameState";
 import { updateResearch } from "../state/upgrades";
+import { updateResonanceTaps } from "./resonance";
 
 export function updateGame(state: GameState, dt: number): void {
   state.soundEvents = []; // host drained last frame's; collect this frame's
@@ -58,6 +59,7 @@ export function updateGame(state: GameState, dt: number): void {
   updateConstruction(state, dt); // may complete buildings (+ refinery free worker)
   updateRepair(state, dt); // Workers repair damaged friendly buildings (spends gold)
   updateResearch(state, dt); // Lab research; applies per-player upgrades on completion
+  updateResonanceTaps(state, dt); // 32 §A late-game gold from Resonance Taps
 
   // Broad-phase index for this step's targeting + Citadel capture (rebuilt once).
   entityHash.rebuild(state);

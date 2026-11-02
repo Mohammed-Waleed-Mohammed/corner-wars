@@ -1,19 +1,12 @@
-// 30 §B — the command card's contents: which action sits in each of the 15 grid slots, per card.
-// Slots are positional (QWERT / ASDFG / ZXCVB by physical key, KeyboardEvent.code), and a command keeps
-// its slot across cards: Z = commander ability and X = Citadel powers everywhere, B = Back in sub-cards
-// and Sell on a selected structure, T = Build… on the Yard and structure cards.
+// 30 §B — the command card's contents: which action sits in each of the 15 grid slots, per card, and
+// which key fires it. Keys come from each button's NAME (Refinery = R, Barracks = B), resolved per card
+// so no two buttons share one; Z = commander ability and X = Citadel powers everywhere; Esc goes back.
+// Structures are grouped: the Build card shows four categories, each opening its own card.
 // Pure data — presentation and state live in commandCard.ts.
 
 import { CITADEL_POWERS, PRODUCES } from "../../config/constants";
 import type { Building, BuildingType, UnitType } from "../../core/types";
 import type { FormationOption, SelectionDetail } from "../../input/controller";
-
-export const GRID_CODES = [
-  "KeyQ", "KeyW", "KeyE", "KeyR", "KeyT",
-  "KeyA", "KeyS", "KeyD", "KeyF", "KeyG",
-  "KeyZ", "KeyX", "KeyC", "KeyV", "KeyB",
-] as const;
-export const GRID_KEYS = ["Q", "W", "E", "R", "T", "A", "S", "D", "F", "G", "Z", "X", "C", "V", "B"] as const;
 
 export type Cmd = "attack" | "stop" | "guard" | "fallback" | "breakform" | "rally";
 
@@ -29,8 +22,22 @@ export type SlotAction =
   | { kind: "sell" }
   | { kind: "back" };
 
+// 30 §B.2 build categories, in card order.
+export type BuildCategory = "economy" | "production" | "defense" | "walls";
+export const BUILD_CATEGORIES: Record<BuildCategory, { label: string; tip: string; items: BuildingType[] }> = {
+  economy: { label: "Economy", tip: "Power and gold: Power Plant, Refinery, Resonance Tap, and a new Construction Yard to expand.", items: ["powerPlant", "refinery", "resonanceTap", "constructionYard"] },
+  production: { label: "Production", tip: "Where armies and research come from: Barracks, War Factory, Lab.", items: ["barracks", "warFactory", "lab"] },
+  defense: { label: "Defense", tip: "Towers that shoot on their own: Pillbox, Gun Turret, Anti-Armor Cannon, Missile Tower.", items: ["pillbox", "turret", "antiArmorCannon", "missileTower"] },
+  walls: { label: "Walls", tip: "Walls to block the way, and gates your own units can walk through.", items: ["wall", "gate"] },
+};
+export const CATEGORY_ORDER: BuildCategory[] = ["economy", "production", "defense", "walls"];
+export function categoryOf(b: BuildingType): BuildCategory | null {
+  for (const c of CATEGORY_ORDER) if (BUILD_CATEGORIES[c].items.includes(b)) return c;
+  return null;
+}
+
 export type RootCard = "build" | "army" | "production" | "lab" | "structure";
-export type SubCard = "powers" | "formations" | "structures";
+export type SubCard = "powers" | "formations" | "structures" | `cat:${BuildCategory}`;
 export type CardId = RootCard | SubCard;
 
 /** Which root card the current selection shows (30 §B table). */
@@ -46,8 +53,6 @@ export function rootCard(sel: SelectionDetail, building: Building | null, placin
   return "build";
 }
 
-const BUILD_ROW1: BuildingType[] = ["powerPlant", "refinery", "barracks", "warFactory", "lab"];
-const BUILD_ROW2: BuildingType[] = ["pillbox", "turret", "antiArmorCannon", "missileTower", "wall"];
 export const POWER_ORDER = ["artillery", "reinforcements", "frenzy", "repair", "ion"] as const;
 const PRESETS = ["spear", "line", "box", "column"];
 
@@ -58,13 +63,16 @@ export function cardSlots(card: CardId, ctx: { building: Building | null; format
     s[10] = { kind: "ability" };
     if (card !== "powers") s[11] = { kind: "open", sub: "powers" };
   };
+  if (card.startsWith("cat:")) {
+    BUILD_CATEGORIES[card.slice(4) as BuildCategory].items.forEach((b, i) => (s[i] = { kind: "place", building: b }));
+    common();
+    s[14] = { kind: "back" };
+    return s;
+  }
   switch (card) {
     case "build":
     case "structures": {
-      BUILD_ROW1.forEach((b, i) => (s[i] = { kind: "place", building: b }));
-      BUILD_ROW2.forEach((b, i) => (s[5 + i] = { kind: "place", building: b }));
-      s[12] = { kind: "place", building: "gate" };
-      s[13] = { kind: "place", building: "constructionYard" };
+      CATEGORY_ORDER.forEach((c, i) => (s[i] = { kind: "open", sub: `cat:${c}` }));
       common();
       if (card === "structures") s[14] = { kind: "back" };
       break;
@@ -111,4 +119,45 @@ export function cardSlots(card: CardId, ctx: { building: Building | null; format
     }
   }
   return s;
+}
+
+// ── 30 §B.1 name-based hotkeys ──────────────────────────────────────────────────────────────────────
+
+/** Which buttons pick their letter first: orders, then what you build or train, then the rest. */
+function priority(a: SlotAction): number {
+  switch (a.kind) {
+    case "cmd": return a.cmd === "breakform" || a.cmd === "rally" ? 4 : 0;
+    case "place": case "train": case "research": case "power": return 1;
+    case "formation": return 2;
+    case "open": return 3;
+    default: return 5;
+  }
+}
+
+/** Letters to try for a label, best first: the first letter of each word, then every other letter. */
+function candidates(label: string): string[] {
+  const words = label.toUpperCase().replace(/[^A-Z ]/g, " ").split(/\s+/).filter(Boolean);
+  const out: string[] = [];
+  for (const w of words) out.push(w[0]);
+  for (const w of words) for (const ch of w.slice(1)) out.push(ch);
+  return out;
+}
+
+/** The key for every slot: "Z" ability, "X" powers, "Esc" back, otherwise a letter from the button's
+ *  label, unique within the card. Deterministic for a given card and labels. */
+export function assignKeys(actions: (SlotAction | null)[], labelOf: (a: SlotAction) => string): (string | null)[] {
+  const keys: (string | null)[] = actions.map(() => null);
+  const used = new Set<string>(["Z", "X"]);
+  const order = actions
+    .map((a, i) => ({ a, i }))
+    .filter((e): e is { a: SlotAction; i: number } => e.a !== null)
+    .sort((p, q) => priority(p.a) - priority(q.a) || p.i - q.i);
+  for (const { a, i } of order) {
+    if (a.kind === "ability") { keys[i] = "Z"; continue; }
+    if (a.kind === "open" && a.sub === "powers") { keys[i] = "X"; continue; }
+    if (a.kind === "back") { keys[i] = "Esc"; continue; }
+    const pick = candidates(labelOf(a)).find((c) => !used.has(c)) ?? "ABCDEFGHIJKLMNOPQRSTUVWY".split("").find((c) => !used.has(c)) ?? null;
+    if (pick) { used.add(pick); keys[i] = pick; }
+  }
+  return keys;
 }

@@ -1,6 +1,7 @@
 // 30 §B — the 5×3 command card. 15 permanent buttons; their actions come from cards.ts, re-derived every
-// frame (cheap), with the DOM rebuilt only when the card changes. Positional hotkeys (KeyboardEvent.code)
-// fire exactly the slot whose key is printed on it. Hovering shows the tooltip panel above the card, led by a
+// frame (cheap), with the DOM rebuilt only when the card changes. Each button's key is a letter of its
+// name (cards.ts assignKeys) and is printed on it; sub-cards (build categories, powers, formations) stack,
+// Esc steps back one. Hovering shows the tooltip panel above the card, led by a
 // plain-words description of what the building or unit does. Sell arms on the first press and sells on
 // the second within SELL.confirmMs (Shift sells at once).
 
@@ -14,7 +15,7 @@ import { canSell, sellRefund } from "../../engine/sell";
 import { portraitCanvas } from "../../render/portraits";
 import type { HudInfo } from "../hud";
 import { playUiSound } from "../uiSound";
-import { GRID_CODES, GRID_KEYS, cardSlots, rootCard, type CardId, type Cmd, type SlotAction, type SubCard } from "./cards";
+import { BUILD_CATEGORIES, assignKeys, cardSlots, categoryOf, rootCard, type BuildCategory, type CardId, type Cmd, type SlotAction, type SubCard } from "./cards";
 import type { HudControls } from "./controls";
 import { glyph, icon } from "./glyphs";
 import { pct, setClass, setDisabled, setStyle, setText } from "./domWrite";
@@ -23,8 +24,10 @@ import { pct, setClass, setDisabled, setStyle, setText } from "./domWrite";
 const SHORT: Partial<Record<string, string>> = {
   powerPlant: "Power", refinery: "Refinery", barracks: "Barracks", warFactory: "Factory", lab: "Lab",
   pillbox: "Pillbox", turret: "Turret", antiArmorCannon: "AT Gun", missileTower: "Missiles",
-  wall: "Wall", gate: "Gate", constructionYard: "Yard",
+  wall: "Wall", gate: "Gate", constructionYard: "Yard", resonanceTap: "Res. Tap",
 };
+// The icon on each build-category button.
+const CATEGORY_ICON: Record<BuildCategory, "refinery" | "barracks" | "turret" | "wall"> = { economy: "refinery", production: "barracks", defense: "turret", walls: "wall" };
 const POWER_SHORT: Record<string, string> = { artillery: "Artillery", reinforcements: "Reinforce", frenzy: "Frenzy", repair: "Repair", ion: "Ion" };
 const CMD_INFO: Record<Cmd, { label: string; tip: string }> = {
   attack: { label: "Attack", tip: "Attack-move: click a destination — the units fight anything they meet on the way. (Ctrl + right-click does the same.)" },
@@ -41,7 +44,8 @@ interface Live { enabled: boolean; reason: string; active: boolean; cost: string
 export class CommandCard {
   private slots: Slot[] = [];
   private actions: (SlotAction | null)[] = new Array(15).fill(null);
-  private sub: SubCard | null = null;
+  private stack: SubCard[] = []; // open sub-cards, innermost last (Esc pops one)
+  private keys: (string | null)[] = new Array(15).fill(null);
   private rootSig = "";
   private sig = "";
   private hover = -1;
@@ -62,7 +66,6 @@ export class CommandCard {
       el.className = "cg-btn hud-chamfer-sm empty";
       const mk = (c: string): HTMLElement => { const s = document.createElement("span"); s.className = c; el.append(s); return s; };
       const slot: Slot = { el, icon: mk("cg-icon"), wipe: mk("cg-wipe"), key: mk("cg-key"), count: mk("cg-count"), label: mk("cg-label"), cost: mk("cg-cost") };
-      slot.key.textContent = GRID_KEYS[i];
       el.addEventListener("click", (e) => this.activate(i, e.shiftKey));
       el.addEventListener("mouseenter", () => { this.hover = i; this.renderTip(); this.preview(i, true); });
       el.addEventListener("mouseleave", () => { if (this.hover === i) this.hover = -1; this.tip.hidden = true; this.preview(i, false); });
@@ -74,7 +77,7 @@ export class CommandCard {
   bind(c: HudControls): void { this.ctrl = c; }
 
   /** The card currently shown (for tests/screenshots and the HUD title). */
-  get card(): CardId { return this.sub ?? (this.info ? rootCard(this.info.selection, this.info.selectedBuilding, this.info.placementType) : "build"); }
+  get card(): CardId { return this.stack[this.stack.length - 1] ?? (this.info ? rootCard(this.info.selection, this.info.selectedBuilding, this.info.placementType) : "build"); }
 
   update(state: GameState, info: HudInfo): void {
     this.state = state;
@@ -82,21 +85,26 @@ export class CommandCard {
     const b = info.selectedBuilding;
     const root = rootCard(info.selection, b, info.placementType);
     const rootSig = `${root}:${b?.id ?? ""}:${b?.buildProgress === 1 ? 1 : 0}:${root === "army" ? info.formationOptions.map((o) => o.id).join(",") : ""}`;
-    if (rootSig !== this.rootSig) { this.rootSig = rootSig; this.sub = null; }
-    const card: CardId = this.sub ?? root;
+    if (rootSig !== this.rootSig) { this.rootSig = rootSig; this.stack = []; }
+    // While placing, the placed structure's category card shows (with it highlighted).
+    const placingCat = info.placementType ? categoryOf(info.placementType) : null;
+    const card: CardId = placingCat ? `cat:${placingCat}` : this.stack[this.stack.length - 1] ?? root;
     this.actions = cardSlots(card, { building: b, formations: info.formationOptions });
+    // Keys follow the resting label: an armed Sell reads "Confirm" but keeps its key for the second press.
+    this.keys = assignKeys(this.actions, (a) => (a.kind === "sell" && this.sellArmed ? ((b?.buildProgress ?? 1) < 1 ? "Cancel" : "Sell") : this.labelOf(a)));
     if (this.sellArmed && (this.sellArmed.id !== b?.id || performance.now() - this.sellArmed.at > SELL.confirmMs)) this.sellArmed = null;
-    const sig = `${card}|${rootSig}|${this.player()?.commander ?? ""}|${this.sellArmed ? "armed" : ""}`;
+    const sig = `${card}|${rootSig}|${this.player()?.commander ?? ""}|${this.sellArmed ? "armed" : ""}|${this.keys.join(",")}`;
     if (sig !== this.sig) { this.sig = sig; this.rebuild(); }
     for (let i = 0; i < 15; i++) this.refresh(i);
     if (this.hover >= 0) this.renderTip();
   }
 
-  /** Grid / Esc keys. Returns true when the key was consumed. */
+  /** A button's letter (by the character typed, so it follows the keyboard layout) or Esc to step
+   *  back out of a sub-card. Returns true when the key was consumed. */
   handleKey(e: KeyboardEvent): boolean {
-    if (e.code === "Escape" && this.sub) { this.sub = null; this.sig = ""; return true; }
-    if (e.ctrlKey || e.metaKey || e.altKey) return false;
-    const i = (GRID_CODES as readonly string[]).indexOf(e.code);
+    if (e.code === "Escape" && this.stack.length > 0 && !this.info?.placementType) { this.stack.pop(); this.sig = ""; return true; }
+    if (e.ctrlKey || e.metaKey || e.altKey || e.key.length !== 1) return false;
+    const i = this.keys.indexOf(e.key.toUpperCase());
     if (i < 0 || !this.actions[i]) return false;
     this.activate(i, e.shiftKey, true);
     return true;
@@ -112,7 +120,8 @@ export class CommandCard {
       s.el.classList.toggle("empty", !a);
       s.icon.replaceChildren();
       s.label.textContent = a ? this.labelOf(a) : "";
-      s.key.hidden = !a;
+      s.key.textContent = this.keys[i] ?? "";
+      s.key.hidden = !a || !this.keys[i];
       if (a) { const c = this.iconOf(a); if (c) s.icon.append(c); }
     });
   }
@@ -140,7 +149,7 @@ export class CommandCard {
       case "cmd": return CMD_INFO[a.cmd].label;
       case "ability": return p?.commander ? COMMANDER_INFO[p.commander].abilityName : "Ability";
       case "power": return POWER_SHORT[a.key] ?? POWER_INFO[a.key]?.label ?? a.key;
-      case "open": return a.sub === "powers" ? "Powers" : a.sub === "structures" ? "Build" : "More…";
+      case "open": return a.sub === "powers" ? "Powers" : a.sub === "structures" ? "Build" : a.sub.startsWith("cat:") ? BUILD_CATEGORIES[a.sub.slice(4) as BuildCategory].label : "More…";
       case "research": return "Research";
       case "sell": return this.sellArmed ? "Confirm" : (this.info?.selectedBuilding?.buildProgress ?? 1) < 1 ? "Cancel" : "Sell";
       case "back": return "Back";
@@ -162,7 +171,11 @@ export class CommandCard {
         return c;
       }
       case "power": return icon(a.key === "artillery" ? "artillery_power" : (a.key as "reinforcements"), 28);
-      case "open": return a.sub === "powers" ? icon("citadel", 28, HUD.ENERGY) : a.sub === "structures" ? glyph("build", 26) : glyph("more", 26);
+      case "open":
+        if (a.sub === "powers") return icon("citadel", 28, HUD.ENERGY);
+        if (a.sub === "structures") return glyph("build", 26);
+        if (a.sub.startsWith("cat:")) return icon(CATEGORY_ICON[a.sub.slice(4) as BuildCategory], 30);
+        return glyph("more", 26);
       case "research": return icon("flask", 28);
       case "sell": return glyph("sell", 26, HUD.TRIM_GOLD);
       case "back": return glyph("back", 26);
@@ -217,6 +230,10 @@ export class CommandCard {
       }
       case "open":
         if (a.sub === "powers") { out.cost = String(Math.floor(p.commandEnergy)); out.costKind = "energy"; }
+        if (a.sub.startsWith("cat:")) { // how many of the category you can place right now
+          const n = BUILD_CATEGORIES[a.sub.slice(4) as BuildCategory].items.filter((t) => buildAvailability(st, this.local, t).ok).length;
+          out.count = n > 0 ? String(n) : "";
+        }
         break;
       case "sell": {
         const b = info.selectedBuilding;
@@ -247,8 +264,8 @@ export class CommandCard {
       case "ability": c.activateAbility(); break;
       case "power": c.activatePower(a.key); break;
       case "research": this.openResearch(); break;
-      case "open": this.sub = a.sub; this.sig = ""; break;
-      case "back": this.sub = null; this.sig = ""; break;
+      case "open": this.stack.push(a.sub); this.sig = ""; break;
+      case "back": this.stack.pop(); this.sig = ""; break;
       case "cmd":
         if (a.cmd === "attack") c.enterAttackMove();
         else if (a.cmd === "stop") c.stopSelected();
@@ -258,7 +275,7 @@ export class CommandCard {
         else c.enterRallyMode();
         break;
     }
-    if (a.kind === "power" || a.kind === "ability") this.sub = null; // a power fired → back to the root card
+    if (a.kind === "power" || a.kind === "ability") this.stack = []; // a power fired → back to the root card
   }
 
   /** First press arms (the button turns into "Confirm"); a second press within SELL.confirmMs — or a
@@ -318,8 +335,17 @@ export class CommandCard {
       case "cmd": lines.push(CMD_INFO[a.cmd].tip); break;
       case "ability": if (p.commander) { const ab = COMMANDERS[p.commander].ability; lines.push(abilityText(ab), `<span class="dim">${abilityCooldownText(ab)}</span>`); } break;
       case "power": lines.push(POWER_INFO[a.key]?.tooltip ?? "", `Costs <b class="energy">${CITADEL_POWERS[a.key].energy}</b> Command Energy`); break;
-      case "open": lines.push(a.sub === "powers" ? "Citadel powers — hold the Citadel to charge Command Energy."
-        : a.sub === "structures" ? "Choose a structure to build. Your Workers go and put it up." : "Your custom formations."); break;
+      case "open":
+        if (a.sub.startsWith("cat:")) {
+          const c = BUILD_CATEGORIES[a.sub.slice(4) as BuildCategory];
+          lines.push(`<span class="ct-desc">${c.tip}</span>`);
+          for (const t of c.items) {
+            const av = buildAvailability(this.state, this.local, t);
+            lines.push(`${BUILDING_LABEL[t]} <b class="gold">${BUILDING_STATS[t].gold}</b>${av.ok ? "" : ` <span class="dim">· ${av.reason}</span>`}`);
+          }
+        } else lines.push(a.sub === "powers" ? "Citadel powers — hold the Citadel to charge Command Energy."
+          : a.sub === "structures" ? "Choose a structure to build. Your Workers go and put it up." : "Your custom formations.");
+        break;
       case "research": lines.push("Open the research tree."); break;
       case "sell": {
         const b = this.info?.selectedBuilding;
@@ -337,7 +363,7 @@ export class CommandCard {
       case "back": lines.push("Back to the main card (Esc)."); break;
     }
     if (!l.enabled && l.reason) lines.push(`<span class="bad">${l.reason}</span>`);
-    this.tip.innerHTML = `<div class="ct-head"><span class="ct-title">${title}</span><span class="ct-key">${GRID_KEYS[this.hover]}</span></div>` +
+    this.tip.innerHTML = `<div class="ct-head"><span class="ct-title">${title}</span><span class="ct-key">${this.keys[this.hover] ?? ""}</span></div>` +
       lines.filter(Boolean).map((t) => `<div class="ct-line">${t}</div>`).join("");
     this.tip.hidden = false;
   }

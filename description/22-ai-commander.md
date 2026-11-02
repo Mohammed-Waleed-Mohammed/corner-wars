@@ -198,6 +198,19 @@ Research queue built from weighted needs, spend limited by the personality tech 
 - Combat Stims once medics ≥ 3.
 - TECHER personality doubles all tech weights and beelines one full line (Weapons II) before army pushes.
 
+**v5 (file 32):**
+- **Chains:** the tree has more prerequisites now, so each wanted research walks back to the first missing step of its chain (wanting Deep Resonance queues Mining II first). Vehicles research waits for a finished War Factory (`hasResearchBuilding`).
+- **Reinforced Structures:** Turtles want it from the start, everyone else once income >35/s.
+- **Late economy:** the AI wants Resonance Tapping, then Deep Resonance, in any of these cases:
+  - after 12 minutes (`RESONANCE_AFTER_S`);
+  - after 8 minutes, once the gold it mines is below 35% (`RESONANCE_MIN_S`, `RESONANCE_MINED_LEFT`);
+  - when income >35/s.
+- **Saving up:** in the first two cases, `saveFor` (set at the start of the operational pass) holds back the price of the next Resonance research (while the Lab is idle), or of a Tap, plus `RESONANCE_SAVE_SLACK`:
+  - Unit training, extra Barracks and wall/tower spending only use gold above it.
+  - That one research skips the personality budget fraction.
+  - DEFEND, RECOVER and ALL_IN ignore the reserve.
+- **Taps:** built up to the limit (4). If spare power can't cover another −60 (Taps under construction count), a Power Plant goes down first.
+
 ## I. Military production & counter-composition (Operational)
 
 Maintain a **desired composition** and queue whatever is most under its ratio:
