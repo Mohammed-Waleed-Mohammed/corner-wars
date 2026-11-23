@@ -59,6 +59,8 @@ export class Match {
   samples: Sample[][] = [[], [], [], []];
   /** Scenario hook run every tick before the AI (e.g. a scripted opponent's orders). */
   onTick?: (m: Match) => void;
+  /** More per-tick hooks, run in order after `onTick` (the puppets of puppets.ts attach here). */
+  tickHooks: ((m: Match) => void)[] = [];
   private lastSample = -1;
   /** Every AI log line of the match, per player (the Commander keeps only a ring of 50). */
   fullLog: string[][] = [[], [], [], []];
@@ -97,6 +99,7 @@ export class Match {
     const s = this.state;
     if (s.winner !== null) return;
     this.onTick?.(this);
+    for (const h of this.tickHooks) h(this);
     runAI(s, SIM_DT, (c) => this.submit(c));
     if (this.pending.length > 1) this.pending.sort((a, b) => (a.playerId - b.playerId) || (a.seq - b.seq));
     const cmds = this.pending;

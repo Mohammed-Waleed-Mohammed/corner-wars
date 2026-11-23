@@ -852,5 +852,24 @@ War-craft scenarios (§W). The scripted opponents are harness puppets that behav
 | **camp.comeback** | the AI starts 40 % behind in army and income | it doesn't lose its army in a bad fight; it raids, consolidates, and survives ≥ 10 min |
 | **read.profile** | puppets with known response time, chase distance and route | the profile measures each within 25 % after PROFILE_MIN_SAMPLES |
 
+**The puppets** (`src/dev/aisim/puppets.ts`). `attachPuppet(match, pid, behaviour, opts)` puts a
+scripted controller on an idle seat and returns a handle with its measurements. Every `every` ticks
+(0.5 s) it reads the real state (it may cheat: it is a fixture) and acts only through `Match.order`,
+the command path players use; it has no economy unless a `scriptedEconomy` gives it one, and
+`tough: true` makes its yard unkillable. The behaviours: **chaser** (locks the nearest enemy unit it
+sees and pursues it without limit, into forests and past towers; `maxPursuit`), **overResponder**
+(whole army to any intrusion within R of its buildings or mines, home when clear; each incident's
+response time and value ratio), **routeAttacker** (a wave every T s along one fixed waypoint route;
+the route and each wave's trail), **watcher** (sentries by the enemy base and a shadow on its army;
+`armyAge()` = how old its view of the enemy army is), **standLine** (FORM_UP Line at a point, then
+stands; drift), **bait** (a bait fights `fightS` s, retreats along waypoints past a forest where an
+ambush waits on HOLD; the spring, the kill zone's entrants and their losses; a `holdFire` hook takes the
+§W.6 order when it exists), **idleArmy** (the baseline), **committer** (whole army at their base at T,
+and stays), **scriptedEconomy** (gold per second, fixed or a factor × another seat's real income,
+optionally spent on units at its yard) and **fightEachOther** (two puppets attack each other's army at
+T, for FFA tests). All are deterministic. The `puppet.*` scenarios check each puppet itself (and that
+puppet matches replay to identical checksums), so a war-craft scenario that fails is the AI's fault,
+not the fixture's.
+
 Regression targets after every step: all 42 scenarios of 33 §T; `war.vsMedium` ≥ 2 of 3 (it is 3 of 3
 today); `war.ffa` ≥ 2 of 3; `det`; `npm run build`; a browser check of a skirmish with the F5 overlay.
