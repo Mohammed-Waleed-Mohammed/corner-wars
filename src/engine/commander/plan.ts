@@ -12,6 +12,7 @@ import type { ReqCat } from "./budget";
 import { aiLog, type Ctx } from "./commander";
 import { isResearched } from "../../state/upgrades";
 import { councilOf, PUSHING, strikeRead } from "./reports";
+import { needMul, strategyLean } from "./estimate";
 
 export type PhaseExit =
   | { kind: "workers"; n: number } | { kind: "refineries"; n: number } | { kind: "army"; value: number }
@@ -75,7 +76,7 @@ export function planOf(ctx: Ctx): { phase: PlanPhase; index: number; plan: PlanP
 /** The priority lean of the current phase for a petition category (0 outside a plan / Medium). */
 export function leanFor(ctx: Ctx, cat: ReqCat): number {
   if (!ctx.tier.fullAdaptation) return 0;
-  return planOf(ctx).phase.lean[cat] ?? 0;
+  return (planOf(ctx).phase.lean[cat] ?? 0) + strategyLean(ctx, cat); // 34 §M.2 the strategy leans too
 }
 
 /** Strategic tick, after the stance table (34 §C.2): advance the plan, apply its postures, launch its
@@ -112,7 +113,8 @@ export function runPlan(ctx: Ctx, myArmy: number): void {
   }
 
   // postures: the phase decides whether the King may take the field
-  if ((cs.stance === "PRESSURE" || cs.stance === "ALL_IN") && !phase.postures.includes(cs.stance) && cs.allInWhy !== "cap") {
+  if ((cs.stance === "PRESSURE" || cs.stance === "ALL_IN") && !phase.postures.includes(cs.stance) &&
+      cs.allInWhy !== "cap" && cs.allInWhy !== "counter" && cs.allInWhy !== "thirdparty") { // 34 §M.6 windows outrank the phase
     cs.stance = "BUILD_UP";
   }
 
@@ -123,7 +125,8 @@ export function runPlan(ctx: Ctx, myArmy: number): void {
     const due = state.time >= by;
     if (myArmy >= phase.strike.value || due) {
       const read = strikeRead(ctx, target, myArmy);
-      if (read.odds >= pers.strikeOdds) {
+      const nerve = +(pers.strikeOdds * needMul(ctx)).toFixed(2); // 34 §M.2 the grand strategy's nerve
+      if (read.odds >= nerve) {
         if (cs.stance !== "ALL_IN") {
           cs.stance = "ALL_IN";
           cs.allInWhy = "plan";
@@ -131,11 +134,11 @@ export function runPlan(ctx: Ctx, myArmy: number): void {
         }
         if (!st.strikeLogged) {
           st.strikeLogged = true;
-          aiLog(cs, t, "S", `[King] timing strike on P${target}: army ${myArmy | 0}${myArmy >= phase.strike.value ? ` ≥ ${phase.strike.value}` : `, deadline ${by | 0} s`}, odds ${read.odds.toFixed(2)} ≥ nerve ${pers.strikeOdds}`);
+          aiLog(cs, t, "S", `[King] timing strike on P${target}: army ${myArmy | 0}${myArmy >= phase.strike.value ? ` ≥ ${phase.strike.value}` : `, deadline ${by | 0} s`}, odds ${read.odds.toFixed(2)} ≥ nerve ${nerve}`);
         }
       } else if (due) {
         // the timing is missed: drop the strike and let the stance table run the war (CONTROL)
-        aiLog(cs, t, "S", `[King] timing missed: ${myArmy | 0}/${phase.strike.value} at ${(state.time / 60).toFixed(1)} min, odds ${read.odds.toFixed(2)} < ${pers.strikeOdds} (believed ${read.believed | 0}) → ${plan[Math.min(plan.length - 1, st.phase + 1)].name}`);
+        aiLog(cs, t, "S", `[King] timing missed: ${myArmy | 0}/${phase.strike.value} at ${(state.time / 60).toFixed(1)} min, odds ${read.odds.toFixed(2)} < ${nerve} (believed ${read.believed | 0}) → ${plan[Math.min(plan.length - 1, st.phase + 1)].name}`);
         st.phase = Math.min(plan.length - 1, st.phase + 1);
         st.since = t;
         st.paused = 0;

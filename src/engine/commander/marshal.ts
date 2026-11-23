@@ -19,6 +19,8 @@ import { defenseAnchor, runHomeGuard } from "./warden";
 import { ask, homeRadius, strikeRead, veto } from "./reports";
 import { opReady, runLeash, siegeHolds, watchFeint } from "./operations";
 import { runStandoff } from "./standoff";
+import { econVictimMul, needMul, raidRest } from "./estimate";
+import { runAAR } from "./aar";
 
 export function runMarshal(ctx: Ctx): void {
   const { cs } = ctx;
@@ -38,6 +40,7 @@ export function runMarshal(ctx: Ctx): void {
   const home0 = baseCenter(ctx.state, ctx.pid);
   if (home0) runLeash(ctx, home0, homeRadius(ctx)); // 34 §W.5 defenders on a leash
   watchFeint(ctx); // 34 §W.4 did the feint draw them?
+  runAAR(ctx); // 34 §M.11 follow every fight; record the ones worth recording
 }
 
 /** §K v2 finishing blow: a hostile player's LAST yard, badly damaged, close to this squad. Losing it
@@ -209,7 +212,10 @@ function runMainArmy(ctx: Ctx, s: Squad): void {
       // launch on discounted odds (assume defenders I can't see).
       const age = staleness(state, ctx.intel, objective.x, objective.y);
       let stale = false;
-      if (age > COMMANDER.ATTACK_INTEL_TICKS && fighters.length >= COMMANDER.ATTACK_MIN_UNITS) {
+      // (a counter-punch or a third party's strike has no time to look first: the window is short, and
+      // their army was just seen dying)
+      const hurry = cs.stance === "ALL_IN" && (cs.allInWhy === "counter" || cs.allInWhy === "thirdparty");
+      if (age > COMMANDER.ATTACK_INTEL_TICKS && fighters.length >= COMMANDER.ATTACK_MIN_UNITS && !hurry) {
         const req = cs.scoutRequest;
         if (!req || dist(req, objective) > 6 || state.tick - req.tick > 2 * COMMANDER.ATTACK_INTEL_WAIT_TICKS) {
           cs.scoutRequest = { x: objective.x, y: objective.y, tick: state.tick };
@@ -236,9 +242,11 @@ function runMainArmy(ctx: Ctx, s: Squad): void {
       const proj = Math.min(beliefOdds, projectedOdds(state, pid, fighters, target, objective) * (stale ? COMMANDER.STALE_INTEL_DISCOUNT : 1));
       // 34 §E.2 no coin flips: a decisive ALL_IN launches at the King's nerve, except in the windows that
       // really are decisive (a crippled target; at the unit cap, where units I can't add are worth spending)
-      const need = cs.stance === "ALL_IN"
-        ? (cs.allInWhy === "crippled" || cs.allInWhy === "cap" ? COMMANDER.FIGHT_ODDS : pers.strikeOdds)
-        : +(1 + (pers.attackRatio - 1) * COMMANDER.ATTACK_ODDS_SCALE).toFixed(2);
+      // 34 §M.6 the counter-punch and the third party's chance are windows too; 34 §M.2 the grand
+      // strategy scales every other launch (attrition takes only good trades, a decisive battle less)
+      const windowed = cs.stance === "ALL_IN" && (cs.allInWhy === "crippled" || cs.allInWhy === "cap" || cs.allInWhy === "counter" || cs.allInWhy === "thirdparty");
+      const need = windowed ? COMMANDER.FIGHT_ODDS
+        : +((cs.stance === "ALL_IN" ? pers.strikeOdds : 1 + (pers.attackRatio - 1) * COMMANDER.ATTACK_ODDS_SCALE) * needMul(ctx)).toFixed(2);
       // 34 §E.1 no strike on a guess: a close call on low confidence asks the Spymaster for a look at
       // their main (where an unlocated army is assumed to be). It doesn't block: look-before-you-leap
       // above already waited for a look at the objective, and the odds are read against the estimate,
@@ -447,6 +455,7 @@ function pickVictim(ctx: Ctx, target: PlayerId, from: Vec2): Building | null {
     if (b.buildingType === "wall" || b.buildingType === "gate") continue;
     let w = W[b.buildingType] ?? (DEFENSE_STATS[b.buildingType] ? W.defense : W.other);
     if (b.buildingType === "powerPlant" && b.buildProgress >= 1 && tp.powerProduced - b.powerProduced < tp.powerUsed) w += W.POWER_CRIPPLE;
+    if (b.buildingType === "refinery" || b.buildingType === "resonanceTap") w *= econVictimMul(ctx); // 34 §M.2 strangulation
     const hpFrac = b.hp / b.maxHp;
     if (b.buildingType === "constructionYard" && yards === 1) w *= 1 + (1 - hpFrac) * 2;
     const c = centerOf(b);
@@ -474,7 +483,7 @@ function runRaid(ctx: Ctx, s: Squad): void {
       cmd(ctx, "MOVE", { unitIds: s.unitIds, x: home.x, y: home.y, spread: false });
       s.mission = "flee";
       const [lo, hi] = COMMANDER.RAID_INTERVAL_TICKS;
-      s.timer = state.tick + lo + Math.floor(rng() * (hi - lo)); // seeded jitter
+      s.timer = state.tick + Math.round((lo + Math.floor(rng() * (hi - lo))) * raidRest(ctx)); // seeded jitter (34 §M.2: strangling raids more)
     }
     return;
   }
@@ -505,7 +514,7 @@ function runRaid(ctx: Ctx, s: Squad): void {
   s.objective = spot;
   s.lastSpot = { x: spot.x, y: spot.y };
   const [lo, hi] = COMMANDER.RAID_INTERVAL_TICKS;
-  s.timer = state.tick + lo + Math.floor(rng() * (hi - lo));
+  s.timer = state.tick + Math.round((lo + Math.floor(rng() * (hi - lo))) * raidRest(ctx));
   aiLog(cs, state.tick, "T", `raid → P${target} workers`);
 }
 

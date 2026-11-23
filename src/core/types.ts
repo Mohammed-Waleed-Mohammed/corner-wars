@@ -387,6 +387,7 @@ export interface AISquad {
   stageLogTick?: number; // 33 dev: last time a held launch logged its reason
   chaseWatch?: { from: Vec2; enemy: PlayerId | null; max: number }; // 34 §W.3 measuring a pursuit of this squad
   leashLogTick?: number; // 34 §W.5 last leash log
+  tried?: { x: number; y: number; tick: number }[]; // 34 §M.8 scout: trips that ended without a look (chased off, or nothing in sight) — left alone a while
   standoff?: { since: number; step: number; stepAt: number; v0: number; f0: number; cycles: number; lastMission: string; facedAt?: number }; // 34 §W.8
   trickleLogTick?: number; // 34 §W.9 last "reinforcements wait" log
   shellTick?: number; // 34 §W.9 last answer to shelling
@@ -441,8 +442,9 @@ export interface CommanderState {
   council?: CouncilState; // 34: reports, rulings
   opsOff?: boolean; // dev harness only: operations + counter-craft off (op.* ablation)
   standoffOff?: boolean; // dev harness only: the standoff ladder alone off (standoff.* ablation)
+  campOff?: boolean; // dev harness only: the campaign layer off — estimate, strategies, windows, FFA politics (camp.* ablation)
   manualOff?: boolean; // dev harness only: switch the captains' manual off (craft.* ablation)
-  allInWhy?: "crippled" | "away" | "cap" | "plan"; // 34 §E.2: which window opened the ALL_IN (sets the launch odds)
+  allInWhy?: "crippled" | "away" | "cap" | "plan" | "counter" | "thirdparty"; // 34 §E.2: which window opened the ALL_IN (sets the launch odds)
   projects?: AIExpansion[]; // 33 §C.4: running expansion projects
   hits?: { x: number; y: number; w: number; tick: number }[]; // 33 §E.4: where my territory was attacked (decaying weight)
   danger?: number; // 33 §E.1: danger D ∈ [0, 1] from the last operational tick
@@ -502,6 +504,47 @@ export interface CouncilState {
   lastOpTick?: number; // when a non-direct operation was last chosen
   /** 34 §C.2 the grand plan: phase index, when it began, ticks paused by emergencies, the strike launch */
   plan?: { phase: number; since: number; paused: number; pauseStart?: number; launched?: number; strikeLogged?: boolean };
+  campaign?: CampaignState; // 34 §M the King's campaign: estimate, grand strategy, windows, FFA politics
+  battles?: OpenBattle[]; // 34 §M.11 fights in progress (one per squad)
+  aar?: BattleRecord[]; // 34 §M.11 after-action records, ring of CAMPAIGN.AAR_KEEP
+}
+
+/** 34 §M.2 the grand strategy ("plan" = the character's opening book runs unmodified). */
+export type GrandStrategy = "plan" | "decisive" | "attrition" | "strangulation" | "fortress" | "opportunism" | "comeback";
+/** 34 §M.6 a window: an opening with a closing time that the King and the Marshal act on. */
+export interface CampaignWindow { kind: "counter" | "mySpike" | "theirSpike" | "thirdparty"; on: PlayerId | null; open: number; close: number; why: string; taken?: boolean }
+/** 34 §M.1 the situation estimate against one enemy: each measure is mine ÷ theirs (tech is a difference). */
+export interface SituationEstimate {
+  tick: number; vs: PlayerId | null;
+  worth: number; income: number; army: number; trade: number; tech: number; map: number;
+  time: "me" | "them" | "even"; // who a long war favours
+}
+export interface CampaignState {
+  strategy: GrandStrategy;
+  since: number; // tick the strategy was taken
+  cand?: GrandStrategy; // a different strategy the estimate points at, held since candSince (hysteresis)
+  candSince?: number;
+  est?: SituationEstimate;
+  lastLog?: number;
+  windows: CampaignWindow[];
+  /** a defense in progress: who attacked, and their army's known value when it began */
+  defense?: { start: number; from: PlayerId; theirStart: number; lastThreat: number };
+  /** two enemies seen fighting each other (FFA): their known values when it began */
+  brawl?: { a: PlayerId; b: PlayerId; start: number; lastSeen: number; aStart: number; bStart: number };
+  leader?: PlayerId | null;
+  spikes?: { weapons: number; armor: number; heavy: boolean; theirLab: Partial<Record<number, boolean>> };
+  /** per enemy: the income their army's growth between good looks proved, decaying; the last look */
+  incomeFloor?: Partial<Record<number, { v: number; tick: number; lookTick?: number; lookKnown?: number }>>;
+}
+/** 34 §M.11 a fight in progress for one squad: every unit's worth when it joined (enemy worth last seen). */
+export interface OpenBattle {
+  squad: number; role: string; start: number; last: number; at: Vec2; op: string; ground: string;
+  mine: Record<number, number>; theirs: Record<number, number>; theirLast: Record<number, number>; foeValue: Partial<Record<number, number>>;
+}
+export interface BattleRecord {
+  start: number; end: number; at: Vec2; squad: string; ground: string; op: string;
+  mine: number; theirs: number; lost: number; killed: number; foe: PlayerId | null;
+  read: number; held: boolean; // the odds of the forces that fought (√ mine ÷ theirs), and whether the result matched them
 }
 
 /** 33 §B.1 — one enemy as this AI believes it to be (built only from its own perception). */

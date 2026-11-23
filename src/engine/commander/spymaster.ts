@@ -240,8 +240,18 @@ export function runScout(ctx: Ctx): void {
   const interval = Math.round(COMMANDER.SCOUT_INTERVAL_TICKS * tier.cadenceMult);
 
   const contact = contactPoint(state, pid, s.unitIds);
-  if (contact && squadOdds(state, pid, [u], contact) < COMMANDER.SCOUT_FLEE_ODDS) {
+  // 34 §M.8 the dash: a guard in front of a base would chase a scout off before it ever sees the base —
+  // a healthy scout this close to the point it came to see goes in for the look first, then runs
+  const dash = s.mission === "scouting" && !!s.objective && dist(u, s.objective) <= COMMANDER.SCOUT_DASH_DIST &&
+    u.hp >= u.maxHp * COMMANDER.SCOUT_DASH_HP && staleness(state, intel, s.objective.x, s.objective.y) > 0;
+  if (contact && !dash && squadOdds(state, pid, [u], contact) < COMMANDER.SCOUT_FLEE_ODDS) {
     if (s.mission !== "flee" && home) {
+      // 34 §M.8 a trip I was chased off: that point stays unseen, so it would win every next pick and
+      // the scout would run into the same guard forever — leave it for a while, look elsewhere
+      if (s.mission === "scouting" && s.objective) {
+        s.tried = (s.tried ?? []).filter((c) => state.tick - c.tick < COMMANDER.SCOUT_TRIED_TICKS);
+        s.tried.push({ x: s.objective.x, y: s.objective.y, tick: state.tick });
+      }
       cmd(ctx, "MOVE", { unitIds: s.unitIds, x: home.x, y: home.y, spread: false });
       s.mission = "flee";
       s.objective = home;
@@ -252,8 +262,24 @@ export function runScout(ctx: Ctx): void {
   // §K v3: the main army wants a fresh look at its push objective — that trip jumps the queue.
   const req = cs.scoutRequest;
   if (req && staleness(state, intel, req.x, req.y) < COMMANDER.SCOUT_STALE_TICKS / 4) cs.scoutRequest = undefined; // looked
-  const urgent = cs.scoutRequest && state.tick - cs.scoutRequest.tick < 2 * COMMANDER.ATTACK_INTEL_WAIT_TICKS
+  let urgent = cs.scoutRequest && state.tick - cs.scoutRequest.tick < 2 * COMMANDER.ATTACK_INTEL_WAIT_TICKS
     ? cs.scoutRequest : undefined;
+  // 34 §M.3/§M.9 every enemy gets a first look: an FFA King who has never seen a seat can't tell a
+  // runaway leader from a weakling. A never-seen home goes before a repeat look for the push (the push
+  // target itself was seen, or it is the never-seen home)
+  if (s.mission !== "flee" && s.mission !== "scouting") {
+    const chased = (s.tried ?? []).filter((c) => state.tick - c.tick < COMMANDER.SCOUT_TRIED_TICKS);
+    const unseen = livingEnemies(state, pid)
+      .map((e) => cs.beliefs?.enemies[e]?.home ?? baseCenter(state, e))
+      .filter((h): h is Vec2 => !!h && !Number.isFinite(staleness(state, intel, h.x, h.y)) && !chased.some((c) => dist(c, h) <= COMMANDER.INTEL.PEEK_DIST + 6))
+      .sort((a, b) => dist(u, a) - dist(u, b));
+    if (unseen.length && (!urgent || Number.isFinite(staleness(state, intel, urgent.x, urgent.y)))) {
+      const h = unseen[0];
+      const d = home ? dist(home, h) || 1 : 1;
+      const k = home ? Math.min(1, COMMANDER.INTEL.FIRST_LOOK_DIST / d) : 0;
+      urgent = { x: h.x + ((home?.x ?? h.x) - h.x) * k, y: h.y + ((home?.y ?? h.y) - h.y) * k, tick: state.tick };
+    }
+  }
   if (urgent && s.mission !== "flee" && (!s.objective || dist(s.objective, urgent) > COMMANDER.SCOUT_ARRIVE || s.mission !== "scouting")) {
     const to = nearestPassableTile(state, urgent.x, urgent.y);
     cmd(ctx, "MOVE", { unitIds: s.unitIds, x: to.x, y: to.y, spread: false });
@@ -266,6 +292,10 @@ export function runScout(ctx: Ctx): void {
   if (s.mission === "scouting" && s.objective) {
     if (dist(u, s.objective) > COMMANDER.SCOUT_ARRIVE && u.moveTarget) return; // still on the way
     s.mission = "idle"; // arrived (or the move ended) — the look is taken, pick the next point
+    // (a trip that saw nothing new — the point is out of sight from where I could stand — is set aside
+    // like a chased-off one, or the same unseeable point would win every next pick)
+    s.tried = (s.tried ?? []).filter((c) => state.tick - c.tick < COMMANDER.SCOUT_TRIED_TICKS);
+    s.tried.push({ x: s.objective.x, y: s.objective.y, tick: state.tick });
   }
   if (state.tick < s.timer) return;
 
@@ -286,9 +316,12 @@ export function runScout(ctx: Ctx): void {
   pois.push({ at: { x: state.citadel.x, y: state.citadel.y }, imp: 1, owner: null });
 
   let best: { at: Vec2; imp: number; owner: PlayerId | null } | null = null, bs = -Infinity;
+  const chased = (s.tried ?? []).filter((c) => state.tick - c.tick < COMMANDER.SCOUT_TRIED_TICKS);
   for (const poi of pois) {
     const age = staleness(state, intel, poi.at.x, poi.at.y);
     if (age < COMMANDER.SCOUT_STALE_TICKS) continue;
+    // (the peek point of a POI lies up to PEEK_DIST short of it: compare against that reach)
+    if (chased.some((c) => dist(c, poi.at) <= COMMANDER.INTEL.PEEK_DIST + 6)) continue;
     const score = (Number.isFinite(age) ? Math.min(age, 20000) : 20000) * poi.imp - dist(u, poi.at) * 10;
     if (score > bs) { bs = score; best = poi; }
   }

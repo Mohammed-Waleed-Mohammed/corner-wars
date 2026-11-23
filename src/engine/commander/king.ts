@@ -12,6 +12,7 @@ import { aiLog, type Ctx } from "./commander";
 import { updateBeliefs } from "./spymaster";
 import { ask, strikeRead, veto } from "./reports";
 import { runPlan } from "./plan";
+import { leaderTarget, pressMul, runCampaign, stayOut, strikeWindow } from "./estimate";
 
 const HIST_KEEP_TICKS = 1800;
 
@@ -39,6 +40,7 @@ export function runKing(ctx: Ctx): void {
   const aggressor = biggestThreatPlayer(state, pid);
   if (aggressor != null) cs.grudges[aggressor] = t;
 
+  runCampaign(ctx, myArmy); // 34 §M the estimate, the grand strategy, windows, FFA politics
   pickTarget(ctx, enemies, t);
 
   const est = (e: PlayerId | null): number => (e != null ? b.enemies[e]?.est ?? 0 : 0);
@@ -65,6 +67,7 @@ export function runKing(ctx: Ctx): void {
   const rebuildTo = Math.min(cs.peakArmy * COMMANDER.RECOVER_REBUILD_FRAC, Math.max(desired, 1));
 
   const prev = cs.stance;
+  let win: ReturnType<typeof strikeWindow> = null;
   if (losingAtHome || alertBad) {
     cs.stance = "DEFEND"; // row 1
   } else if (cs.stance === "DEFEND" && ((cs.danger ?? 0) >= D2.DEFEND_EXIT_DANGER ||
@@ -78,14 +81,22 @@ export function runKing(ctx: Ctx): void {
     cs.stance = defaultStance(ctx, myArmy, est(target));
   } else if (cs.stance === "ALL_IN" && t < cs.stanceUntilTick && !windowShut(ctx, myArmy)) {
     // hold the ALL_IN window
+  } else if ((win = strikeWindow(ctx))) {
+    // 34 §M.6 a counter-punch or a third party's chance: strike now, the window is short
+    cs.targetPlayer = win.on;
+    cs.stance = "ALL_IN";
+    cs.allInWhy = win.kind as "counter" | "thirdparty";
+    cs.stanceUntilTick = win.close;
   } else if (target != null && tb && (cs.allInWhy = allInWindow(ctx, tb, myArmy, dropped(target, COMMANDER.ALLIN_ENEMY_DROP)) ?? undefined)) {
     cs.stance = "ALL_IN"; // row 3
     cs.stanceUntilTick = t + COMMANDER.ALLIN_WINDOW_TICKS;
-  } else if (target != null && myArmy > pers.attackRatio * est(target)) {
-    cs.stance = "PRESSURE"; // row 4
+  } else if (stayOut(ctx)) {
+    cs.stance = "BUILD_UP"; // 34 §M.9 two enemies at war with each other: let them fight
+  } else if (target != null && pressMul(ctx) > 0 && myArmy > pers.attackRatio * est(target) * pressMul(ctx)) {
+    cs.stance = "PRESSURE"; // row 4 (34 §M.2: the grand strategy moves the bar; fortress/comeback never press)
   } else {
     const brawlers = enemies.filter((e) => dropped(e, 0.15) && cs.grudges[e] !== t);
-    if (brawlers.length >= 2) {
+    if (brawlers.length >= 2 && (cs.campOff || !tier.fullAdaptation)) { // (with the campaign: 34 §M.9 above)
       cs.targetPlayer = brawlers.reduce((a, c) => (est(a) < est(c) ? a : c));
       cs.stance = "PRESSURE";
     } else {
@@ -160,6 +171,14 @@ function pickTarget(ctx: Ctx, enemies: PlayerId[], t: number): void {
   const b = cs.beliefs!;
   if (enemies.length === 0) { cs.targetPlayer = null; return; }
   if (cs.targetPlayer != null && !enemies.includes(cs.targetPlayer)) cs.targetPlayer = null;
+  // 34 §M.9 hit the leader: a runaway leader is the target even if another enemy is nearer (not in the
+  // middle of a push on another: never two wars)
+  const lead = leaderTarget(ctx);
+  if (lead != null && enemies.includes(lead)) {
+    if (cs.targetPlayer !== lead) aiLog(cs, t, "S", `target → P${lead} (the runaway leader)`);
+    cs.targetPlayer = lead;
+    return;
+  }
   if ((cs.stance === "PRESSURE" || cs.stance === "ALL_IN") && cs.targetPlayer != null) return;
 
   const est = (e: PlayerId): number => b.enemies[e]?.est ?? 0;

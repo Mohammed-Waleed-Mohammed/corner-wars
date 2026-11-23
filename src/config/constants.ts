@@ -869,6 +869,9 @@ export const COMMANDER = {
   SCOUT_STALE_TICKS: 1800, // a point is worth a look once unseen for this long (60 s)
   SCOUT_ARRIVE: 4, // tiles — close enough to count as "looked"
   SCOUT_FLEE_ODDS: 2.0, // the scout runs from anything but a trivially won fight
+  SCOUT_TRIED_TICKS: 2700, // 34 §M.8 a point a scouting trip failed to see is left alone this long (90 s)
+  SCOUT_DASH_DIST: 10, // 34 §M.8 a scout this close to its look point dashes in through a guard…
+  SCOUT_DASH_HP: 0.5, // …while it has at least this share of its hp
   // §K v3 look before you leap: a push objective unseen for longer than this is scouted first…
   ATTACK_INTEL_TICKS: 1350,
   ATTACK_INTEL_WAIT_TICKS: 900, // …waiting up to this long for the look; after that it launches anyway,
@@ -930,6 +933,7 @@ export const COMMANDER = {
     ALERT_MIN_VALUE: 300, // smaller groups are a raid, not an alert
     DANGER_MEMORY_TICKS: 600, // a mine stays "in danger" 20 s after enemy fighters were seen there
     PEEK_DIST: 7, // the scout looks from this far short of its target
+    FIRST_LOOK_DIST: 4, // 34 §M.3 a first look at a never-seen home stops this short (inside the scout's sight)
     SENTRY_OUT: 22, // sentries stand this far beyond my wall, toward the nearest enemies
     SENTRY_MAX: 2,
     SENTRY_FLEE_DIST: 9, // a sentry falls back from enemy fighters this close…
@@ -972,6 +976,54 @@ export const COMMANDER = {
     ARTY_STEP: 4, // tiles artillery steps back
     KITE_MARGIN: 1.2, // a kiter steps away when its foe is within the foe's range + this
     KITE_STEP: 2.5, // tiles a kiter steps back
+  },
+  // 34 §M the match as a campaign (the King's estimate, strategies, windows, FFA politics, AAR)
+  CAMPAIGN: {
+    // 34 §M.1 the situation estimate
+    LOG_EVERY_S: 60, // the estimate is logged this often
+    TRADE_WINDOW_S: 300, // trade = value killed ÷ value lost in the battles of this window
+    TRADE_PRIOR: 300, // gold added to both sides of the trade ratio (no battles → 1.0)
+    AHEAD: 1.1, // a measure at least this (mine ÷ theirs) is "ahead"
+    BEHIND: 0.8, // … at most this is "behind"
+    TIME_ME: 1.12, // income × tech above this: a long war favours me
+    TIME_THEM: 0.89, // … below this: it favours them
+    TECH_WEIGHT: 0.15, // each tech tier of difference moves the time read by this much
+    INCOME_MEMORY_S: 180, // the income an enemy army's seen growth proved fades over about this long
+    OPENING_S: 180, // the opening book (the plan) runs unmodified this long
+    // 34 §M.2 grand strategies
+    SWITCH_HOLD_S: 30, // a new strategy must be pointed at this long…
+    SWITCH_MIN_S: 90, // …and the last switch be this old (hysteresis)
+    SMOOTH_S: 30, // the income and army ratios are smoothed over about this long
+    STRANGLE_SOURCES: 3, // their income comes from at most this many refineries and Taps
+    ATTRITION_MAX_ARMY: 2, // time on my side → attrition, unless my army is this far ahead (then the plan presses)
+    COMEBACK_ARMY: 0.7, // comeback: my army at most this share of theirs…
+    COMEBACK_MEASURES: 3, // …and behind on at least this many of worth, income, army, trade
+    // PRESSURE takes my army > attackRatio × their estimate × this (0 = never by the table)
+    PRESS_MUL: { plan: 1, decisive: 0.85, attrition: 1.15, strangulation: 1, fortress: 0, opportunism: 1, comeback: 0 },
+    // the Marshal's launch odds and the plan's strike nerve × this
+    NEED_MUL: { plan: 1, decisive: 0.92, attrition: 1.15, strangulation: 1, fortress: 1.1, opportunism: 1, comeback: 1.25 },
+    // the strategy's priority lean per petition category (on top of the plan phase's lean)
+    LEAN: { plan: {}, decisive: { military: 6 }, attrition: { defense: 3, eco: 2 }, strangulation: { military: 3 }, fortress: { defense: 6, invest: 6 }, opportunism: { eco: 2 }, comeback: { defense: 4, military: 3, invest: -4 } },
+    STRANGLE_ECON_W: 3, // strangulation: refineries and Taps weigh this much more as the push's victim
+    RAID_FASTER: 0.5, // strangulation / comeback: the raid's rest between raids × this
+    // 34 §M.6 windows
+    COUNTERPUNCH_S: 45, // the window to strike after winning a defense
+    COUNTER_DROP: 0.4, // a defense is won when the attacker's known army fell by this share…
+    COUNTER_CLEAR_S: 6, // …and my territory has been clear this long
+    SPIKE_S: 60, // my spike / their spike coming: the window's length
+    SPIKE_PRESS_MUL: 0.85, // PRESSURE threshold × this while a spike window is open
+    // 34 §M.9 FFA politics
+    BRAWL_R: 9, // two enemies' fighters this close are fighting each other…
+    BRAWL_MIN: 3, // …with at least this many of each in sight
+    BRAWL_END_S: 8, // a brawl not seen for this long is over
+    THIRDPARTY_S: 60, // strike the weakened winner (or the exposed loser) within this
+    LEADER_RATIO: 1.5, // an enemy worth this × the next one is the runaway leader…
+    LEADER_ME_FRAC: 0.8, // …if it is also worth at least this share of me
+    // 34 §M.11 after-action review
+    AAR_MIN_VALUE: 400, // the least value traded (both sides) for a fight to get a record
+    AAR_GAP_S: 6, // a fight is over after this long without contact
+    AAR_R: 9, // enemy fighters this close to a squad's units are in its fight
+    AAR_KEEP: 40, // records kept
   },
   // 34 §W.8 standoffs and dances
   STANDOFF: {
