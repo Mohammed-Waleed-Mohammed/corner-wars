@@ -5,7 +5,7 @@ competent alone, but each one **decides alone**: it reads the game state, makes 
 requests, and nobody asks the part that knows. This file reorganises the Medium/Hard AI into a
 **court**: a King who holds the plan and rules on disputes, and six councillors who each own one
 aspect of winning, keep a report on it, answer the others' questions, and petition for what their
-aspect needs, each with a written reason.
+aspect needs, each with a written reason. Part §W gives the Marshal the art of war: a field manual of every unit, task forces with different jobs, a profile of how each enemy behaves, and operations (pincers, feints, baits and traps, ambushes, sieges, base trades) — and the sense not to fall for the enemy's.
 
 Everything in 33 that this file does not restate still holds (beliefs, the mine economy, the
 priced-request arbiter, danger, static defense, push discipline, the scenario suite). Everything in 22
@@ -62,7 +62,7 @@ consult them first, and the consultation is visible in the log.
 | **Warden** | the base: what actually stands at home, danger, towers, walls, repair, home guard | home strength, danger, can we hold X, desired standing army | `defense.ts`, home guard in `tactical.ts` |
 | **Quartermaster** | what to build and where: unit mix, producers, supply, queues | army now, shortfall, time to reach a value | `military.ts` |
 | **Scholar** | research, each item justified by what it buys | what is next and why, what it unlocks | `tech.ts` |
-| **Marshal** | the field army and raids: when to launch, where to gather, what to hit, when to fall back | army position, mission, ETA home, committed value | main/raid/Citadel decisions in `tactical.ts` |
+| **Marshal** | the field army: the operations (§W), the task forces that run them, when to launch, what to hit, when to fall back; the field manual of every unit | army position, mission, ETA home, committed value, operation in progress | main/raid/Citadel decisions in `tactical.ts` |
 | **Captain** (one per squad) | carrying out the Marshal's order locally: formation, path, contact odds, retreat mechanics, breaching | — | execution half of `tactical.ts` |
 
 Units keep their own rules (targeting, kiting, fleeing, auto-acquire) exactly as today. The council
@@ -115,17 +115,18 @@ character, read in one place. 33's dials map onto it:
 | `patience` | how long the King waits for the plan's timing | `firstPush` |
 | `trust` | how far the King believes estimates over sightings (paranoid = trusts `est`) | new: `trustEst` |
 | `ambition` | how hard it contests the Citadel and expansions | `citadelWeight`, `raidSquads` |
+| `cunning` | how readily it uses deception (feints, baits, ambushes) over force (§W.4) | new: `cunning` |
 | `bias` | the defense and tech shares | `defenseBudget`, `techBudget` |
 
 Starting values (tuned by the suite):
 
-| | nerve `strikeOdds` | `trustEst` | plan |
-|---|---|---|---|
-| rusher | 1.15 | 0.6 | strike early, keep striking |
-| boomer | 1.35 | 0.9 | grow, arm, one timing strike |
-| turtle | 1.6 | 1.0 | fortify, out-tech, counter-strike only |
-| techer | 1.3 | 0.9 | grow, tech to a spike unit, strike on the spike |
-| opportunist | 1.2 | 0.8 | raid and punish, strike exposed targets |
+| | nerve `strikeOdds` | `trustEst` | `cunning` | plan |
+|---|---|---|---|---|
+| rusher | 1.15 | 0.6 | 0.2 | strike early, keep striking |
+| boomer | 1.35 | 0.9 | 0.5 | grow, arm, one timing strike |
+| turtle | 1.6 | 1.0 | 0.6 | fortify, out-tech, ambush the approach, counter-strike |
+| techer | 1.3 | 0.9 | 0.4 | grow, tech to a spike unit, strike on the spike |
+| opportunist | 1.2 | 0.8 | 0.9 | raid and punish, feints and baits, strike exposed targets |
 
 ### §C.2 The grand plan
 
@@ -252,6 +253,187 @@ the launch gate at FIGHT_ODDS) with one place that says why.
 
 ---
 
+## §W The art of war (the Marshal's craft)
+
+33's war is linear: gather, march as one body, fight, retreat or raze. A real commander fights with
+**several groups doing different jobs at once**, uses the ground and the fog, lies about where the blow
+will land, sets traps and refuses the enemy's, and changes all of this according to **how this
+particular enemy behaves**. This part gives the Marshal that craft, in five pieces: the field manual
+(what each unit can and cannot do, and how to order it), task forces (groups with jobs), the
+Spymaster's profile of each enemy, the operations playbook, and the rules that keep the AI from
+walking into the enemy's traps.
+
+Everything here uses only what a human player has: the same units, terrain, fog, commands and
+abilities. Deception means using concealment and timing, never seeing through the fog.
+
+### §W.1 The field manual (`manual.ts`)
+
+The manual is **derived from the data**, not hand-written, so a balance change flows into the AI's
+doctrine: for every unit type it reads `UNIT_STATS`, `COUNTERS`, the terrain effects (24) and the
+formation traits (19 §F) and answers:
+
+| question | from |
+|---|---|
+| `beats(a, b)` / `beatenBy(a)` | the counter triangle (infantry > ranged > heavy > infantry, +50 %); siege +100 % vs buildings |
+| `canKite(a, b)` | a's range > b's range **and** a's speed ≥ b's speed (it can shoot and step away faster than b closes) |
+| `outranges(a, tower)` | a's range (+1 on a hill if range ≥ 2) > the tower's range (+1 on a hill) |
+| `minRangeGap(a)` | artillery's 3-tile blind ring: it must be screened |
+| `cover(a)` / `hides(a)` | forest: damage taken × 0.7 for foot, × 0.85 for vehicles; concealment beyond 4 tiles for all |
+| `hillGain(a)` | +2 sight for all; +1 range for range ≥ 2 |
+| `bestFormation(job)` | 19 §F: Spear charges, Line +10 % stationary, Box −15 % stationary, Column +15 % march |
+
+What it says about today's roster (worked out from the numbers, so the AI and this table agree):
+
+| unit | job it is good at | never ask it to | manual notes |
+|---|---|---|---|
+| **Rifleman** (fast, range 1) | screen, chase down rockets and artillery, forest ambush (foot cover), bait for infantry | stand against tanks | fastest foot unit (3.5): nothing on foot outruns it, so rockets can't kite it |
+| **Rocket** (range 4) | kill vehicles from behind a screen, hold hills | stand in front against infantry | can't kite riflemen (2.3 < 3.5); on a hill outranges a Pillbox only |
+| **Tank** (heavy) | front line vs infantry, the Box's wall | chase rockets alone | |
+| **Grenadier** (range 3, splash) | break blobs and formations, clear infantry in forests | fight vehicles | splash punishes a stationary Line/Box: the answer to an enemy that digs in |
+| **Scout Buggy** (speed 5, sight 7) | scout, sentry, raid workers, bait, hunt artillery | take a fair fight | the only unit that kites riflemen, tanks and heavy tanks |
+| **Heavy Tank** (range 3) | the anchor and the breaker; tower-diving with a screen | march alone against rockets | slowest fighter (1.4): sets a column's pace |
+| **Artillery** (range 9, min 3, splash) | siege; shell a stationary army | stand within 3 tiles of anything | outranges Pillbox, Turret and AT Cannon from the flat; ties the Missile Tower, loses to it on a hill |
+| **Medic** | keep the line alive from behind | lead | the first thing an enemy should focus: protect it |
+
+**The right command for the job.** Captains turn a job into commands; the manual names the
+commands, so the AI never issues the wrong one (a MOVE when it means a fighting withdrawal, a loose
+ATTACK_MOVE into a town when it means a siege):
+
+| job | commands |
+|---|---|
+| march | FORM_UP column → MOVE (around forests unless hiding is the point) |
+| assault | FORM_UP spear → ATTACK_MOVE; BREAK_FORMATION when the stall watchdog fires (33 §T.1) |
+| hold a line | FORM_UP line, stand (Volley +10 %); HOLD (§W.6) so nobody chases out of it |
+| endure | FORM_UP box, stand (Brace −15 %) |
+| withdraw in good order | FALL_BACK (keeps facing and firing), **never** a plain MOVE except a rout |
+| focus | ATTACK_TARGET on the manual's priority: artillery in range, then medics, then the counter target |
+| kite | (`canKite` only) ATTACK_TARGET, then MOVE back a step when the target closes within its range + 1 |
+| siege | artillery ATTACK_TARGET on buildings from `outranges` distance; the screen in Line in front of the blind ring |
+| ambush | MOVE into the forest, HOLD with hold-fire (§W.6) until the trigger |
+| guard a point | GUARD |
+
+**Abilities and powers by the manual** (22 §L, 27 §E are kept, and gain these rules):
+
+| ability or power | use it when | never |
+|---|---|---|
+| Hammerfall (1.5 s delay) | on a stationary or slow body (Box, artillery, a siege line), or buildings | on a moving force |
+| Sundering Hymn (telegraphed 3 s) | on an enemy that **can't leave in time**: trapped, slowed by Prism, or held at a chokepoint | in the open: they walk out |
+| Prism Pulse | on the kill zone when the trap springs, or on a chokepoint | far from my own fighters |
+| Ghost Roads / Ashstorm | to hide an ambush or a flank's approach, or cover a withdrawal | after the enemy is already in contact (it no longer hides anything) |
+| Aegis Field | on my own line at the moment of committing | before contact (it expires) |
+| Rally / Battle Frenzy | at the moment the main blow lands | on a march |
+| Artillery / Ion Strike | the densest enemy cluster in sight, or a tower blocking the breach | on a lone unit |
+
+### §W.2 Task forces
+
+33 has fixed squads (main, home guard, raid, scout, sentry, Citadel). The Marshal instead forms
+**task forces** for the operation at hand, and dissolves them back into the main body when it ends:
+
+```ts
+interface TaskForce {
+  id: number; op: number | null;          // the operation it serves (null = the standing main body)
+  job: "strike" | "pin" | "feint" | "bait" | "ambush" | "raid" | "reserve" | "escort" | "siege" | "hunt" | "garrison";
+  want: Partial<Record<CombatType, number>>; // value wanted by class, chosen from the manual for the job
+  roe: { engageOdds: number; retreatOdds: number; leash: number; holdFire: boolean };
+  order: { kind: Job; at: Vec2; target?: number; until?: Trigger };
+  status: "forming" | "moving" | "in_place" | "engaged" | "done" | "broken";
+}
+```
+
+The manual chooses who goes where: a raid takes buggies; an ambush takes foot units (forest cover
+counts double for them) with rockets behind; a bait takes fast, cheap units; a pin takes tanks in a
+Box on a hill; a siege takes artillery plus a Line screen; a hunt (killing the enemy's raiders and
+scouts) takes buggies and riflemen. A task force is formed only from units that the Warden does not
+need at home (`canHold` stays ≥ BASE_HOLD_ODDS without them), and the Quartermaster is told what is
+missing so production fills it.
+
+Each task force has a **captain** (§A) that reports its status to the Marshal every tactical tick.
+The Marshal coordinates through these reports, never by guessing where its own units are.
+
+### §W.3 Reading the enemy (the Spymaster's profile)
+
+The Spymaster keeps a **behaviour profile** per enemy, measured from what it sees, each trait with a
+sample count. An operation may rely on a trait only once it has `PROFILE_MIN_SAMPLES` observations. It
+works the same against a human and against another AI.
+
+| trait | measured as |
+|---|---|
+| `aggression` | time of their first attack; attacks per 5 min; share of their army they send |
+| `routes[]` | the paths their armies took to me (a coarse heat map of the tiles their marching army crossed) |
+| `response` | when I hit one of their mines: seconds until defenders arrive, and their value ÷ my raid's value |
+| `overreacts` | `response` value ratio ≥ 1.5: they send far more than the raid needed (feints work) |
+| `chases` | how far their units pursue my retreating units past their towers; whether they enter forests unscouted (baits work) |
+| `homeGuard` | the share of their army that stays home while the rest is out (seen while their army is away) |
+| `retreats` | do they fall back at bad odds or fight to the last (a retreating enemy can be ambushed on its way back) |
+| `turtles` | towers per minute vs units per minute; walls |
+| `timing` | how regular their attack intervals are (a regular enemy can be met on schedule) |
+| `comp` | (33) their unit mix, and how it shifts after they lose a fight (do they counter me?) |
+
+### §W.4 The operations playbook
+
+An operation is a small plan with task forces, a timeline of **sync points** (each waiting on a
+captain's report or a Spymaster's sighting), abort rules and a success measure. Each one is a module
+in `ops/` with the same interface: `eligible(ctx) → score | null`, `forces()`, `step()`, `abort()`.
+
+| operation | preconditions | how it runs | aborts when |
+|---|---|---|---|
+| **Assault** (today's push) | odds ≥ nerve at the objective (§E) | gather out of tower reach → Spear → engage as one body | 33's retreat rules |
+| **Pincer** | army ≥ PINCER_MIN, two approaches to the objective ≥ 60° apart | two task forces; each captain reports its ETA; the faster one waits so both arrive within SYNC_S | one force is caught alone (odds < retreatOdds) |
+| **Feint and strike** | target `overreacts`, two objectives ≥ 25 tiles apart | a small visible feint hits objective A; the strike force waits hidden (forest, Ghost Roads); it launches at B when the Spymaster sees their army move ≥ 10 tiles toward A | their army doesn't move within FEINT_WAIT_S; the feint withdraws |
+| **Bait and trap** | target `chases`, a forest ≤ 15 tiles from the bait's route home | the ambush hides in the forest on HOLD + hold-fire; the bait engages, then FALL_BACKs past the forest; the trap springs when the pursuers are inside the kill zone (Prism + Hymn if I have them) | nobody chases within TRAP_WAIT_S; the ambush is spotted (an enemy unit within 4 tiles) |
+| **Ambush the approach** | an alert, and a forest or bridge on the attacker's predicted route (from `routes`) within reach before it arrives | the army sets up in the forest or at the bridge exit (Line, on a hill if one is there) instead of at the wall | the attacker changes route; the Warden's `canHold` at the wall is better |
+| **Pin and raid** | army can hold a Box on a hill out of their tower reach; their mines are uncovered | the pin stands where their army must deal with it; raids hit the mines the pin uncovers | the pin's odds fall below retreatOdds |
+| **Siege** | target fortified (baseDef ≥ SIEGE_DEFSCORE), artillery in hand | artillery shells towers from `outranges` distance; the screen meets every sally in Line; advance one tower at a time | the screen is losing; their army arrives with better odds |
+| **Base trade** | their army is committed at my base, my towers + guard can hold it (`canHold` ≥ 1), my army is closer to their base than theirs is to home | the main army hits their base instead of coming home | the Warden's odds at home fall below 0.8 |
+| **Raid rotation** | target `response` known | raid a mine; leave just before the measured response arrives; hit the mine farthest from where the defenders went | raiders lose half their value |
+| **Citadel bait** | they contest the Citadel (seen twice) | hold the Citadel with a Box and artillery behind; let them come to it | odds at the Citadel < retreatOdds |
+| **Fall back to the towers** | (33 §E.3) a defense I win only under my towers | FALL_BACK to the defense anchor; fight there | — |
+
+**Choosing.** Each eligible operation scores
+`expected gain × success chance − value at risk × failure chance`, where the gain is what it would
+destroy (army, workers, buildings, weighted by 33's victim weights), the chance comes from the odds
+and the profile evidence, and the risk is the value of the task forces. The King's character weighs it
+(a new trait, **cunning**: how readily it uses deception over force; Rusher low, Opportunist high), and
+the seeded RNG picks among the top two when they are within OP_TIE of each other, so the AI is not
+predictable from one game to the next, but stays deterministic. One major operation per target at a
+time, plus raids and hunts.
+
+**Learning within the match.** Every operation's outcome (gain, loss, whether the enemy did what the
+profile predicted) updates the profile; an operation that failed against an enemy is not repeated on
+that enemy for OP_COOLDOWN_S, and the trait it relied on loses weight.
+
+### §W.5 Refusing the enemy's traps (counter-craft)
+
+The same knowledge protects the AI:
+
+* **No pursuit into the unknown.** A captain never chases past its leash into an unscouted forest
+  (one no unit of mine has seen inside within 10 s), past a known enemy tower's reach, or more than
+  CHASE_MAX tiles from its task force. Retreating enemies are let go unless the trap is mine.
+* **Proportional answers.** When a small force hits me, the Warden sends what `canHold` says is
+  enough, not the whole army, so a feint doesn't pull my army out of position. A raid answered by the
+  army is logged as "drawn", and if the Spymaster then sees a second force, the army is recalled.
+* **Suspicion.** A lone enemy group that retreats toward a forest after barely fighting is marked as
+  possible bait; a forest on my route that the Spymaster can't see into is either scouted first or
+  passed out of reach.
+* **Don't sit under artillery and don't clump.** A stationary Line or Box that is being shelled (losses
+  from splash with no attacker in its range) moves or charges the artillery; the manual's "never"
+  column applies to my own units in reverse.
+
+### §W.6 What the simulation must add (for players too)
+
+Two orders are needed for these tactics, and since the AI may only use what players have, they are
+added to the game for everyone, with HUD buttons and hotkeys:
+
+1. **HOLD becomes "hold ground".** Today HOLD is the same as STOP. It becomes: stand here, fire at
+   what comes in range, never chase. Lines, pins and chokepoint defenses depend on it.
+2. **Hold fire** (an ambush stance). Units on hold-fire don't auto-acquire, so a forest keeps them
+   hidden; they open fire when an enemy comes within `HOLD_FIRE_TRIGGER` tiles, when one of them is
+   hit, or when the order is lifted. Without it, an ambush gives itself away at the first unit in range.
+
+Both are lockstep commands like every other, so determinism is unaffected; both are checksummed state.
+
+---
+
 ## §F State and code layout
 
 ```
@@ -265,8 +447,11 @@ commander/
   warden.ts       was defense.ts + runHomeGuard + defenseAnchor
   quartermaster.ts was military.ts
   scholar.ts      was tech.ts
-  marshal.ts      the decision half of runMainArmy, runRaid, runCitadel, runPowers
-  captain.ts      the execution half: formations, driveSquad, retreat mechanics, the stall watchdog
+  marshal.ts      the decision half of runMainArmy, runRaid, runCitadel, runPowers; picks operations, forms task forces
+  captain.ts      the execution half: formations, driveSquad, retreat mechanics, the stall watchdog, the job → command table
+  manual.ts       NEW   the field manual (§W.1), derived from UNIT_STATS / COUNTERS / terrain / formation traits
+  profile.ts      NEW   the Spymaster's behaviour profile of each enemy (§W.3)
+  ops/            NEW   one module per operation (§W.4): assault, pincer, feint, trap, ambush, pin, siege, trade, rotation, citadel
   assess.ts / basePlan.ts / place.ts / aiPerception.ts   kept
 ```
 
@@ -310,8 +495,16 @@ Treasurer, `cs.hits` for the Warden …) so the migration moves code, not data.
 | `SHORT_FRAC` | 0.2 | the shortfall above which investments may not be saved for |
 | `RULINGS_KEEP` | 40 | rulings kept for the overlay and the harness |
 | `PLAN_MIN_GAP_S` | 30 | the least time between plan changes |
+| `PROFILE_MIN_SAMPLES` | 2 | observations before an operation may rely on a profile trait |
+| `SYNC_S` | 8 | a pincer's forces must arrive within this of each other |
+| `FEINT_WAIT_S` / `TRAP_WAIT_S` | 40 / 45 | how long a feint or bait waits for the enemy to bite |
+| `PINCER_MIN` | 2500 | the least army value for a two-prong attack |
+| `OP_TIE` | 0.1 | operations within this share of the best score are a seeded coin toss |
+| `OP_COOLDOWN_S` | 300 | a failed operation is not repeated on the same enemy for this long |
+| `CHASE_MAX` | 10 | tiles a unit may pursue beyond its task force |
+| `HOLD_FIRE_TRIGGER` | 4 | tiles at which a hold-fire ambush opens fire |
 
-Personalities gain `strikeOdds`, `trustEst` and `plan` (§C.1–2).
+Personalities gain `strikeOdds`, `trustEst`, `cunning` and `plan` (§C.1–2).
 
 ---
 
@@ -326,6 +519,14 @@ Personalities gain `strikeOdds`, `trustEst` and `plan` (§C.1–2).
 3. **The vetoes** (§E), one at a time, each with its scenario (§T). Behaviour changes here.
 4. **The plan** (§C.2) and the timing strikes, with their scenarios.
 5. **Visibility** (§G): seat-tagged logs, the overlay, the harness filter.
+6. **The two new orders** (§W.6): hold ground and hold fire in the sim, the HUD and the hotkeys, with
+   their own unit tests; `det` must pass.
+7. **The field manual and captains** (§W.1): the job → command table, kiting, focus fire, artillery
+   discipline, ability rules.
+8. **Task forces and the profile** (§W.2–3): the fixed squads become task forces; the Spymaster
+   measures the enemy.
+9. **Operations** (§W.4–5), one per commit, each with its scenario, counter-craft first (so the AI
+   stops falling for traps before it starts setting them).
 
 ---
 
@@ -345,6 +546,25 @@ Personalities gain `strikeOdds`, `trustEst` and `plan` (§C.1–2).
 | **plan.timing** | Boomer vs idle-but-defended | the STRIKE launches by the plan's `by` with ≥ the plan's value, or logs why it waited |
 | **plan.emergency** | Boomer in GROW is attacked | DEFEND interrupts; GROW resumes after; its time exit is extended by the pause |
 | **war.bvr.{1,2,3}** | Boomer vs Rusher duel, 3 seeds (the §0 match is seed 3) | measured and reported: winner, time, the Boomer's worker losses; group pass: the Boomer loses ≤ 15 workers in every seed |
+
+War-craft scenarios (§W). The scripted opponents are harness puppets that behave in one known way
+(always chase, always over-respond, always march the same route), so each test isolates one trick:
+
+| id | setup | pass |
+|---|---|---|
+| **craft.kite** | 4 buggies meet 6 riflemen in the open | the buggies kite: ≥ 4 riflemen die, ≤ 1 buggy |
+| **craft.artillery** | artillery + screen vs a Turret line | towers are shelled from outside their range; no artillery dies inside its own 3-tile blind ring |
+| **craft.fallback** | a squad must withdraw from a 2× force | it withdraws with FALL_BACK and keeps ≥ 1.3× the value a plain MOVE retreat keeps (same seed) |
+| **craft.abilities** | Hymn and Hammerfall available, a moving and a held enemy group | both are cast only on the held (or slowed) group |
+| **op.pincer** | army ≥ PINCER_MIN, open map | two forces from ≥ 60° apart arrive within SYNC_S of each other |
+| **op.feint** | puppet that over-responds | the feint pulls their army; the strike destroys ≥ 1 building at the other objective while their army is away |
+| **op.trap** | puppet that always chases, a forest on the bait's route | the pursuers enter the kill zone; they lose ≥ 2× the value the AI loses |
+| **op.ambush** | puppet that attacks along the same route 3 times | by the third attack the AI's army waits on the route, and wins there |
+| **op.trade** | puppet's army commits at my base, my towers can hold | the AI hits their base instead of coming home and comes out ahead in value |
+| **op.variety** | 3 seeds, Opportunist vs Medium | ≥ 3 different operations used; no failed one repeated on the same enemy within OP_COOLDOWN_S |
+| **counter.nochase** | a puppet bait retreats past an unscouted forest with an ambush in it | no unit of mine enters the forest or chases beyond CHASE_MAX |
+| **counter.drawn** | a small raid on my mine, then the puppet's army at my other gate | the Warden answers the raid in proportion; the army is home for the second force |
+| **read.profile** | puppets with known response time, chase distance and route | the profile measures each within 25 % after PROFILE_MIN_SAMPLES |
 
 Regression targets after every step: all 42 scenarios of 33 §T; `war.vsMedium` ≥ 2 of 3 (it is 3 of 3
 today); `war.ffa` ≥ 2 of 3; `det`; `npm run build`; a browser check of a skirmish with the F5 overlay.

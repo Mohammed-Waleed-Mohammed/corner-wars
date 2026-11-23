@@ -31,7 +31,7 @@ Each file is the **single source of truth** for its own system and numbers. The 
 | `31-performance.md` | Big battles at 60 fps: how to measure (`?stress=N&clash`), the sim/render/HUD rules and budgets (nav grid, A* budget, re-target interval, per-tile fog, change-only HUD writes) |
 | `32-late-economy-and-research.md` | Late-game gold without mines (the Resonance Tap), the research tree re-planned as six branches × four tiers, the Research board UI, and how the AI uses both |
 | `33-ai-v2.md` | AI v2: beliefs and scouting under fog, the mine-aware economy, the priced-request budget arbiter, danger-driven defense, war posture — and the headless scenario suite (`npm run aisim`) every AI change must pass |
-| `34-council.md` | The Council: the Medium/Hard AI as a King (character, grand plan, posture, rulings) and six councillors (Spymaster, Treasurer, Warden, Quartermaster, Scholar, Marshal) who brief, consult each other and petition with reasons; the vetoes that fix the 33 duel losses, the migration plan and its scenarios |
+| `34-council.md` | The Council: the Medium/Hard AI as a King (character, grand plan, posture, rulings) and six councillors (Spymaster, Treasurer, Warden, Quartermaster, Scholar, Marshal) who brief, consult each other and petition with reasons; the vetoes that fix the 33 duel losses; the art of war (field manual, task forces, enemy profiles, operations such as feints, traps and ambushes, counter-craft); the migration plan and its scenarios |
 
 ## Conventions used everywhere
 
