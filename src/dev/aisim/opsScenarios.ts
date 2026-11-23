@@ -139,7 +139,82 @@ function leashBout(ops: boolean): { lostInZone: number; entrants: number; maxOut
   return { lostInZone: p.zoneValueLost(), entrants: p.zoneEntrants(), maxOut, log };
 }
 
+/** battle.shelled bout: enemy artillery on HOLD shells my base from its range, behind a small screen. */
+function shelledBout(craft: boolean): { lost: number; gunsLeft: number; answered: boolean } {
+  const m = vsPuppet("turtle", 91);
+  m.run(1);
+  m.cs(P0)!.manualOff = !craft;
+  const home = m.home(P0), them = m.home(P1);
+  const mine = spawnMix(m, P0, [["rifleman", 8], ["tank", 4], ["rocket", 4]], home);
+  m.run(4);
+  const k = 13 / Math.max(13, dist(home, them));
+  const at = { x: home.x + (them.x - home.x) * k, y: home.y + (them.y - home.y) * k };
+  const guns = m.spawn(P1, "artillery", 3, at, 1);
+  const screen = m.spawn(P1, "rifleman", 3, { x: at.x - (them.x - home.x) * 0.02, y: at.y - (them.y - home.y) * 0.02 }, 0.8);
+  m.order(P1, "HOLD", { unitIds: ids([...guns, ...screen]) });
+  const v0 = valueOf(mine);
+  const seen = new Set<string>();
+  let answered = false;
+  for (let i = 0; i < 60; i++) { m.run(1); for (const l of m.log(P0)) if (!seen.has(l)) { seen.add(l); if (l.includes("shelled by artillery")) answered = true; } }
+  return { lost: 1 - valueOf(mine) / v0, gunsLeft: alive(guns).length, answered };
+}
+
+/** battle.retreatOpen bout: a Rusher's push is beaten ahead while a second force sits on its road home. */
+function cutOffBout(ops: boolean): { kept: number; pushed: boolean; detoured: boolean; trace: string } {
+  const m = vsPuppet("rusher", 93);
+  const y = m.yard(P1)!;
+  y.maxHp = 1e8; y.hp = 1e8;
+  m.run(1);
+  m.cs(P0)!.opsOff = !ops;
+  const home = m.home(P0), them = m.home(P1);
+  const main = () => m.cs(P0)!.squads.find((q) => q.role === "main");
+  const at = (): Vec2 | null => { const q = main(); const us = q ? alive(m.units(P0).filter((u) => q.unitIds.includes(u.id))) : []; return us.length ? { x: us.reduce((a, u) => a + u.x, 0) / us.length, y: us.reduce((a, u) => a + u.y, 0) / us.length } : null; };
+  let c: Vec2 | null = null;
+  for (let i = 0; i < 960 && m.state.winner === null; i++) {
+    m.run(0.5);
+    const q = main(), p = at();
+    if (q && p && ["engage", "attack"].includes(q.mission) && dist(p, home) >= 44) { c = p; break; }
+  }
+  if (!c) return { kept: 0, pushed: false, detoured: false, trace: "" };
+  const q = main()!;
+  const mine = m.units(P0).filter((u) => q.unitIds.includes(u.id));
+  const v0 = valueOf(mine);
+  const toThem = Math.max(1, dist(c, them)), toHome = Math.max(1, dist(c, home));
+  const wall = m.spawn(P1, "tank", Math.ceil((2.2 * v0) / UNIT_STATS.tank.gold), { x: c.x + ((them.x - c.x) / toThem) * 10, y: c.y + ((them.y - c.y) / toThem) * 10 }, 1.2);
+  const cut = m.spawn(P1, "tank", Math.ceil((1.0 * v0) / UNIT_STATS.tank.gold), { x: c.x + ((home.x - c.x) / toHome) * 12, y: c.y + ((home.y - c.y) / toHome) * 12 }, 1.2);
+  m.order(P1, "ATTACK_MOVE", { unitIds: ids(wall), x: c.x, y: c.y, spread: false });
+  m.order(P1, "GUARD", { unitIds: ids(cut), x: cut[0].x, y: cut[0].y }); // it engages what passes
+  const seen = new Set<string>();
+  let detoured = false;
+  const tr: string[] = [];
+  for (let i = 0; i < 50; i++) {
+    m.run(1);
+    if (i % 5 === 0) tr.push(`${main()?.mission}:${(100 * valueOf(mine) / v0) | 0}`);
+    for (const l of m.log(P0)) if (!seen.has(l)) { seen.add(l); if (l.includes("retreat detours")) detoured = true; if (l.includes("FALL BACK") || l.includes("detour")) tr.push(l); }
+  }
+  return { kept: valueOf(mine) / Math.max(1, v0), pushed: true, detoured, trace: tr.join(" ") };
+}
+
 export const OPS_SCENARIOS: Scenario[] = [
+  {
+    id: "battle.shelled", title: "Units shelled by artillery they can't reach charge it (34 §W.9)",
+    make: () => vsPuppet("turtle", 91),
+    run: () => {
+      const on = shelledBout(true), off = shelledBout(false);
+      const ok = on.answered && on.gunsLeft <= off.gunsLeft && on.lost <= off.lost + 0.03;
+      return res(ok, `guns left ${on.gunsLeft} vs ${off.gunsLeft}, lost ${pct(on.lost)} vs ${pct(off.lost)} without battle craft; answered ${on.answered}`);
+    },
+  },
+  {
+    id: "battle.retreatOpen", title: "A beaten push retreats around the force that cut its road home (34 §W.9)",
+    make: () => vsPuppet("rusher", 93),
+    run: () => {
+      const on = cutOffBout(true), off = cutOffBout(false);
+      if (!on.pushed) return res(false, "never pushed");
+      const ok = on.detoured && on.kept >= off.kept;
+      return res(ok, `kept ${pct(on.kept)} vs ${pct(off.kept)} without battle craft; detoured ${on.detoured}; ${on.trace}`);
+    },
+  },
   {
     id: "op.feint", title: "Feint & strike: raid their far mine, hit the base while their army answers it (34 §W.4)",
     make: () => vsPuppet("opportunist", 71),

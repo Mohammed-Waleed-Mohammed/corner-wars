@@ -973,6 +973,14 @@ export const COMMANDER = {
     KITE_MARGIN: 1.2, // a kiter steps away when its foe is within the foe's range + this
     KITE_STEP: 2.5, // tiles a kiter steps back
   },
+  // 34 §W.9 battle craft
+  BATTLE: {
+    ROAD_BAND: 6, // tiles either side of a road that count as "on it"
+    TRICKLE_MIN: 4, // stragglers walk past enemies on the road only as a group this big…
+    TRICKLE_FRAC: 0.25, // …worth this share of the squad
+    DETOUR: 10, // a retreat passes this many tiles beside a force on its road home
+    WOUNDED_FRAC: 0.3, // a loose unit below this hp share steps back to its medics
+  },
   // 34 §W.4–5 operations and counter-craft
   OPS: {
     OP_COOLDOWN_S: 90, // a non-direct operation can't be chosen again within this

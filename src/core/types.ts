@@ -387,6 +387,8 @@ export interface AISquad {
   stageLogTick?: number; // 33 dev: last time a held launch logged its reason
   chaseWatch?: { from: Vec2; enemy: PlayerId | null; max: number }; // 34 §W.3 measuring a pursuit of this squad
   leashLogTick?: number; // 34 §W.5 last leash log
+  trickleLogTick?: number; // 34 §W.9 last "reinforcements wait" log
+  shellTick?: number; // 34 §W.9 last answer to shelling
   lastSpot?: Vec2; // 34 §W.4 raid rotation: where this raid last struck
   fleeUntil?: Partial<Record<number, number>>; // 33 §B.2 sentries: unit id → tick it may return to its post
 }

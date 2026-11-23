@@ -7,6 +7,7 @@ import type { Building, FormationId, GameState, PlayerId, Unit, Vec2 } from "../
 import { baseCenter, fightOdds, squadCenter } from "./assess";
 import { aiLog, type Ctx } from "./commander";
 import { blindRing, canKite, focusScore } from "./manual";
+import { battleCraft, mayReinforce, retreatVia } from "./battle";
 import { nearestPassableTile } from "../pathfinding";
 
 export const cmd = (ctx: Ctx, type: string, payload: Record<string, unknown>): void =>
@@ -92,7 +93,7 @@ export function driveSquad(ctx: Ctx, s: Squad, objective: Vec2, attack: boolean)
   if (stale) {
     cmd(ctx, type, { unitIds: s.unitIds, x: objective.x, y: objective.y, spread: false });
     s.lastOrderTick = state.tick;
-  } else if (idle.length > 0) {
+  } else if (idle.length > 0 && mayReinforce(ctx, s, idle, objective)) { // 34 §W.9 no trickling
     cmd(ctx, type, { unitIds: idle.map((u) => u.id), x: objective.x, y: objective.y, spread: false });
   }
 }
@@ -137,7 +138,8 @@ export function retreat(ctx: Ctx, s: Squad, odds: number, value: number, why: st
   if (f && odds < COMMANDER.ROUT_ODDS) cmd(ctx, "BREAK_FORMATION", { formationInstanceId: f.id });
   // 34 §W.1 measured (craft runs, 2026-11): a FALL_BACK withdrawal kept 0–38% of the squad where running
   // kept 57–85%, against slower and equally fast pursuers alike — so a retreat runs.
-  cmd(ctx, "MOVE", { unitIds: s.unitIds, x: to.x, y: to.y, spread: false });
+  const via = retreatVia(ctx, s, to); // 34 §W.9 an open retreat: around a force on the road home
+  cmd(ctx, "MOVE", { unitIds: s.unitIds, x: via.x, y: via.y, spread: false });
   s.mission = "retreat";
   s.objective = to;
   s.retreatTick = state.tick;
@@ -163,6 +165,7 @@ export function runCaptains(ctx: Ctx): void {
   for (const s of cs.squads) {
     if (s.role === "scout" || s.role === "sentry") continue; // they run from fights (Spymaster)
     if (s.mission === "retreat" || s.mission === "flee") continue; // running: a focus order would stop them
+    battleCraft(ctx, s, foes); // 34 §W.9 wounded rotation, the answer to shelling
     const byTarget = new Map<number, number[]>();
     const kiters: { u: Unit; to: Vec2 }[] = [];
     for (const u of squadUnits(state, s)) {
@@ -178,7 +181,7 @@ export function runCaptains(ctx: Ctx): void {
         kiters.push({ u, to: stepAway(state, u, near, COMMANDER.MANUAL.KITE_STEP) });
         continue;
       }
-      if (!focusNow) continue;
+      if (!focusNow || s.role === "homeGuard") continue; // a guard keeps its GUARD leash: an ATTACK_TARGET would chase a bait anywhere
       const r = st.range + 0.5;
       let best: Unit | null = null, bs = -Infinity;
       for (const f of foes) {
