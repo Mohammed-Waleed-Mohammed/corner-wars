@@ -1,4 +1,4 @@
-// 33 §F.4 / 22 §I — military production as budget requests: the counter-mix against what I believe
+// 34 §A the Quartermaster (was 33 §F.4 / 22 §I) — military production as budget requests: the counter-mix against what I believe
 // the enemy fields (and whatever is in my territory right now), one request per free production slot,
 // and enough producers to turn my income into units. How much the army gets is the arbiter's call:
 // below the desired army (§E.2) units outrank investments; above it, investments win.

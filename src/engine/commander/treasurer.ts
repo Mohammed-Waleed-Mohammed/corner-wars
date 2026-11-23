@@ -1,4 +1,4 @@
-// 33 §C — the economy planner. Measured rules it rests on: a Refinery beside a mine multiplies a
+// 34 §A the Treasurer (was 33 §C, the economy planner). Measured rules it rests on: a Refinery beside a mine multiplies a
 // worker's take ~5×; ~10 workers saturate a mine (29 g/s); a mine lasts 2–5 minutes; after the mines
 // run out only Resonance Taps (and the Citadel) pay. So: a Refinery at every mine worked, crews of ~10,
 // the next mine claimed BEFORE the current ones run dry (stepping-stone creep where the build radius
@@ -12,7 +12,7 @@ import { unitCap } from "../../state/upgrades";
 import { armyValue, baseCenter, buildingsOf, enemyValueNear, fightOdds, mainYard, unitsOf } from "./assess";
 import type { Budget } from "./budget";
 import { aiLog, type Ctx } from "./commander";
-import { mineInDanger, strongestEnemies } from "./intel";
+import { mineInDanger, strongestEnemies } from "./spymaster";
 import { centerOf, cmd, countAll, creepSpot, findSpot, insideMyBase, legalFor, refinerySpot, sitesOf } from "./place";
 
 const E = COMMANDER.ECON;

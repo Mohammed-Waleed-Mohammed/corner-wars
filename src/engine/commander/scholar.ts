@@ -1,4 +1,4 @@
-// 33 §D — research by value, as budget requests. Mining research pays back in about a minute, so it
+// 34 §A the Scholar (was 33 §D) — research by value, as budget requests. Mining research pays back in about a minute, so it
 // comes first; the Resonance Grid is timed against the mines running out; armory upgrades are worth
 // more the bigger the army they multiply; the rest answers what the enemy fields. One research at a
 // time (gold sitting in a Lab queue is gold the army can't use).
@@ -9,7 +9,7 @@ import { hasResearchBuilding, isResearched, unitCap } from "../../state/upgrades
 import { armyValue, buildingsOf, combatUnitsOf, mainYard, unitsOf } from "./assess";
 import type { Budget, ReqCat } from "./budget";
 import type { Ctx } from "./commander";
-import { minesRunwayS } from "./economy";
+import { minesRunwayS } from "./treasurer";
 import { cmd, countAll, findSpot } from "./place";
 
 const E = COMMANDER.ECON;

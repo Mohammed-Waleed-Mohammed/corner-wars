@@ -1,4 +1,4 @@
-// 33 §B — what this AI believes. Rebuilt every operational tick from the AI's OWN perception view
+// 34 §A the Spymaster (was 33 §B intel) — what this AI believes. Rebuilt every operational tick from the AI's OWN perception view
 // (ctx.state: what it sees now + what it remembers, 22 §C v3) — never from the real state. Beliefs
 // are estimates: an enemy army the AI hasn't had a good look at for a while is assumed to have grown
 // at the rate its economy could pay for, so an unscouted enemy is never treated as harmless, and a
@@ -7,8 +7,10 @@
 import { COMMANDER, UNIT_STATS } from "../../config/constants";
 import type { AIBeliefs, Building, EnemyBelief, MineBelief, PlayerId, Unit, Vec2 } from "../../core/types";
 import { staleness } from "../aiPerception";
-import { baseCenter, buildingsOf, defenseScore, livingEnemies } from "./assess";
-import type { Ctx } from "./commander";
+import { baseCenter, buildingsOf, claimedSources, contactPoint, defenseCover, defenseScore, livingEnemies } from "./assess";
+import { aiLog, ensureSquad, type Ctx } from "./commander";
+import { nearestPassableTile } from "../pathfinding";
+import { cmd, squadOdds, squadUnits } from "./captain";
 
 const I = COMMANDER.INTEL;
 const dist = (a: Vec2, b: Vec2): number => Math.hypot(a.x - b.x, a.y - b.y);
@@ -212,4 +214,156 @@ export function strongestEnemies(b: AIBeliefs): EnemyBelief[] {
 
 export function mineInDanger(m: MineBelief, tick: number): boolean {
   return tick - m.dangerTick < COMMANDER.INTEL.DANGER_MEMORY_TICKS;
+}
+
+// ── §J v3 Scout: fog of war means the AI must go and look, like a player ─────────
+/** One fast unit (a Scout Buggy; until one exists, main's cheapest fighter once main has ≥ 6) tours
+ *  the stalest point of interest — every known enemy yard/refinery, every unclaimed mine (where an
+ *  expansion would be), the Citadel — MOVE-ing (not fighting) and fleeing any real fight. */
+export function runScout(ctx: Ctx): void {
+  const { state, cs, pid, tier, intel } = ctx;
+  let s = cs.squads.find((q) => q.role === "scout");
+  if (!s || squadUnits(state, s).length === 0) {
+    const main = ensureSquad(cs, "main");
+    const pool = squadUnits(state, main).filter((u) => u.combatType !== undefined && u.combatType !== "support");
+    const pick = pool.find((u) => u.unitType === "scoutBuggy") ??
+      (pool.length >= 6 ? [...pool].sort((a, b) => UNIT_STATS[a.unitType].gold - UNIT_STATS[b.unitType].gold || a.id - b.id)[0] : undefined);
+    if (!pick) return;
+    s = ensureSquad(cs, "scout");
+    s.unitIds = [pick.id];
+    s.mission = "idle";
+    main.unitIds = main.unitIds.filter((id) => id !== pick.id);
+  }
+  const u = squadUnits(state, s)[0];
+  if (!u) return;
+  const home = baseCenter(state, pid);
+  const interval = Math.round(COMMANDER.SCOUT_INTERVAL_TICKS * tier.cadenceMult);
+
+  const contact = contactPoint(state, pid, s.unitIds);
+  if (contact && squadOdds(state, pid, [u], contact) < COMMANDER.SCOUT_FLEE_ODDS) {
+    if (s.mission !== "flee" && home) {
+      cmd(ctx, "MOVE", { unitIds: s.unitIds, x: home.x, y: home.y, spread: false });
+      s.mission = "flee";
+      s.objective = home;
+      s.timer = state.tick + Math.round(interval / 2);
+    }
+    return;
+  }
+  // §K v3: the main army wants a fresh look at its push objective — that trip jumps the queue.
+  const req = cs.scoutRequest;
+  if (req && staleness(state, intel, req.x, req.y) < COMMANDER.SCOUT_STALE_TICKS / 4) cs.scoutRequest = undefined; // looked
+  const urgent = cs.scoutRequest && state.tick - cs.scoutRequest.tick < 2 * COMMANDER.ATTACK_INTEL_WAIT_TICKS
+    ? cs.scoutRequest : undefined;
+  if (urgent && s.mission !== "flee" && (!s.objective || dist(s.objective, urgent) > COMMANDER.SCOUT_ARRIVE || s.mission !== "scouting")) {
+    const to = nearestPassableTile(state, urgent.x, urgent.y);
+    cmd(ctx, "MOVE", { unitIds: s.unitIds, x: to.x, y: to.y, spread: false });
+    s.mission = "scouting";
+    s.objective = to;
+    s.timer = state.tick + interval;
+    aiLog(cs, state.tick, "T", `scout → (${to.x | 0},${to.y | 0}) for the push`);
+    return;
+  }
+  if (s.mission === "scouting" && s.objective) {
+    if (dist(u, s.objective) > COMMANDER.SCOUT_ARRIVE && u.moveTarget) return; // still on the way
+    s.mission = "idle"; // arrived (or the move ended) — the look is taken, pick the next point
+  }
+  if (state.tick < s.timer) return;
+
+  // 33 §B.2: importance × staleness — enemy mains matter most (more while I'm weighing an attack or
+  // only guessing at their army), then their expansions, then free mines (where expansions appear)
+  const pois: { at: Vec2; imp: number; owner: PlayerId | null }[] = [];
+  const beliefs = cs.beliefs;
+  for (const e of livingEnemies(state, pid)) {
+    const eb = beliefs?.enemies[e];
+    const guessing = eb ? eb.est > 1.5 * eb.known + 300 : true;
+    for (const b of buildingsOf(state, e)) {
+      if (b.buildingType === "constructionYard") pois.push({ at: centerOf(b), imp: cs.targetPlayer === e || guessing ? 3 : 2, owner: e });
+      else if (b.buildingType === "refinery" || b.buildingType === "resonanceTap") pois.push({ at: centerOf(b), imp: 2, owner: e });
+    }
+  }
+  const mine = new Set(claimedSources(state, pid).map((g) => g.id));
+  for (const g of state.goldSources) if (!mine.has(g.id)) pois.push({ at: { x: g.x + 0.5, y: g.y + 0.5 }, imp: 1, owner: null });
+  pois.push({ at: { x: state.citadel.x, y: state.citadel.y }, imp: 1, owner: null });
+
+  let best: { at: Vec2; imp: number; owner: PlayerId | null } | null = null, bs = -Infinity;
+  for (const poi of pois) {
+    const age = staleness(state, intel, poi.at.x, poi.at.y);
+    if (age < COMMANDER.SCOUT_STALE_TICKS) continue;
+    const score = (Number.isFinite(age) ? Math.min(age, 20000) : 20000) * poi.imp - dist(u, poi.at) * 10;
+    if (score > bs) { bs = score; best = poi; }
+  }
+  if (!best) return;
+  // look from a peek point outside the known towers' reach, on my side of the target
+  let look = best.at;
+  if (best.owner != null && defenseCover(state, best.owner, look) > 0 && home) {
+    const d = dist(home, look) || 1;
+    const k = Math.min(1, COMMANDER.INTEL.PEEK_DIST / d);
+    look = { x: look.x + (home.x - look.x) * k, y: look.y + (home.y - look.y) * k };
+  }
+  const to = nearestPassableTile(state, look.x, look.y);
+  cmd(ctx, "MOVE", { unitIds: s.unitIds, x: to.x, y: to.y, spread: false });
+  s.mission = "scouting";
+  s.objective = to;
+  s.timer = state.tick + interval;
+  aiLog(cs, state.tick, "T", `scout → (${to.x | 0},${to.y | 0})`);
+}
+
+// ── 33 §B.2 sentries (Hard): watch posts on the approaches, for early warning ─────────────────
+export function runSentries(ctx: Ctx): void {
+  const { state, cs, pid, tier } = ctx;
+  if (!tier.raids) return; // Hard only
+  const I = COMMANDER.INTEL;
+  const home = baseCenter(state, pid);
+  if (!home) return;
+  const main = ensureSquad(cs, "main");
+  const mainUnits = squadUnits(state, main).filter((u) => u.combatType !== undefined && u.combatType !== "support");
+  let s = cs.squads.find((q) => q.role === "sentry");
+  if (!s) {
+    if (mainUnits.length < I.SENTRY_MIN_ARMY) return;
+    s = ensureSquad(cs, "sentry");
+  }
+  const sq = s;
+  const wallR = cs.basePlan && cs.basePlan.radius > 0 ? cs.basePlan.radius : 12;
+  const enemies = livingEnemies(state, pid)
+    .map((e) => ({ e, c: cs.beliefs?.enemies[e]?.home ?? baseCenter(state, e) }))
+    .filter((x): x is { e: PlayerId; c: Vec2 } => !!x.c)
+    .sort((a, b) => dist(a.c, home) - dist(b.c, home) || a.e - b.e)
+    .slice(0, I.SENTRY_MAX);
+  const posts = enemies.map(({ c }) => {
+    const d = dist(c, home) || 1;
+    const k = Math.min(0.5, (wallR + I.SENTRY_OUT) / d);
+    return nearestPassableTile(state, home.x + (c.x - home.x) * k, home.y + (c.y - home.y) * k);
+  });
+  let units = squadUnits(state, sq);
+  while (units.length < posts.length && mainUnits.length >= I.SENTRY_MIN_ARMY) {
+    const pick = [...mainUnits].sort((a, b) => (a.unitType === "scoutBuggy" ? 0 : 1) - (b.unitType === "scoutBuggy" ? 0 : 1) ||
+      UNIT_STATS[a.unitType].gold - UNIT_STATS[b.unitType].gold || a.id - b.id)[0];
+    if (!pick) break;
+    sq.unitIds.push(pick.id);
+    main.unitIds = main.unitIds.filter((id) => id !== pick.id);
+    mainUnits.splice(mainUnits.indexOf(pick), 1);
+    units = squadUnits(state, sq);
+  }
+  // per-sentry flee timers live in the squad's `fleeUntil` map (unit id → tick)
+  const flee = (sq.fleeUntil ??= {});
+  units.forEach((u, i) => {
+    const post = posts[i];
+    if (!post) return;
+    let threat = false;
+    for (const e of state.entities) {
+      if (e.kind !== "unit" || e.owner === pid || e.owner === "neutral" || e.hp <= 0 || e.unitType === "worker") continue;
+      if (dist(e, u) <= I.SENTRY_FLEE_DIST) { threat = true; break; }
+    }
+    const fleeing = (flee[u.id] ?? -1) > state.tick;
+    if (threat) {
+      if (!fleeing) {
+        cmd(ctx, "MOVE", { unitIds: [u.id], x: home.x, y: home.y, spread: false });
+        flee[u.id] = state.tick + I.SENTRY_RETURN_TICKS;
+      }
+      return;
+    }
+    if (fleeing) return;
+    if (dist(u, post) > 3 && !u.moveTarget) cmd(ctx, "MOVE", { unitIds: [u.id], x: post.x, y: post.y, spread: false });
+  });
+  sq.mission = "watch";
 }

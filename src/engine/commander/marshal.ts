@@ -1,30 +1,23 @@
-// 22 §K/§L/§M — the tactical layer (every 15 ticks): squad orders. Attack condition + doctrine,
-// centralized retreat odds, formation counter-picks + facing + re-form, flanking waypoints (Hard),
-// Citadel contest + the four power-usage rules. Commands only — the sim validates everything.
-//
-// v2 (context): every engage/retreat call reads FightOdds at the POINT OF CONTACT (counter triangle,
-// upgrades, medics, powered turrets — not a gold tally at the squad centroid); pushes launch from a
-// projected fight at the objective (what can actually respond there); a retreat runs HOME and then
-// regroups (no instant re-push); victims are scored by value × damage ÷ turret cover ÷ distance, with
-// power plants weighted up only when killing one actually drops the enemy into low power; a nearly
-// dead last yard is pressed home (finishing blow); raids on expansions are answered; the Citadel is
-// garrisoned once taken.
+// 34 §A — the Marshal: the field army (when to launch, where to gather, what to hit, when to fall back),
+// raids, the Citadel, Citadel powers and the commander ability. It runs on the tactical clock (every
+// 15 ticks) and also seats the tactical turn of the Warden (home guard) and the Spymaster (scout,
+// sentries), in the same order as before (22 §K/§L/§M, 33 §F).
 
 import { CITADEL_POWERS, COMMANDER, DEFENSE_STATS, UNIT_STATS } from "../../config/constants";
-import type { Building, FormationId, GameState, PlayerId, Unit, Vec2 } from "../../core/types";
+import type { Building, GameState, PlayerId, Unit, Vec2 } from "../../core/types";
 import {
-  armyValue, baseCenter, buildingsOf, claimedSources, contactPoint, defenseCover, enemyValueNear, fightOdds,
+  armyValue, baseCenter, buildingsOf, contactPoint, defenseCover, enemyValueNear, fightOdds,
   livingEnemies, projectedOdds, squadCenter, territoryThreat, unitsOf,
 } from "./assess";
 import { aiLog, ensureSquad, type Ctx } from "./commander";
 import { nearestPassableTile } from "../pathfinding";
 import { staleness } from "../aiPerception";
 import { planAbility } from "../aiAbilities";
+import { baseThreatened, centerOf, cmd, dist, driveSquad, ensureFormation, gatePost, myFormation, pickFormation, retreat, squadOdds, squadUnits, valueOf, type Squad } from "./captain";
+import { runScout, runSentries } from "./spymaster";
+import { defenseAnchor, runHomeGuard } from "./warden";
 
-const cmd = (ctx: Ctx, type: string, payload: Record<string, unknown>): void =>
-  ctx.submit({ type, playerId: ctx.pid, seq: 0, payload } as never);
-
-export function runTactical(ctx: Ctx): void {
+export function runMarshal(ctx: Ctx): void {
   const { cs } = ctx;
   const main = ensureSquad(cs, "main");
   const guard = ensureSquad(cs, "homeGuard");
@@ -38,230 +31,6 @@ export function runTactical(ctx: Ctx): void {
   runSentries(ctx);
   runPowers(ctx);
   runAbility(ctx); // 27 §E commander ability
-}
-
-// ── §J v3 Scout: fog of war means the AI must go and look, like a player ─────────
-/** One fast unit (a Scout Buggy; until one exists, main's cheapest fighter once main has ≥ 6) tours
- *  the stalest point of interest — every known enemy yard/refinery, every unclaimed mine (where an
- *  expansion would be), the Citadel — MOVE-ing (not fighting) and fleeing any real fight. */
-function runScout(ctx: Ctx): void {
-  const { state, cs, pid, tier, intel } = ctx;
-  let s = cs.squads.find((q) => q.role === "scout");
-  if (!s || squadUnits(state, s).length === 0) {
-    const main = ensureSquad(cs, "main");
-    const pool = squadUnits(state, main).filter((u) => u.combatType !== undefined && u.combatType !== "support");
-    const pick = pool.find((u) => u.unitType === "scoutBuggy") ??
-      (pool.length >= 6 ? [...pool].sort((a, b) => UNIT_STATS[a.unitType].gold - UNIT_STATS[b.unitType].gold || a.id - b.id)[0] : undefined);
-    if (!pick) return;
-    s = ensureSquad(cs, "scout");
-    s.unitIds = [pick.id];
-    s.mission = "idle";
-    main.unitIds = main.unitIds.filter((id) => id !== pick.id);
-  }
-  const u = squadUnits(state, s)[0];
-  if (!u) return;
-  const home = baseCenter(state, pid);
-  const interval = Math.round(COMMANDER.SCOUT_INTERVAL_TICKS * tier.cadenceMult);
-
-  const contact = contactPoint(state, pid, s.unitIds);
-  if (contact && squadOdds(state, pid, [u], contact) < COMMANDER.SCOUT_FLEE_ODDS) {
-    if (s.mission !== "flee" && home) {
-      cmd(ctx, "MOVE", { unitIds: s.unitIds, x: home.x, y: home.y, spread: false });
-      s.mission = "flee";
-      s.objective = home;
-      s.timer = state.tick + Math.round(interval / 2);
-    }
-    return;
-  }
-  // §K v3: the main army wants a fresh look at its push objective — that trip jumps the queue.
-  const req = cs.scoutRequest;
-  if (req && staleness(state, intel, req.x, req.y) < COMMANDER.SCOUT_STALE_TICKS / 4) cs.scoutRequest = undefined; // looked
-  const urgent = cs.scoutRequest && state.tick - cs.scoutRequest.tick < 2 * COMMANDER.ATTACK_INTEL_WAIT_TICKS
-    ? cs.scoutRequest : undefined;
-  if (urgent && s.mission !== "flee" && (!s.objective || dist(s.objective, urgent) > COMMANDER.SCOUT_ARRIVE || s.mission !== "scouting")) {
-    const to = nearestPassableTile(state, urgent.x, urgent.y);
-    cmd(ctx, "MOVE", { unitIds: s.unitIds, x: to.x, y: to.y, spread: false });
-    s.mission = "scouting";
-    s.objective = to;
-    s.timer = state.tick + interval;
-    aiLog(cs, state.tick, "T", `scout → (${to.x | 0},${to.y | 0}) for the push`);
-    return;
-  }
-  if (s.mission === "scouting" && s.objective) {
-    if (dist(u, s.objective) > COMMANDER.SCOUT_ARRIVE && u.moveTarget) return; // still on the way
-    s.mission = "idle"; // arrived (or the move ended) — the look is taken, pick the next point
-  }
-  if (state.tick < s.timer) return;
-
-  // 33 §B.2: importance × staleness — enemy mains matter most (more while I'm weighing an attack or
-  // only guessing at their army), then their expansions, then free mines (where expansions appear)
-  const pois: { at: Vec2; imp: number; owner: PlayerId | null }[] = [];
-  const beliefs = cs.beliefs;
-  for (const e of livingEnemies(state, pid)) {
-    const eb = beliefs?.enemies[e];
-    const guessing = eb ? eb.est > 1.5 * eb.known + 300 : true;
-    for (const b of buildingsOf(state, e)) {
-      if (b.buildingType === "constructionYard") pois.push({ at: centerOf(b), imp: cs.targetPlayer === e || guessing ? 3 : 2, owner: e });
-      else if (b.buildingType === "refinery" || b.buildingType === "resonanceTap") pois.push({ at: centerOf(b), imp: 2, owner: e });
-    }
-  }
-  const mine = new Set(claimedSources(state, pid).map((g) => g.id));
-  for (const g of state.goldSources) if (!mine.has(g.id)) pois.push({ at: { x: g.x + 0.5, y: g.y + 0.5 }, imp: 1, owner: null });
-  pois.push({ at: { x: state.citadel.x, y: state.citadel.y }, imp: 1, owner: null });
-
-  let best: { at: Vec2; imp: number; owner: PlayerId | null } | null = null, bs = -Infinity;
-  for (const poi of pois) {
-    const age = staleness(state, intel, poi.at.x, poi.at.y);
-    if (age < COMMANDER.SCOUT_STALE_TICKS) continue;
-    const score = (Number.isFinite(age) ? Math.min(age, 20000) : 20000) * poi.imp - dist(u, poi.at) * 10;
-    if (score > bs) { bs = score; best = poi; }
-  }
-  if (!best) return;
-  // look from a peek point outside the known towers' reach, on my side of the target
-  let look = best.at;
-  if (best.owner != null && defenseCover(state, best.owner, look) > 0 && home) {
-    const d = dist(home, look) || 1;
-    const k = Math.min(1, COMMANDER.INTEL.PEEK_DIST / d);
-    look = { x: look.x + (home.x - look.x) * k, y: look.y + (home.y - look.y) * k };
-  }
-  const to = nearestPassableTile(state, look.x, look.y);
-  cmd(ctx, "MOVE", { unitIds: s.unitIds, x: to.x, y: to.y, spread: false });
-  s.mission = "scouting";
-  s.objective = to;
-  s.timer = state.tick + interval;
-  aiLog(cs, state.tick, "T", `scout → (${to.x | 0},${to.y | 0})`);
-}
-
-type Squad = Ctx["cs"]["squads"][number];
-
-function squadUnits(state: GameState, s: Squad): Unit[] {
-  const ids = new Set(s.unitIds);
-  return state.entities.filter((e): e is Unit => e.kind === "unit" && e.hp > 0 && ids.has(e.id));
-}
-function myFormation(state: GameState, pid: PlayerId, s: Squad): GameState["formations"][number] | null {
-  const set = new Set(s.unitIds);
-  return state.formations.find((f) => f.owner === pid && f.unitIds.some((id) => set.has(id))) ?? null;
-}
-const valueOf = (us: Unit[]): number => us.reduce((v, u) => v + (u.hp / u.maxHp) * UNIT_STATS[u.unitType].gold, 0);
-const dist = (a: Vec2, b: Vec2): number => Math.hypot(a.x - b.x, a.y - b.y);
-const centerOf = (b: Building): Vec2 => ({ x: b.x + b.width / 2, y: b.y + b.height / 2 });
-
-/** The squad's read of the fight it's in: hostiles within LOCAL_ODDS_RADIUS of the contact vs every
- *  squad member within LOCAL_ODDS_RADIUS + ENGAGE_RADIUS (they're arriving — when the vanguard touches
- *  the enemy, the column behind it is part of this fight; counting only units already at the contact
- *  point made a winning army retreat from its own first skirmish). */
-function squadOdds(state: GameState, pid: PlayerId, members: Unit[], contact: Vec2): number {
-  const reach = COMMANDER.LOCAL_ODDS_RADIUS + COMMANDER.ENGAGE_RADIUS;
-  return fightOdds(state, pid, contact, COMMANDER.LOCAL_ODDS_RADIUS, members.filter((u) => dist(u, contact) <= reach));
-}
-
-/** §L: the formation the situation calls for, or (Hard) the §L counter-pick against the nearest enemy
- *  formation. Medium uses the fixed mode picks only (§N) — the old `fullAdaptation || true` gave Medium
- *  Hard's counter-picks too. */
-function pickFormation(ctx: Ctx, at: Vec2, mode: "travel" | "siege" | "meet" | "defend"): FormationId {
-  const { state, pid, tier } = ctx;
-  if (tier.fullAdaptation) {
-    let nearest: GameState["formations"][number] | null = null, bd = 18 * 18;
-    for (const f of state.formations) {
-      if (f.owner === pid) continue;
-      const d = (f.anchor.x - at.x) ** 2 + (f.anchor.y - at.y) ** 2;
-      if (d < bd) { bd = d; nearest = f; }
-    }
-    const pick = nearest ? (COMMANDER.FORMATION_COUNTERS as Record<string, string>)[nearest.formationDefId] : undefined;
-    if (pick) return pick as FormationId;
-  }
-  switch (mode) {
-    case "travel": return "column";
-    case "siege": return "spear";
-    case "meet": return "line";
-    case "defend": return "box";
-  }
-}
-
-/** FORM_UP if the squad isn't in `want` formation, or re-form on >25% holes (§L facing discipline:
- *  face the nearest enemy formation / the objective). */
-function ensureFormation(ctx: Ctx, s: Squad, want: FormationId, faceTo: Vec2 | null): void {
-  const { state, pid } = ctx;
-  const units = squadUnits(state, s).filter((u) => u.combatType && u.combatType !== "support" || u.unitType === "medic");
-  if (units.length < 4) return;
-  const f = myFormation(state, pid, s);
-  // holes = squad fighters NOT covered by the formation (reinforcements/losses), §L re-form >25%.
-  const covered = f ? f.unitIds.filter((id) => s.unitIds.includes(id)).length : 0;
-  const holes = 1 - covered / units.length;
-  const throttled = state.tick - s.lastFormTick < 240; // never re-form more than every ~8 s (stall guard)
-  if (f && f.formationDefId === want && (holes <= COMMANDER.REFORM_HOLES || throttled)) return;
-  if (!f || !throttled || f.formationDefId !== want) {
-    const center = squadCenter(state, s.unitIds);
-    let facing: number | undefined;
-    if (faceTo && center) facing = Math.atan2(faceTo.y - center.y, faceTo.x - center.x);
-    cmd(ctx, "FORM_UP", { unitIds: units.map((u) => u.id), formationId: want, facing });
-    s.formation = want;
-    s.lastFormTick = state.tick;
-  }
-}
-
-/** Reinforcement stream: idle squad members far from the objective get sent forward, and the whole
- *  squad order is re-issued every ~10 s so a stalled push resumes instead of standing at home. */
-function driveSquad(ctx: Ctx, s: Squad, objective: Vec2, attack: boolean): void {
-  const { state } = ctx;
-  const type = attack ? "ATTACK_MOVE" : "MOVE";
-  const stale = state.tick - s.lastOrderTick > 300;
-  const idle = squadUnits(state, s).filter(
-    (u) => u.state === "idle" && !u.moveTarget && u.formationId == null && dist(u, objective) > 15,
-  );
-  if (stale) {
-    cmd(ctx, type, { unitIds: s.unitIds, x: objective.x, y: objective.y, spread: false });
-    s.lastOrderTick = state.tick;
-  } else if (idle.length > 0) {
-    cmd(ctx, type, { unitIds: idle.map((u) => u.id), x: objective.x, y: objective.y, spread: false });
-  }
-}
-
-/** Where a beaten squad runs to: inside the main gate if the base is planned, else the yard. */
-function rallyPoint(ctx: Ctx): Vec2 | null {
-  return gatePost(ctx) ?? baseCenter(ctx.state, ctx.pid);
-}
-
-/** §G v4: a spot a few tiles inside the main gate, on its lane — where defenders muster. */
-function gatePost(ctx: Ctx): Vec2 | null {
-  const { state, cs, pid } = ctx;
-  const home = baseCenter(state, pid);
-  const gate = cs.basePlan?.gateCenters[0];
-  if (!home || !gate) return home;
-  const d = Math.hypot(home.x - gate.x, home.y - gate.y) || 1;
-  const k = Math.min(1, COMMANDER.GATE_POST_DEPTH / d);
-  return { x: gate.x + 0.5 + (home.x - gate.x - 0.5) * k, y: gate.y + 0.5 + (home.y - gate.y - 0.5) * k };
-}
-
-/** §K v4: is this point part of my base — inside the planned wall (with a little slack outside it, where
- *  attackers chew on the wall), or near the yard when no wall is planned? */
-function baseThreatened(ctx: Ctx, at: Vec2, home: Vec2): boolean {
-  const plan = ctx.cs.basePlan;
-  const W = ctx.state.mapWidth;
-  const tx = Math.floor(at.x), ty = Math.floor(at.y);
-  if (plan?.dist && plan.radius > 0 && tx >= 0 && ty >= 0 && tx < W && ty < ctx.state.mapHeight) {
-    const d = plan.dist[ty * W + tx];
-    if (d >= 0 && d <= plan.radius + COMMANDER.BASE_WALL_SLACK) return true;
-  }
-  return dist(at, home) <= COMMANDER.BASE_DEFEND_RADIUS;
-}
-
-/** §K v2 retreat: MOVE (not attack-move — don't stop to trade) to the rally point. A rout (odds below
- *  ROUT_ODDS) breaks the formation first so everyone runs at their own speed instead of the slowest
- *  member's 80% Fall Back walk; anything better withdraws as a shape. Arms the regroup hysteresis. */
-function retreat(ctx: Ctx, s: Squad, odds: number, value: number, why: string): void {
-  const { state, cs, pid } = ctx;
-  const to = rallyPoint(ctx);
-  if (!to) return;
-  const f = myFormation(state, pid, s);
-  if (f && odds < COMMANDER.ROUT_ODDS) cmd(ctx, "BREAK_FORMATION", { formationInstanceId: f.id });
-  cmd(ctx, "MOVE", { unitIds: s.unitIds, x: to.x, y: to.y, spread: false });
-  s.mission = "retreat";
-  s.objective = to;
-  s.retreatTick = state.tick;
-  s.valueAtRetreat = value;
-  s.lastOrderTick = state.tick;
-  aiLog(cs, state.tick, "T", `${s.role} FALL BACK — ${why} (odds ${odds.toFixed(2)}${odds < COMMANDER.ROUT_ODDS ? ", rout" : ""})`);
 }
 
 /** §K v2 finishing blow: a hostile player's LAST yard, badly damaged, close to this squad. Losing it
@@ -604,33 +373,6 @@ function pickVictim(ctx: Ctx, target: PlayerId, from: Vec2): Building | null {
   return best;
 }
 
-// ── HomeGuard: Guard the threat-facing gate; answer raids anywhere in my territory (§J v2) ─────
-function runHomeGuard(ctx: Ctx, s: Squad): void {
-  const { state, pid } = ctx;
-  const units = squadUnits(state, s);
-  if (units.length === 0) return;
-  const home = baseCenter(state, pid);
-  if (!home) return;
-  const post = gatePost(ctx) ?? home;
-  const threat = territoryThreat(state, pid);
-  if (threat) {
-    // §K v4: inside my walls the guard always engages at the point of attack, beside its towers. An
-    // outlying structure gets help only in a fight the guard (+ my defenses there) can win.
-    const odds = fightOdds(state, pid, threat.at, COMMANDER.LOCAL_ODDS_RADIUS, units, true);
-    const to = baseThreatened(ctx, threat.at, home) || odds >= COMMANDER.GUARD_RESPOND_ODDS ? threat.at : home;
-    if (s.mission !== "repel" || !s.objective || dist(s.objective, to) > 4) {
-      if (to === home) ensureFormation(ctx, s, "box", null);
-      cmd(ctx, "ATTACK_MOVE", { unitIds: s.unitIds, x: to.x, y: to.y, spread: false });
-      s.mission = "repel";
-      s.objective = { x: to.x, y: to.y };
-    }
-  } else if (s.mission !== "guard") {
-    cmd(ctx, "GUARD", { unitIds: s.unitIds, x: post.x, y: post.y });
-    s.mission = "guard";
-    s.objective = { x: post.x, y: post.y };
-  }
-}
-
 // ── RaidSquad: hit the least-covered enemy mining spot; flee anything close to a fair fight (§J v2) ──
 function runRaid(ctx: Ctx, s: Squad): void {
   const { state, cs, pid, rng } = ctx;
@@ -814,88 +556,4 @@ function runAbility(ctx: Ctx): void {
   if (!cast) return;
   cmd(ctx, "USE_ABILITY", { x: cast.x, y: cast.y });
   aiLog(ctx.cs, ctx.state.tick, "T", `ABILITY: ${ctx.p.commander}`);
-}
-
-/** 33 §E.3: the strongest group of my powered towers near the line from the threat to my yard — where a
- *  force that only wins with tower support should stand. */
-function defenseAnchor(ctx: Ctx, threat: Vec2, home: Vec2): Vec2 | null {
-  const { state, pid } = ctx;
-  const towers = buildingsOf(state, pid).filter((b) => DEFENSE_STATS[b.buildingType] && b.buildProgress >= 1);
-  if (towers.length === 0) return null;
-  const R = COMMANDER.DEFENSE2.ANCHOR_RADIUS;
-  let best: Vec2 | null = null, bs = 0;
-  for (const t of towers) {
-    const c = centerOf(t);
-    const vx = home.x - threat.x, vy = home.y - threat.y;
-    const L2 = vx * vx + vy * vy || 1;
-    const k = Math.max(0, Math.min(1, ((c.x - threat.x) * vx + (c.y - threat.y) * vy) / L2));
-    const off = Math.hypot(threat.x + vx * k - c.x, threat.y + vy * k - c.y);
-    if (off > R) continue;
-    const cover = defenseCover(state, pid, c);
-    if (cover > bs) { bs = cover; best = c; }
-  }
-  if (!best) return null;
-  const d = dist(best, home) || 1;
-  const k = Math.min(1, 2 / d);
-  return nearestPassableTile(state, best.x + (home.x - best.x) * k, best.y + (home.y - best.y) * k);
-}
-
-// ── 33 §B.2 sentries (Hard): watch posts on the approaches, for early warning ─────────────────
-function runSentries(ctx: Ctx): void {
-  const { state, cs, pid, tier } = ctx;
-  if (!tier.raids) return; // Hard only
-  const I = COMMANDER.INTEL;
-  const home = baseCenter(state, pid);
-  if (!home) return;
-  const main = ensureSquad(cs, "main");
-  const mainUnits = squadUnits(state, main).filter((u) => u.combatType !== undefined && u.combatType !== "support");
-  let s = cs.squads.find((q) => q.role === "sentry");
-  if (!s) {
-    if (mainUnits.length < I.SENTRY_MIN_ARMY) return;
-    s = ensureSquad(cs, "sentry");
-  }
-  const sq = s;
-  const wallR = cs.basePlan && cs.basePlan.radius > 0 ? cs.basePlan.radius : 12;
-  const enemies = livingEnemies(state, pid)
-    .map((e) => ({ e, c: cs.beliefs?.enemies[e]?.home ?? baseCenter(state, e) }))
-    .filter((x): x is { e: PlayerId; c: Vec2 } => !!x.c)
-    .sort((a, b) => dist(a.c, home) - dist(b.c, home) || a.e - b.e)
-    .slice(0, I.SENTRY_MAX);
-  const posts = enemies.map(({ c }) => {
-    const d = dist(c, home) || 1;
-    const k = Math.min(0.5, (wallR + I.SENTRY_OUT) / d);
-    return nearestPassableTile(state, home.x + (c.x - home.x) * k, home.y + (c.y - home.y) * k);
-  });
-  let units = squadUnits(state, sq);
-  while (units.length < posts.length && mainUnits.length >= I.SENTRY_MIN_ARMY) {
-    const pick = [...mainUnits].sort((a, b) => (a.unitType === "scoutBuggy" ? 0 : 1) - (b.unitType === "scoutBuggy" ? 0 : 1) ||
-      UNIT_STATS[a.unitType].gold - UNIT_STATS[b.unitType].gold || a.id - b.id)[0];
-    if (!pick) break;
-    sq.unitIds.push(pick.id);
-    main.unitIds = main.unitIds.filter((id) => id !== pick.id);
-    mainUnits.splice(mainUnits.indexOf(pick), 1);
-    units = squadUnits(state, sq);
-  }
-  // per-sentry flee timers live in the squad's `fleeUntil` map (unit id → tick)
-  const flee = (sq.fleeUntil ??= {});
-  units.forEach((u, i) => {
-    const post = posts[i];
-    if (!post) return;
-    let threat = false;
-    for (const e of state.entities) {
-      if (e.kind !== "unit" || e.owner === pid || e.owner === "neutral" || e.hp <= 0 || e.unitType === "worker") continue;
-      if (dist(e, u) <= I.SENTRY_FLEE_DIST) { threat = true; break; }
-    }
-    const fleeing = (flee[u.id] ?? -1) > state.tick;
-    if (threat) {
-      if (!fleeing) {
-        cmd(ctx, "MOVE", { unitIds: [u.id], x: home.x, y: home.y, spread: false });
-        flee[u.id] = state.tick + I.SENTRY_RETURN_TICKS;
-      }
-      return;
-    }
-    if (fleeing) return;
-    if (dist(u, post) > 3 && !u.moveTarget) cmd(ctx, "MOVE", { unitIds: [u.id], x: post.x, y: post.y, spread: false });
-  });
-  sq.mission = "watch";
 }

@@ -11,9 +11,9 @@ import { COMMANDER } from "../../config/constants";
 import type { AIIntel, AIPersonality, CommanderState, GameState, Player, PlayerId, SquadRole } from "../../core/types";
 import type { Command } from "../../sim/commands";
 import { initIntel, perceive } from "../aiPerception";
-import { runStrategic } from "./strategic";
-import { runOperational } from "./operational";
-import { runTactical } from "./tactical";
+import { runKing } from "./king";
+import { runSession } from "./council";
+import { runMarshal } from "./marshal";
 
 export type Submit = (cmd: Command) => void;
 
@@ -117,9 +117,11 @@ export function runCommander(state: GameState, p: Player, submit: Submit): void 
     rng: makeRng(cs),
     intel: p.ai.intel,
   };
-  if (dueS) runStrategic(ctx);
-  if (dueO) runOperational(ctx);
-  if (dueT) runTactical(ctx);
+  // 34 §B: the King on the strategic clock, the council session on the operational clock, the
+  // Marshal (and the seats' squads) on the tactical clock — same order as the old three layers
+  if (dueS) runKing(ctx);
+  if (dueO) runSession(ctx);
+  if (dueT) runMarshal(ctx);
 }
 
 // ── §J squad bookkeeping (shared by layers) ───────────────────────────────────

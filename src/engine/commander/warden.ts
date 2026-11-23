@@ -1,4 +1,4 @@
-// 33 §E — defense: how much danger am I in, how big an army do I need standing, where have I been hit,
+// 34 §A the Warden (was 33 §E defense): how much danger am I in, how big an army do I need standing, where have I been hit,
 // which mines to evacuate, and which static defenses to build (the base plan's, adaptive counter
 // towers on the approaches that keep getting hit, and an emergency tower against an attack I can
 // see coming but can't hold). Requests go to the budget arbiter; evacuation marks mines for the
@@ -8,11 +8,13 @@ import { BUILDING_STATS, COMMANDER, DEFENSE_STATS, STRUCTURE_CAP } from "../../c
 import type { BuildingType, ResearchKey, Vec2 } from "../../core/types";
 import { isLowPower } from "../../state/gameState";
 import { isResearched } from "../../state/upgrades";
-import { armyValue, baseCenter, buildingsOf, compositionNear, fightOdds, territoryThreat, type Composition } from "./assess";
+import { armyValue, baseCenter, buildingsOf, compositionNear, defenseCover, fightOdds, territoryThreat, type Composition } from "./assess";
 import type { Budget } from "./budget";
 import { aiLog, type Ctx } from "./commander";
-import { strongestEnemies } from "./intel";
+import { strongestEnemies } from "./spymaster";
 import { centerOf, cmd, spotNear, legalFor } from "./place";
+import { nearestPassableTile } from "../pathfinding";
+import { baseThreatened, ensureFormation, gatePost, squadUnits, type Squad } from "./captain";
 import { keepsBaseConnected } from "./basePlan";
 
 const D2 = COMMANDER.DEFENSE2;
@@ -196,4 +198,55 @@ function mostRecentAttackerComp(ctx: Ctx): Composition | null {
   const b = ctx.cs.beliefs!;
   const att = Object.values(b.enemies).filter((e) => e && e.known > 0).sort((a, c) => c!.attackedMeTick - a!.attackedMeTick)[0];
   return att ? att.comp : null;
+}
+
+// ── HomeGuard: Guard the threat-facing gate; answer raids anywhere in my territory (§J v2) ─────
+export function runHomeGuard(ctx: Ctx, s: Squad): void {
+  const { state, pid } = ctx;
+  const units = squadUnits(state, s);
+  if (units.length === 0) return;
+  const home = baseCenter(state, pid);
+  if (!home) return;
+  const post = gatePost(ctx) ?? home;
+  const threat = territoryThreat(state, pid);
+  if (threat) {
+    // §K v4: inside my walls the guard always engages at the point of attack, beside its towers. An
+    // outlying structure gets help only in a fight the guard (+ my defenses there) can win.
+    const odds = fightOdds(state, pid, threat.at, COMMANDER.LOCAL_ODDS_RADIUS, units, true);
+    const to = baseThreatened(ctx, threat.at, home) || odds >= COMMANDER.GUARD_RESPOND_ODDS ? threat.at : home;
+    if (s.mission !== "repel" || !s.objective || dist(s.objective, to) > 4) {
+      if (to === home) ensureFormation(ctx, s, "box", null);
+      cmd(ctx, "ATTACK_MOVE", { unitIds: s.unitIds, x: to.x, y: to.y, spread: false });
+      s.mission = "repel";
+      s.objective = { x: to.x, y: to.y };
+    }
+  } else if (s.mission !== "guard") {
+    cmd(ctx, "GUARD", { unitIds: s.unitIds, x: post.x, y: post.y });
+    s.mission = "guard";
+    s.objective = { x: post.x, y: post.y };
+  }
+}
+
+/** 33 §E.3: the strongest group of my powered towers near the line from the threat to my yard — where a
+ *  force that only wins with tower support should stand. */
+export function defenseAnchor(ctx: Ctx, threat: Vec2, home: Vec2): Vec2 | null {
+  const { state, pid } = ctx;
+  const towers = buildingsOf(state, pid).filter((b) => DEFENSE_STATS[b.buildingType] && b.buildProgress >= 1);
+  if (towers.length === 0) return null;
+  const R = COMMANDER.DEFENSE2.ANCHOR_RADIUS;
+  let best: Vec2 | null = null, bs = 0;
+  for (const t of towers) {
+    const c = centerOf(t);
+    const vx = home.x - threat.x, vy = home.y - threat.y;
+    const L2 = vx * vx + vy * vy || 1;
+    const k = Math.max(0, Math.min(1, ((c.x - threat.x) * vx + (c.y - threat.y) * vy) / L2));
+    const off = Math.hypot(threat.x + vx * k - c.x, threat.y + vy * k - c.y);
+    if (off > R) continue;
+    const cover = defenseCover(state, pid, c);
+    if (cover > bs) { bs = cover; best = c; }
+  }
+  if (!best) return null;
+  const d = dist(best, home) || 1;
+  const k = Math.min(1, 2 / d);
+  return nearestPassableTile(state, best.x + (home.x - best.x) * k, best.y + (home.y - best.y) * k);
 }

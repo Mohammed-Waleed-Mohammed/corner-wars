@@ -1,4 +1,4 @@
-// 33 §F (over 22 §B/§D/§E) — the strategic layer (every 150 ticks): posture and FFA target, read from
+// 34 §A the King (was 33 §F over 22 §B/§D/§E, the strategic layer) (every 150 ticks): posture and FFA target, read from
 // BELIEFS (33 §B: what I've seen + what an unseen army could have grown into), never from a peek.
 // First matching row wins; Medium runs only the defensive rows (DEFEND/RECOVER) + the personality
 // default (22 §N).
@@ -9,7 +9,7 @@ import { isLowPower } from "../../state/gameState";
 import { unitCap } from "../../state/upgrades";
 import { armyValue, baseCenter, biggestThreatPlayer, fightersOf, fightOdds, frontDistance, livingEnemies, projectedOdds, territoryThreat, unitsOf } from "./assess";
 import { aiLog, type Ctx } from "./commander";
-import { updateBeliefs } from "./intel";
+import { updateBeliefs } from "./spymaster";
 
 const HIST_KEEP_TICKS = 1800;
 
@@ -19,7 +19,7 @@ function valueAgo(hist: { tick: number; v: number }[], now: number, window: numb
   return best;
 }
 
-export function runStrategic(ctx: Ctx): void {
+export function runKing(ctx: Ctx): void {
   const { state, cs, pid, pers, tier } = ctx;
   const t = state.tick;
   const b = updateBeliefs(ctx);

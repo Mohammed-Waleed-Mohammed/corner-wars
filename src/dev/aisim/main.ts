@@ -55,8 +55,9 @@ if (mode === "exp") {
   const grep = args[5];
   for (const p of m.state.players) if (p.ai) {
     out(`  — P${p.id} workers lost ${m.lostWorkers[p.id]}; log${grep ? ` /${grep}/` : " tail"}:`);
-    const lines = grep ? m.fullLog[p.id].filter((l) => new RegExp(grep.replace(/,/g, "|")).test(l)) : m.fullLog[p.id].slice(-12);
-    for (const l of lines.slice(0, 80)) out(`     ${l}`);
+    // "*" prints the whole log (the refactor parity check, 34 §I step 1)
+    const lines = grep === "*" ? m.fullLog[p.id] : grep ? m.fullLog[p.id].filter((l) => new RegExp(grep.replace(/,/g, "|")).test(l)) : m.fullLog[p.id].slice(-12);
+    for (const l of lines.slice(0, grep === "*" ? lines.length : 80)) out(`     ${l}`);
   }
 } else if (mode === "survey") {
   const min = Number(args[1] ?? 20);

@@ -1,4 +1,4 @@
-// 33 §A — the operational layer (every 60 ticks) as an orchestrator: refresh beliefs (§B), read the
+// 34 §B — the council session (was 33 §A, the operational layer; every 60 ticks): refresh beliefs (§B), read the
 // danger (§E), keep workers and sites busy, then let every planner post requests and the budget
 // arbiter (§D) decide what the gold buys. Emits only commands; the sim enforces costs and legality.
 
@@ -6,17 +6,17 @@ import { COMMANDER, UNIT_STATS } from "../../config/constants";
 import { armyValue, combatUnitsOf, fightersOf, mainYard } from "./assess";
 import { arbitrate, Budget } from "./budget";
 import { aiLog, ensureSquad, pruneSquads, type Ctx } from "./commander";
-import { assessDanger, defenseRequests } from "./defense";
-import { crewSites, economyRequests, manageWorkers } from "./economy";
-import { updateBeliefs } from "./intel";
-import { militaryRequests } from "./military";
+import { assessDanger, defenseRequests } from "./warden";
+import { crewSites, economyRequests, manageWorkers } from "./treasurer";
+import { updateBeliefs } from "./spymaster";
+import { militaryRequests } from "./quartermaster";
 import { planBase } from "./basePlan";
-import { techRequests } from "./tech";
+import { techRequests } from "./scholar";
 
-export { counterMix } from "./military";
+export { counterMix } from "./quartermaster";
 export { findSpot } from "./place";
 
-export function runOperational(ctx: Ctx): void {
+export function runSession(ctx: Ctx): void {
   const { state, cs, pid } = ctx;
   const cy = mainYard(state, pid);
   if (!cy) return;
