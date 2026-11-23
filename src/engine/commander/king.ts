@@ -76,7 +76,7 @@ export function runKing(ctx: Ctx): void {
     // keep rebuilding
   } else if (!tier.fullAdaptation) {
     cs.stance = defaultStance(ctx, myArmy, est(target));
-  } else if (cs.stance === "ALL_IN" && t < cs.stanceUntilTick) {
+  } else if (cs.stance === "ALL_IN" && t < cs.stanceUntilTick && !windowShut(ctx, myArmy)) {
     // hold the ALL_IN window
   } else if (target != null && tb && (cs.allInWhy = allInWindow(ctx, tb, myArmy, dropped(target, COMMANDER.ALLIN_ENEMY_DROP)) ?? undefined)) {
     cs.stance = "ALL_IN"; // row 3
@@ -98,6 +98,17 @@ export function runKing(ctx: Ctx): void {
   }
 }
 
+/** 34 §E.1 a window opened on the army being away shuts when that army turns out bigger than I am
+ *  (new sightings raise the belief): the ALL_IN is dropped, not held for its full window. */
+function windowShut(ctx: Ctx, myArmy: number): boolean {
+  const { cs, state } = ctx;
+  if (cs.allInWhy !== "away" || cs.targetPlayer == null) return false;
+  const believed = ask.strength(ctx, cs.targetPlayer).believed;
+  if (myArmy >= believed) return false;
+  aiLog(cs, state.tick, "S", `[King] the ALL_IN window on P${cs.targetPlayer} shuts — their army is bigger than believed (${believed | 0} vs my ${myArmy | 0})`);
+  return true;
+}
+
 /** §F.1 row 3: a decisive window — and which one (it sets the launch odds, 34 §E.2). The "army
  *  away" window asks the Spymaster first (34 §E.1): only a located army, a confident estimate, and
  *  odds against the BELIEVED strength (not just the units in sight) at the King's nerve. */
@@ -112,10 +123,19 @@ function allInWindow(ctx: Ctx, tb: EnemyBelief, myArmy: number, justLost: boolea
     const home = baseCenter(state, pid);
     const mine = home ? Math.hypot(home.x - tb.home.x, home.y - tb.home.y) : 9999;
     const theirs = tb.armyAt ? Math.hypot(tb.armyAt.x - tb.home.x, tb.armyAt.y - tb.home.y) : 0;
-    if (mine < theirs * 1.6) {
+    // a stronger army of theirs on my half of the map: striking their base is a race my base loses
+    const onMySide = !!home && !!tb.armyAt && Math.hypot(tb.armyAt.x - home.x, tb.armyAt.y - home.y) < theirs;
+    if (onMySide && believed > myArmy) {
+      veto(ctx, "king", "S", "allin:race", `ALL_IN on P${tb.pid} denied — their stronger army (${believed | 0} vs my ${myArmy | 0}) stands on my side of the map: a base race`);
+    } else if (mine < theirs * 1.6) {
       const read = strikeRead(ctx, tb.pid, myArmy);
       const odds = Math.min(read.odds, projectedOdds(state, pid, fighters, tb.pid, tb.home));
-      if (!read.located || (read.conf < COMMANDER.COUNCIL.CONF_TO_STRIKE && odds < pers.strikeOdds * COMMANDER.COUNCIL.CONF_MARGIN)) {
+      // a lost army is read as standing at home, at its FULL estimate (no trust discount: it could be
+      // anywhere, at any size up to the estimate) — a clear margin over that strikes anyway
+      const fullOdds = Math.sqrt(myArmy / Math.max(1, ask.strength(ctx, tb.pid).est + 4 * (tb.baseDef ?? 0)));
+      const sure = read.located ? read.conf >= COMMANDER.COUNCIL.CONF_TO_STRIKE || odds >= pers.strikeOdds * COMMANDER.COUNCIL.CONF_MARGIN
+        : Math.min(odds, fullOdds) >= pers.strikeOdds * COMMANDER.COUNCIL.CONF_MARGIN;
+      if (!sure) {
         veto(ctx, "king", "S", "allin:guess", `ALL_IN on P${tb.pid} denied — Spymaster ${read.located ? `confidence ${read.conf.toFixed(2)} < ${COMMANDER.COUNCIL.CONF_TO_STRIKE}` : "has lost their army"} (believed ${read.believed | 0} vs my ${myArmy | 0})`);
         if (tb.home) ctx.cs.scoutRequest = { x: tb.home.x, y: tb.home.y, tick: state.tick };
       } else if (odds < pers.strikeOdds) {

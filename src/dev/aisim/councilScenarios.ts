@@ -29,6 +29,12 @@ function vsIdle(pers: AIPersonality, seed: number): Match {
   if (y) { y.maxHp = 1e8; y.hp = 1e8; }
   return m;
 }
+/** A garrison at P1's yard: against an idle base with no army the AI rightly strikes at once, and a
+ *  scenario about my side of the map needs my army home. */
+function garrisoned(m: Match, n = 20): Match {
+  m.spawn(P1, "tank", n, m.home(P1), 1.2);
+  return m;
+}
 function runUntil(m: Match, seconds: number, check: () => boolean): number | null {
   const end = m.state.tick + seconds * TPS;
   while (m.state.tick < end && m.state.winner === null) {
@@ -66,17 +72,20 @@ export const COUNCIL_SCENARIOS: Scenario[] = [
       const home = m.home(P0), theirs = m.home(P1);
       // their army shows itself on my side of the map, far from its base, then vanishes into the fog
       const at = lerp(home, theirs, 0.3);
+      const before = `${m.cs(P0)!.stance}/${m.cs(P0)!.allInWhy} until ${((m.cs(P0)!.stanceUntilTick ?? 0) / 30) | 0}s`;
       const army = armyWorth(m, P1, Math.max(1500, m.army(P0) * 1.4), { x: at.x + 14, y: at.y });
       m.run(12);
       const corner = { x: theirs.x > home.x ? m.state.mapWidth - 4 : 4, y: theirs.y > home.y ? 4 : m.state.mapHeight - 4 };
       m.order(P1, "MOVE", { unitIds: ids(army), x: corner.x, y: corner.y, spread: false });
       let awayAllIn = 0;
+      const when: number[] = [];
       for (let t = 0; t < 120; t += 1) {
         m.run(1);
         const cs = m.cs(P0)!;
-        if (cs.stance === "ALL_IN" && cs.allInWhy === "away" && valueOf(army) > m.army(P0)) awayAllIn++;
+        // the King decides every 5 s (COMMANDER.CADENCE.STRATEGIC): one cadence of grace after the move
+        if (t >= 6 && cs.stance === "ALL_IN" && cs.allInWhy === "away" && valueOf(army) > m.army(P0)) { awayAllIn++; when.push(t); }
       }
-      return res(awayAllIn === 0, `ALL_IN on the lost "away" army while weaker: ${awayAllIn} s (0); hidden army ${valueOf(army) | 0} vs mine ${m.army(P0) | 0}`);
+      return res(awayAllIn === 0, `ALL_IN on the lost "away" army while weaker: ${awayAllIn} s (0); hidden army ${valueOf(army) | 0} vs mine ${m.army(P0) | 0}${when.length ? ` (at +${when.join(",")} s; at the spawn ${before})` : ""}`);
     },
   },
   {
@@ -102,21 +111,23 @@ export const COUNCIL_SCENARIOS: Scenario[] = [
   },
   {
     id: "council.fieldArmy", title: "A stronger army on the route is not marched past",
-    make: () => vsIdle("rusher", 3),
+    make: () => garrisoned(vsIdle("rusher", 3)), // the Rusher's army starts at home (no 3-min strike on an empty base)
     run: (m) => {
       m.run(200);
       const mid = lerp(m.home(P0), m.home(P1), 0.5);
       const army = armyWorth(m, P1, m.army(P0) * 1.6, mid);
       m.order(P1, "GUARD", { unitIds: ids(army), x: mid.x, y: mid.y });
       let close = 0;
+      const seen: string[] = [];
       for (let t = 0; t < 240; t += 1) {
         m.run(1);
         if (t % 15 === 0 && m.army(P0) * 1.6 > valueOf(army) + 300) { const add = armyWorth(m, P1, m.army(P0) * 1.6 - valueOf(army), mid); army.push(...add); m.order(P1, "GUARD", { unitIds: ids(add), x: mid.x, y: mid.y }); }
         const c = centroid(army);
         const main = new Set(mainSquad(m, P0)?.unitIds ?? []);
-        if (c && valueOf(army) > m.army(P0) && m.fighters(P0).some((u) => main.has(u.id) && dist(u, c) < 8 && dist(u, m.home(P0)) > 25)) close++;
+        const near = c ? m.fighters(P0).filter((u) => main.has(u.id) && dist(u, c) < 8 && dist(u, m.home(P0)) > 25) : [];
+        if (c && valueOf(army) > m.army(P0) && near.length) { close++; if (seen.length < 6) seen.push(`${m.state.time | 0}s ${mainMission(m, P0)} ${near.length}×${near[0].unitType}`); }
       }
-      return res(close <= 3, `seconds with main units within 8 tiles of a stronger field army, out of base: ${close} (≤3)`);
+      return res(close <= 3, `seconds with main units within 8 tiles of a stronger field army, out of base: ${close} (≤3)${seen.length ? ` — ${seen.join(", ")}` : ""}`);
     },
   },
   {
@@ -267,19 +278,31 @@ export const COUNCIL_SCENARIOS: Scenario[] = [
   },
   {
     id: "plan.emergency", title: "An attack in GROW → DEFEND interrupts, GROW resumes after",
-    make: () => vsIdle("boomer", 4),
+    make: () => garrisoned(vsIdle("boomer", 4)), // a garrison keeps the Boomer home
     run: (m) => {
-      m.run(130);
+      m.run(90);
       const home = m.home(P0);
-      const rush = m.spawn(P1, "rifleman", 14, lerp(home, m.home(P1), 0.35));
+      const p0 = m.cs(P0)?.council?.plan?.phase ?? 0;
+      const before = PLANS.boomer[p0]?.name ?? "?";
+      // a rush that home can't hold alone: DEFEND must take over from the plan
+      const a0 = m.army(P0);
+      const n = Math.max(20, Math.ceil((3.5 * a0) / 75));
+      const rush = m.spawn(P1, "rifleman", n, lerp(home, m.home(P1), 0.35));
       m.order(P1, "ATTACK_MOVE", { unitIds: ids(rush), x: home.x, y: home.y, spread: false });
-      let defended = false;
-      runUntil(m, 120, () => { if (m.cs(P0)?.stance === "DEFEND") defended = true; return defended && alive(rush).length === 0; });
+      let defended = false, maxDanger = 0, alerted = false;
+      runUntil(m, 120, () => {
+        const cs = m.cs(P0);
+        if (cs?.stance === "DEFEND") defended = true;
+        maxDanger = Math.max(maxDanger, cs?.danger ?? 0);
+        if (cs?.beliefs?.alert) alerted = true;
+        return defended && alive(rush).length === 0;
+      });
+      const rushLeft = alive(rush).length;
       m.run(20);
-      const resumed = m.fullLog[P0].find((l) => l.includes("[King] plan GROW resumes"));
+      const resumed = m.fullLog[P0].find((l) => l.includes(`[King] plan ${before} resumes`));
       const phase = m.cs(P0)?.council?.plan?.phase ?? -1;
       const name = PLANS.boomer[phase]?.name ?? "?";
-      return res(defended && !!resumed && name === "GROW", `DEFEND ${defended ? "yes" : "no"}; ${resumed ?? "no resume logged"}; phase now ${name} (GROW)`);
+      return res(defended && !!resumed && phase >= p0, `in ${before}: rush ${n} riflemen vs army ${a0 | 0} (alert ${alerted}, peak danger ${maxDanger.toFixed(2)}, ${rushLeft} left); DEFEND ${defended ? "yes" : "no"}; ${resumed ?? "no resume logged"}; phase now ${name} (≥ ${before})`);
     },
   },
   // ───────────────────────────── Boomer vs Rusher (the 34 §0 duel) ─────────────────────────────

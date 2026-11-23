@@ -93,7 +93,8 @@ function assignSquads(ctx: Ctx): void {
       continue;
     }
     if (raid && u.unitType === "scoutBuggy" && raid.unitIds.length < wantRaiders) { raid.unitIds.push(u.id); continue; }
-    if (value(guard.unitIds) < guardTarget * totalValue) { guard.unitIds.push(u.id); continue; }
+    // 34 §W.1 the guns march with the army (sieges); a home guard fights close, inside their blind ring
+    if (u.combatType !== "siege" && value(guard.unitIds) < guardTarget * totalValue) { guard.unitIds.push(u.id); continue; }
     main.unitIds.push(u.id);
   }
   for (const m of medics) if (!assigned.has(m.id)) main.unitIds.push(m.id);

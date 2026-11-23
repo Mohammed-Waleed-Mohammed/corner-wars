@@ -16,7 +16,8 @@ import { planAbility } from "../aiAbilities";
 import { baseThreatened, centerOf, cmd, runCaptains, dist, driveSquad, ensureFormation, gatePost, myFormation, pickFormation, retreat, squadOdds, squadUnits, valueOf, type Squad } from "./captain";
 import { runScout, runSentries } from "./spymaster";
 import { defenseAnchor, runHomeGuard } from "./warden";
-import { ask, strikeRead, veto } from "./reports";
+import { ask, homeRadius, strikeRead, veto } from "./reports";
+import { opReady, runLeash, siegeHolds, watchFeint } from "./operations";
 
 export function runMarshal(ctx: Ctx): void {
   const { cs } = ctx;
@@ -33,6 +34,9 @@ export function runMarshal(ctx: Ctx): void {
   runPowers(ctx);
   runAbility(ctx); // 27 §E commander ability
   runCaptains(ctx); // 34 §W.1 the manual: artillery discipline, kiting, focus fire
+  const home0 = baseCenter(ctx.state, ctx.pid);
+  if (home0) runLeash(ctx, home0, homeRadius(ctx)); // 34 §W.5 defenders on a leash
+  watchFeint(ctx); // 34 §W.4 did the feint draw them?
 }
 
 /** §K v2 finishing blow: a hostile player's LAST yard, badly damaged, close to this squad. Losing it
@@ -295,6 +299,7 @@ function runMainArmy(ctx: Ctx, s: Squad): void {
         aiLog(cs, state.tick, "T", `[Marshal] launch → P${target}'s army in the field at (${fieldTarget.x | 0},${fieldTarget.y | 0}) (odds ${proj.toFixed(2)} ≥ ${need})`);
         return;
       }
+      if (!opReady(ctx, s, target, objective, center)) return; // 34 §W.4 the operation holds the launch
       const gp = gatherPoint(state, objective, center);
       ensureFormation(ctx, s, pickFormation(ctx, center, "travel"), objective);
       cmd(ctx, "ATTACK_MOVE", { unitIds: s.unitIds, x: gp.x, y: gp.y, spread: false });
@@ -328,6 +333,8 @@ function runMainArmy(ctx: Ctx, s: Squad): void {
         return;
       }
     } else s.stallSince = undefined;
+
+    if (siegeHolds(ctx, s, objective, center)) return; // 34 §W.4 the guns work the towers first
 
     // flanking (Hard): when the counter-pick says spear-into-flank, route via a perpendicular waypoint.
     const enemyFormation = state.formations.find((ef) => ef.owner === target && dist(ef.anchor, objective) < 20);
@@ -471,6 +478,8 @@ function runRaid(ctx: Ctx, s: Squad): void {
   }
   const target = cs.targetPlayer;
   if (target == null) return;
+  const op = cs.council?.op;
+  if (op?.kind === "feint" && op.phase === "lure" && !cs.opsOff) return; // 34 §W.4 the feint has the raiders
   const workers = unitsOf(state, target).filter((u) => u.unitType === "worker");
   if (s.mission === "raiding") {
     // Done when nothing is left to kill at the spot → re-raid after the jittered interval.
@@ -482,7 +491,9 @@ function runRaid(ctx: Ctx, s: Squad): void {
   // The worker spot with the least turret cover (ties → nearer to the raiders).
   let spot: Vec2 | null = null, bs = Infinity;
   for (const w of workers) {
-    const score = defenseCover(state, target, w) + 0.05 * dist(center, w);
+    // 34 §W.4 raid rotation: not the same spot twice running — they will be waiting there
+    const again = s.lastSpot && dist(s.lastSpot, w) < 8 ? COMMANDER.OPS.RAID_ROTATE : 0;
+    const score = defenseCover(state, target, w) + 0.05 * dist(center, w) + again;
     if (score < bs) { bs = score; spot = { x: w.x, y: w.y }; }
   }
   spot ??= baseCenter(state, target);
@@ -490,6 +501,7 @@ function runRaid(ctx: Ctx, s: Squad): void {
   cmd(ctx, "ATTACK_MOVE", { unitIds: s.unitIds, x: spot.x, y: spot.y, spread: false });
   s.mission = "raiding";
   s.objective = spot;
+  s.lastSpot = { x: spot.x, y: spot.y };
   const [lo, hi] = COMMANDER.RAID_INTERVAL_TICKS;
   s.timer = state.tick + lo + Math.floor(rng() * (hi - lo));
   aiLog(cs, state.tick, "T", `raid → P${target} workers`);

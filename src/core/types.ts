@@ -380,6 +380,8 @@ export interface AISquad {
   looseUntil?: number; // while > tick the push moves loose (no formation) — breaching // 33 §F: first tick of the current run of sub-FIGHT_ODDS reads at their base // 33 §F: first tick of the current run of losing reads (retreat hysteresis)
   stageLogTick?: number; // 33 dev: last time a held launch logged its reason
   chaseWatch?: { from: Vec2; enemy: PlayerId | null; max: number }; // 34 §W.3 measuring a pursuit of this squad
+  leashLogTick?: number; // 34 §W.5 last leash log
+  lastSpot?: Vec2; // 34 §W.4 raid rotation: where this raid last struck
   fleeUntil?: Partial<Record<number, number>>; // 33 §B.2 sentries: unit id → tick it may return to its post
 }
 
@@ -428,6 +430,7 @@ export interface CommanderState {
   saveKey?: string; // 33 §D: which request that is (F5 overlay, logs)
   beliefs?: AIBeliefs; // 33 §B: what this AI believes about its enemies and the map
   council?: CouncilState; // 34: reports, rulings
+  opsOff?: boolean; // dev harness only: operations + counter-craft off (op.* ablation)
   manualOff?: boolean; // dev harness only: switch the captains' manual off (craft.* ablation)
   allInWhy?: "crippled" | "away" | "cap" | "plan"; // 34 §E.2: which window opened the ALL_IN (sets the launch odds)
   projects?: AIExpansion[]; // 33 §C.4: running expansion projects
@@ -459,6 +462,10 @@ export interface Reports {
   quartermaster: QMReport; scholar: ScholarReport; marshal: FieldReport;
 }
 export interface Ruling { tick: number; seat: Seat; key: string; verdict: "fund" | "deny" | "save"; why: string }
+/** 34 §W.4 — the operation carrying out the current launch (operations.ts). */
+export type OpKind = "direct" | "feint" | "siege";
+export interface CouncilOp { kind: OpKind; target: PlayerId; start: number; phase: "lure" | "siege" | "go"; why: string; spot?: Vec2; siegeStart?: number; reconsidered?: boolean; struckAt?: number; answeredAt?: number; answer?: number }
+
 /** 34 §W.3 — how one enemy behaves, measured by the Spymaster (samples, oldest first). */
 export interface EnemyProfile {
   attacks: number[]; // ticks their army began closing on me
@@ -481,6 +488,8 @@ export interface CouncilState {
   mineWatch?: Partial<Record<number, Record<number, number>>>; // mine id → enemy unit id → distance at the last session (closing test)
   vetoLog?: Record<string, number>; // veto key → tick last logged (throttle)
   profiles?: Partial<Record<number, EnemyProfile>>; // 34 §W.3 per enemy
+  op?: CouncilOp; // 34 §W.4 the current operation
+  lastOpTick?: number; // when a non-direct operation was last chosen
   /** 34 §C.2 the grand plan: phase index, when it began, ticks paused by emergencies, the strike launch */
   plan?: { phase: number; since: number; paused: number; pauseStart?: number; launched?: number; strikeLogged?: boolean };
 }

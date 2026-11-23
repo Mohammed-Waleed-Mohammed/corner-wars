@@ -23,6 +23,12 @@ function vsIdle(pers: AIPersonality = "boomer", seed = 1, tough = true, map = "d
   if (tough) toughen(m, P1);
   return m;
 }
+/** A garrison at P1's yard: against an idle base with no army the AI rightly attacks at once, and a
+ *  scenario about my base needs my army home. */
+function garrisoned(m: Match, n = 20): Match {
+  m.spawn(P1, "tank", n, m.home(P1), 1.2);
+  return m;
+}
 function toughen(m: Match, pid: PlayerId): void {
   const y = m.yard(pid);
   if (y) { y.maxHp = 1e8; y.hp = 1e8; }
@@ -265,11 +271,12 @@ export const SCENARIOS: Scenario[] = [
   },
   {
     id: "intel.warning", title: "An approaching army raises the alert while still ≥ 25 tiles out",
-    make: () => vsIdle("boomer", 2, true),
+    make: () => garrisoned(vsIdle("boomer", 2, true)),
     run: (m) => {
       m.run(240);
       const home = m.home(P0);
-      const army = m.spawn(P1, "rifleman", 15, lerp(home, m.home(P1), 0.75));
+      // past the Citadel (my garrison and its artillery strike hold the centre), ~40 tiles out
+      const army = m.spawn(P1, "rifleman", 15, lerp(home, m.home(P1), 0.42));
       m.order(P1, "ATTACK_MOVE", { unitIds: ids(army), x: home.x, y: home.y, spread: false });
       let at: number | null = null;
       runUntil(m, 120, () => {
@@ -280,7 +287,9 @@ export const SCENARIOS: Scenario[] = [
         if (al && al.from === P1) at = dist(c, home);
         return at !== null;
       });
-      return res(at !== null && (at as number) >= 25, `alert raised with the army ${at === null ? "never" : (at as number).toFixed(0) + " tiles"} out (≥25)`);
+      const live = alive(army);
+      const c = live.length ? { x: live.reduce((a, u) => a + u.x, 0) / live.length, y: live.reduce((a, u) => a + u.y, 0) / live.length } : null;
+      return res(at !== null && (at as number) >= 25, `alert raised with the army ${at === null ? "never" : (at as number).toFixed(0) + " tiles"} out (≥25)${at === null ? `; ${live.length} left${c ? ` ${dist(c, home).toFixed(0)} tiles out` : ""} at ${(m.state.time / 60).toFixed(1)} min` : ""}`);
     },
   },
   {
@@ -481,9 +490,7 @@ export const SCENARIOS: Scenario[] = [
     make: () => {
       // a garrison at their yard: an idle base with no army would (rightly) be attacked, and this
       // yard is unbreakable, so the push would never come home
-      const m = vsIdle("boomer", 9, true);
-      m.spawn(P1, "tank", 20, m.home(P1), 1.2);
-      return m;
+      return garrisoned(vsIdle("boomer", 9, true));
     },
     run: (m) => {
       m.run(240);

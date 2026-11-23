@@ -965,6 +965,22 @@ export const COMMANDER = {
     KITE_MARGIN: 1.2, // a kiter steps away when its foe is within the foe's range + this
     KITE_STEP: 2.5, // tiles a kiter steps back
   },
+  // 34 §W.4–5 operations and counter-craft
+  OPS: {
+    OP_COOLDOWN_S: 90, // a non-direct operation can't be chosen again within this
+    OP_MAX_S: 150, // an operation's state is dropped this long after its strike went in
+    FEINT_MIN_RAIDERS: 2,
+    FEINT_MIN_DIST: 14, // tiles from their home: a mine this far makes a feint target
+    FEINT_WAIT_S: 20, // the main army waits this long for the feint to draw their army
+    SIEGE_SCAN: 14, // towers within this of the objective count for a siege
+    SIEGE_MIN_ARTILLERY: 2,
+    SIEGE_MIN_TOWERS: 2,
+    SIEGE_ENGAGE: 6, // the siege takes over this far outside a tower's reach
+    SIEGE_SCREEN_MARGIN: 2.5, // the screen stands this far outside the tower's reach
+    SIEGE_MAX_S: 90,
+    CHASE_MAX: 10, // tiles past my territory a defender may chase before it is called back
+    RAID_ROTATE: 8, // a raid scores the spot it just hit this much worse (tiles-equivalent)
+  },
   // 34 the Council (§H dials)
   COUNCIL: {
     CONF_HALF_LIFE_S: 60, // a good look loses half its weight in this long
