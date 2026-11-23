@@ -35,6 +35,7 @@ export function runTactical(ctx: Ctx): void {
   if (raid) runRaid(ctx, raid);
   runCitadel(ctx);
   runScout(ctx);
+  runSentries(ctx);
   runPowers(ctx);
   runAbility(ctx); // 27 §E commander ability
 }
@@ -92,25 +93,38 @@ function runScout(ctx: Ctx): void {
   }
   if (state.tick < s.timer) return;
 
-  const pois: Vec2[] = [];
+  // 33 §B.2: importance × staleness — enemy mains matter most (more while I'm weighing an attack or
+  // only guessing at their army), then their expansions, then free mines (where expansions appear)
+  const pois: { at: Vec2; imp: number; owner: PlayerId | null }[] = [];
+  const beliefs = cs.beliefs;
   for (const e of livingEnemies(state, pid)) {
+    const eb = beliefs?.enemies[e];
+    const guessing = eb ? eb.est > 1.5 * eb.known + 300 : true;
     for (const b of buildingsOf(state, e)) {
-      if (b.buildingType === "constructionYard" || b.buildingType === "refinery") pois.push(centerOf(b));
+      if (b.buildingType === "constructionYard") pois.push({ at: centerOf(b), imp: cs.targetPlayer === e || guessing ? 3 : 2, owner: e });
+      else if (b.buildingType === "refinery" || b.buildingType === "resonanceTap") pois.push({ at: centerOf(b), imp: 2, owner: e });
     }
   }
   const mine = new Set(claimedSources(state, pid).map((g) => g.id));
-  for (const g of state.goldSources) if (!mine.has(g.id)) pois.push({ x: g.x + 0.5, y: g.y + 0.5 });
-  pois.push({ x: state.citadel.x, y: state.citadel.y });
+  for (const g of state.goldSources) if (!mine.has(g.id)) pois.push({ at: { x: g.x + 0.5, y: g.y + 0.5 }, imp: 1, owner: null });
+  pois.push({ at: { x: state.citadel.x, y: state.citadel.y }, imp: 1, owner: null });
 
-  let best: Vec2 | null = null, bs = -Infinity;
+  let best: { at: Vec2; imp: number; owner: PlayerId | null } | null = null, bs = -Infinity;
   for (const poi of pois) {
-    const age = staleness(state, intel, poi.x, poi.y);
+    const age = staleness(state, intel, poi.at.x, poi.at.y);
     if (age < COMMANDER.SCOUT_STALE_TICKS) continue;
-    const score = (Number.isFinite(age) ? age : 1e9) - dist(u, poi) * 10; // stalest first, nearer breaks ties
+    const score = (Number.isFinite(age) ? Math.min(age, 20000) : 20000) * poi.imp - dist(u, poi.at) * 10;
     if (score > bs) { bs = score; best = poi; }
   }
   if (!best) return;
-  const to = nearestPassableTile(state, best.x, best.y);
+  // look from a peek point outside the known towers' reach, on my side of the target
+  let look = best.at;
+  if (best.owner != null && defenseCover(state, best.owner, look) > 0 && home) {
+    const d = dist(home, look) || 1;
+    const k = Math.min(1, COMMANDER.INTEL.PEEK_DIST / d);
+    look = { x: look.x + (home.x - look.x) * k, y: look.y + (home.y - look.y) * k };
+  }
+  const to = nearestPassableTile(state, look.x, look.y);
   cmd(ctx, "MOVE", { unitIds: s.unitIds, x: to.x, y: to.y, spread: false });
   s.mission = "scouting";
   s.objective = to;
@@ -300,8 +314,21 @@ function runMainArmy(ctx: Ctx, s: Squad): void {
   // nowhere to run to, so a losing fight in my own base braces in a Box with the turrets (territory
   // defense below) instead of a retreat→re-engage→retreat loop.
   const atHome = home != null && dist(center, home) < COMMANDER.THREAT_RADIUS;
-  if (contact && odds < COMMANDER.RETREAT_ODDS && s.mission !== "retreat" && !atHome) {
-    retreat(ctx, s, odds, value, "outmatched");
+  // 33 §F: a committed push reads the fight with the members about to arrive (a strung-out column's
+  // vanguard alone always "loses"), and retreats only when the losing read holds — not on one bad tick
+  const committedPush = ["gather", "engage", "raze", "attack", "flank"].includes(s.mission);
+  let readOdds = odds;
+  if (contact && committedPush) {
+    const reach = COMMANDER.LOCAL_ODDS_RADIUS + COMMANDER.ENGAGE_RADIUS + COMMANDER.ARRIVE_TILES;
+    readOdds = Math.max(odds, fightOdds(state, pid, contact, COMMANDER.LOCAL_ODDS_RADIUS, units.filter((u) => dist(u, contact) <= reach)));
+  }
+  if (contact && readOdds < COMMANDER.RETREAT_ODDS) s.lowOddsSince ??= state.tick;
+  else s.lowOddsSince = undefined;
+  const confirmed = !committedPush || readOdds < COMMANDER.ROUT_ODDS * 0.7 ||
+    state.tick - (s.lowOddsSince ?? state.tick) >= COMMANDER.RETREAT_CONFIRM_TICKS;
+  if (contact && readOdds < COMMANDER.RETREAT_ODDS && confirmed && s.mission !== "retreat" && !atHome) {
+    s.lowOddsSince = undefined;
+    retreat(ctx, s, readOdds, value, "outmatched");
     return;
   }
   if (s.mission === "retreat") {
@@ -324,7 +351,13 @@ function runMainArmy(ctx: Ctx, s: Squad): void {
   else if (s.mission === "repel" && s.lastThreat && state.tick - s.lastThreat.tick < COMMANDER.REPEL_LINGER_TICKS) threat = s.lastThreat;
   const committed = s.mission === "attack" || s.mission === "flank" || s.mission === "raze" ||
     s.mission === "gather" || s.mission === "engage";
-  const repel = (to: Vec2, why: string): void => {
+  const repel = (at: Vec2, why: string): void => {
+    // 33 §E.3 fight under towers: if I only win with my towers' help, hold at the defense anchor
+    let to = at;
+    if (home && fightOdds(state, pid, at, COMMANDER.LOCAL_ODDS_RADIUS, fighters, false) < 1) {
+      const anchor = defenseAnchor(ctx, at, home);
+      if (anchor && fightOdds(state, pid, anchor, COMMANDER.LOCAL_ODDS_RADIUS + 4, fighters, true) >= 1) { to = anchor; why += ", holding at the towers"; }
+    }
     if (s.mission === "repel" && s.objective && dist(s.objective, to) <= 4) return;
     // A long run home goes loose — every unit at its own speed, not the formation's slowest member;
     // close by, the army meets the attack as a shape.
@@ -401,11 +434,19 @@ function runMainArmy(ctx: Ctx, s: Squad): void {
         stale = true;
       }
       // §K v2 launch read: my main army vs what can actually meet it at the objective.
-      const proj = projectedOdds(state, pid, fighters, target, objective) * (stale ? COMMANDER.STALE_INTEL_DISCOUNT : 1);
+      // 33 §F: never launch on less than the belief — an army I can't see but could exist (est) caps
+      // the projection on the same sqrt-of-value scale
+      const tb = cs.beliefs?.enemies[target];
+      const beliefOdds = tb ? Math.sqrt(value / Math.max(1, tb.est * (tb.away ? COMMANDER.FAR_ARMY_WEIGHT : 1) + 4 * tb.baseDef)) : 99;
+      const proj = Math.min(beliefOdds, projectedOdds(state, pid, fighters, target, objective) * (stale ? COMMANDER.STALE_INTEL_DISCOUNT : 1));
       const need = cs.stance === "ALL_IN"
         ? COMMANDER.FIGHT_ODDS
         : +(1 + (pers.attackRatio - 1) * COMMANDER.ATTACK_ODDS_SCALE).toFixed(2);
       if (fighters.length < COMMANDER.ATTACK_MIN_UNITS || proj < need) {
+        if (s.mission === "stage" && state.tick - (s.stageLogTick ?? -1e9) >= 900) {
+          s.stageLogTick = state.tick;
+          aiLog(cs, state.tick, "T", `holding vs P${target}: projected ${proj.toFixed(2)} (belief ${beliefOdds.toFixed(2)}, est ${tb ? tb.est | 0 : "?"}) < ${need}${stale ? ", stale" : ""} — ${fighters.length} fighters`);
+        }
         if (home && s.mission !== "stage") { // stage at home until the push holds
           ensureFormation(ctx, s, "line", tBase);
           cmd(ctx, "ATTACK_MOVE", { unitIds: s.unitIds, x: home.x, y: home.y, spread: false });
@@ -421,6 +462,7 @@ function runMainArmy(ctx: Ctx, s: Squad): void {
       ensureFormation(ctx, s, pickFormation(ctx, center, "travel"), objective);
       cmd(ctx, "ATTACK_MOVE", { unitIds: s.unitIds, x: gp.x, y: gp.y, spread: false });
       s.mission = "gather";
+      s.bestDist = undefined; s.progressTick = state.tick; s.looseUntil = undefined;
       s.objective = gp;
       s.timer = state.tick + COMMANDER.GATHER_TIMEOUT_TICKS;
       s.lastOrderTick = state.tick;
@@ -440,10 +482,15 @@ function runMainArmy(ctx: Ctx, s: Squad): void {
     }
 
     // In contact near their base: fight only at ≥ FIGHT_ODDS (§K.3), else fall back.
-    if (contact && distToTarget < 18 && odds < COMMANDER.FIGHT_ODDS) {
-      retreat(ctx, s, odds, value, "push stalled at their base");
-      return;
-    }
+    // (33 §F: read with the arriving members, and only on a read that holds)
+    if (contact && distToTarget < 18 && readOdds < COMMANDER.FIGHT_ODDS) {
+      s.stallSince ??= state.tick;
+      if (state.tick - s.stallSince >= COMMANDER.RETREAT_CONFIRM_TICKS || readOdds < COMMANDER.ROUT_ODDS * 0.7) {
+        s.stallSince = undefined;
+        retreat(ctx, s, readOdds, value, "push stalled at their base");
+        return;
+      }
+    } else s.stallSince = undefined;
 
     // flanking (Hard): when the counter-pick says spear-into-flank, route via a perpendicular waypoint.
     const enemyFormation = state.formations.find((ef) => ef.owner === target && dist(ef.anchor, objective) < 20);
@@ -474,6 +521,26 @@ function runMainArmy(ctx: Ctx, s: Squad): void {
         s.mission = "raze";
         s.objective = objective;
         aiLog(cs, state.tick, "T", `raze → ${victim.buildingType}`);
+      }
+      return;
+    }
+
+    // 33 §F progress watchdog: a formation can't path into a walled base (its anchor stops at the
+    // wall) — a push that stops closing on its objective breaks formation and breaches loose
+    if (s.bestDist == null || distToTarget < s.bestDist - 2) { s.bestDist = distToTarget; s.progressTick = state.tick; }
+    if ((s.looseUntil ?? -1) <= state.tick && state.tick - (s.progressTick ?? state.tick) >= COMMANDER.PUSH_STALL_TICKS) {
+      s.looseUntil = state.tick + COMMANDER.PUSH_LOOSE_TICKS;
+      s.progressTick = state.tick;
+      s.bestDist = distToTarget;
+      aiLog(cs, state.tick, "T", `push stalled ${distToTarget.toFixed(0)} tiles out — breaching loose`);
+    }
+    if ((s.looseUntil ?? -1) > state.tick) {
+      if (state.tick - s.lastOrderTick > 150 || s.mission !== "attack") {
+        if (f) cmd(ctx, "BREAK_FORMATION", { formationInstanceId: f.id });
+        cmd(ctx, "ATTACK_MOVE", { unitIds: s.unitIds, x: objective.x, y: objective.y, spread: false });
+        s.mission = "attack";
+        s.objective = objective;
+        s.lastOrderTick = state.tick;
       }
       return;
     }
@@ -620,7 +687,9 @@ function runCitadel(ctx: Ctx): void {
 
   // §M v4: after a garrison falls back, wait before sending another — the launch read only counts
   // enemies in sight, so without this it re-sent the squad into the same fight every 0.5 s.
-  const cooling = state.tick - (cs.citadelRetreatTick ?? -1e9) < COMMANDER.CITADEL_RETRY_TICKS;
+  if (holder === pid) cs.citadelLosses = 0;
+  const backoff = 2 ** Math.min(3, cs.citadelLosses ?? 0); // 33 §F: a fight I keep losing is not worth feeding
+  const cooling = state.tick - (cs.citadelRetreatTick ?? -1e9) < COMMANDER.CITADEL_RETRY_TICKS * backoff;
   if (!citadelSquad && !cooling && holder !== pid && cs.stance !== "DEFEND" && cs.stance !== "RECOVER" && main.unitIds.length >= 8) {
     // Candidate garrison: CITADEL_SQUAD_FRAC of main's value, nearest-to-the-Citadel first.
     const fighters = squadUnits(state, main).filter((u) => u.combatType !== "support")
@@ -658,6 +727,7 @@ function runCitadel(ctx: Ctx): void {
   if (contact && odds < COMMANDER.RETREAT_ODDS) {
     retreat(ctx, citadelSquad, odds, valueOf(units), "citadel lost");
     cs.citadelRetreatTick = state.tick;
+    cs.citadelLosses = (cs.citadelLosses ?? 0) + 1;
     main.unitIds.push(...citadelSquad.unitIds);
     cs.squads = cs.squads.filter((s) => s !== citadelSquad);
     return;
@@ -744,4 +814,88 @@ function runAbility(ctx: Ctx): void {
   if (!cast) return;
   cmd(ctx, "USE_ABILITY", { x: cast.x, y: cast.y });
   aiLog(ctx.cs, ctx.state.tick, "T", `ABILITY: ${ctx.p.commander}`);
+}
+
+/** 33 §E.3: the strongest group of my powered towers near the line from the threat to my yard — where a
+ *  force that only wins with tower support should stand. */
+function defenseAnchor(ctx: Ctx, threat: Vec2, home: Vec2): Vec2 | null {
+  const { state, pid } = ctx;
+  const towers = buildingsOf(state, pid).filter((b) => DEFENSE_STATS[b.buildingType] && b.buildProgress >= 1);
+  if (towers.length === 0) return null;
+  const R = COMMANDER.DEFENSE2.ANCHOR_RADIUS;
+  let best: Vec2 | null = null, bs = 0;
+  for (const t of towers) {
+    const c = centerOf(t);
+    const vx = home.x - threat.x, vy = home.y - threat.y;
+    const L2 = vx * vx + vy * vy || 1;
+    const k = Math.max(0, Math.min(1, ((c.x - threat.x) * vx + (c.y - threat.y) * vy) / L2));
+    const off = Math.hypot(threat.x + vx * k - c.x, threat.y + vy * k - c.y);
+    if (off > R) continue;
+    const cover = defenseCover(state, pid, c);
+    if (cover > bs) { bs = cover; best = c; }
+  }
+  if (!best) return null;
+  const d = dist(best, home) || 1;
+  const k = Math.min(1, 2 / d);
+  return nearestPassableTile(state, best.x + (home.x - best.x) * k, best.y + (home.y - best.y) * k);
+}
+
+// ── 33 §B.2 sentries (Hard): watch posts on the approaches, for early warning ─────────────────
+function runSentries(ctx: Ctx): void {
+  const { state, cs, pid, tier } = ctx;
+  if (!tier.raids) return; // Hard only
+  const I = COMMANDER.INTEL;
+  const home = baseCenter(state, pid);
+  if (!home) return;
+  const main = ensureSquad(cs, "main");
+  const mainUnits = squadUnits(state, main).filter((u) => u.combatType !== undefined && u.combatType !== "support");
+  let s = cs.squads.find((q) => q.role === "sentry");
+  if (!s) {
+    if (mainUnits.length < I.SENTRY_MIN_ARMY) return;
+    s = ensureSquad(cs, "sentry");
+  }
+  const sq = s;
+  const wallR = cs.basePlan && cs.basePlan.radius > 0 ? cs.basePlan.radius : 12;
+  const enemies = livingEnemies(state, pid)
+    .map((e) => ({ e, c: cs.beliefs?.enemies[e]?.home ?? baseCenter(state, e) }))
+    .filter((x): x is { e: PlayerId; c: Vec2 } => !!x.c)
+    .sort((a, b) => dist(a.c, home) - dist(b.c, home) || a.e - b.e)
+    .slice(0, I.SENTRY_MAX);
+  const posts = enemies.map(({ c }) => {
+    const d = dist(c, home) || 1;
+    const k = Math.min(0.5, (wallR + I.SENTRY_OUT) / d);
+    return nearestPassableTile(state, home.x + (c.x - home.x) * k, home.y + (c.y - home.y) * k);
+  });
+  let units = squadUnits(state, sq);
+  while (units.length < posts.length && mainUnits.length >= I.SENTRY_MIN_ARMY) {
+    const pick = [...mainUnits].sort((a, b) => (a.unitType === "scoutBuggy" ? 0 : 1) - (b.unitType === "scoutBuggy" ? 0 : 1) ||
+      UNIT_STATS[a.unitType].gold - UNIT_STATS[b.unitType].gold || a.id - b.id)[0];
+    if (!pick) break;
+    sq.unitIds.push(pick.id);
+    main.unitIds = main.unitIds.filter((id) => id !== pick.id);
+    mainUnits.splice(mainUnits.indexOf(pick), 1);
+    units = squadUnits(state, sq);
+  }
+  // per-sentry flee timers live in the squad's `fleeUntil` map (unit id → tick)
+  const flee = (sq.fleeUntil ??= {});
+  units.forEach((u, i) => {
+    const post = posts[i];
+    if (!post) return;
+    let threat = false;
+    for (const e of state.entities) {
+      if (e.kind !== "unit" || e.owner === pid || e.owner === "neutral" || e.hp <= 0 || e.unitType === "worker") continue;
+      if (dist(e, u) <= I.SENTRY_FLEE_DIST) { threat = true; break; }
+    }
+    const fleeing = (flee[u.id] ?? -1) > state.tick;
+    if (threat) {
+      if (!fleeing) {
+        cmd(ctx, "MOVE", { unitIds: [u.id], x: home.x, y: home.y, spread: false });
+        flee[u.id] = state.tick + I.SENTRY_RETURN_TICKS;
+      }
+      return;
+    }
+    if (fleeing) return;
+    if (dist(u, post) > 3 && !u.moveTarget) cmd(ctx, "MOVE", { unitIds: [u.id], x: post.x, y: post.y, spread: false });
+  });
+  sq.mission = "watch";
 }

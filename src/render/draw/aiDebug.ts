@@ -74,6 +74,10 @@ export function drawAIOverlay(ctx: CanvasRenderingContext2D, state: GameState, c
     const tArmy = cs.targetPlayer != null ? armyOf(state, cs.targetPlayer) : 0;
     lines.push(`P${p.id} ${cs.personality.toUpperCase()} · ${cs.stance} → ${cs.targetPlayer != null ? "P" + cs.targetPlayer : "—"}`);
     lines.push(`army ${myArmy | 0} vs ${tArmy | 0} · gold ${p.gold | 0}`);
+    // 33: what it believes and wants (belief of the target, danger, desired army, income, saving)
+    const tb = cs.targetPlayer != null ? cs.beliefs?.enemies[cs.targetPlayer] : undefined;
+    lines.push(`belief ${tb ? `${tb.known | 0}/${tb.est | 0}` : "—"} · danger ${(cs.danger ?? 0).toFixed(2)} · want ${(cs.desiredArmy ?? 0) | 0}`);
+    lines.push(`income ${(cs.beliefs?.income ?? 0).toFixed(1)}/s${cs.saveKey ? ` · saving ${(cs.saveFor ?? 0) | 0} for ${cs.saveKey}` : ""}${cs.beliefs?.alert ? ` · ALERT ETA ${cs.beliefs.alert.eta | 0}s` : ""}`);
     for (const it of cs.intents.slice(0, 3)) lines.push(`» ${it}`);
     for (const s of cs.squads) lines.push(`[${s.role}] ${s.unitIds.length}u ${s.formation ?? "-"} ${s.mission}`);
 

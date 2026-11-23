@@ -106,8 +106,8 @@ export function economyScore(state: GameState, pid: PlayerId): number {
 }
 
 /** DefenseScore(p, at) = Σ defensive-building DPS × HP / 1000 within 10 tiles of the point. */
-export function defenseScore(state: GameState, pid: PlayerId, at: Vec2): number {
-  const r2 = COMMANDER.DEFENSE_SCORE_RADIUS ** 2;
+export function defenseScore(state: GameState, pid: PlayerId, at: Vec2, radius: number = COMMANDER.DEFENSE_SCORE_RADIUS): number {
+  const r2 = radius ** 2;
   let v = 0;
   for (const b of buildingsOf(state, pid)) {
     const s = DEFENSE_STATS[b.buildingType];

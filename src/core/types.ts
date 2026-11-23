@@ -358,7 +358,7 @@ export interface AIIntel {
 // ── 22 §P — the AI Commander's blackboard (engine-only, host-side) ────────────
 export type AIPersonality = "rusher" | "boomer" | "turtle" | "techer" | "opportunist";
 export type AIStance = "BUILD_UP" | "PRESSURE" | "ALL_IN" | "DEFEND" | "RECOVER";
-export type SquadRole = "main" | "homeGuard" | "raid" | "citadel" | "scout";
+export type SquadRole = "main" | "homeGuard" | "raid" | "citadel" | "scout" | "sentry";
 
 export interface AISquad {
   id: number;
@@ -373,6 +373,13 @@ export interface AISquad {
   retreatTick?: number; // 22 §K v2: tick of the last retreat (regroup hysteresis)
   valueAtRetreat?: number; // 22 §K v2: squad value when it retreated (must regrow before re-pushing)
   lastThreat?: { at: Vec2; value: number; tick: number }; // 22 §K v4: last territory threat seen (REPEL hysteresis)
+  lowOddsSince?: number;
+  stallSince?: number;
+  bestDist?: number; // 33 §F progress watchdog: closest the push has come to its objective…
+  progressTick?: number; // …and when it last got closer
+  looseUntil?: number; // while > tick the push moves loose (no formation) — breaching // 33 §F: first tick of the current run of sub-FIGHT_ODDS reads at their base // 33 §F: first tick of the current run of losing reads (retreat hysteresis)
+  stageLogTick?: number; // 33 dev: last time a held launch logged its reason
+  fleeUntil?: Partial<Record<number, number>>; // 33 §B.2 sentries: unit id → tick it may return to its post
 }
 
 export interface AIBasePlan {
@@ -414,8 +421,75 @@ export interface CommanderState {
   nextDue?: { S: number; O: number; T: number };
   // §K v3: "look before you leap" — a push objective the AI hasn't seen lately is scouted first.
   scoutRequest?: { x: number; y: number; tick: number };
+  citadelLosses?: number; // 33 §F: Citadel squads lost in a row — each doubles the retry wait
   citadelRetreatTick?: number; // §M v4: tick the last Citadel squad fell back (CITADEL_RETRY_TICKS cooldown)
-  saveFor?: number; // 32 §D: gold held back from the army for the next late-economy step (0 = none)
+  saveFor?: number; // 33 §D: gold the budget arbiter is saving for (the top unaffordable request; 0 = none)
+  saveKey?: string; // 33 §D: which request that is (F5 overlay, logs)
+  beliefs?: AIBeliefs; // 33 §B: what this AI believes about its enemies and the map
+  projects?: AIExpansion[]; // 33 §C.4: running expansion projects
+  hits?: { x: number; y: number; w: number; tick: number }[]; // 33 §E.4: where my territory was attacked (decaying weight)
+  danger?: number; // 33 §E.1: danger D ∈ [0, 1] from the last operational tick
+  desiredArmy?: number; // 33 §E.2: the army value this AI wants standing right now
+  lastEmergencyTick?: number; // 33 §E.4: last emergency tower
+  evac?: Partial<Record<number, number>>; // 33 §C.6: gold source id → tick its crew may return
+  incomeHist?: { tick: number; mined: number }[]; // 33 §C: my own goldMined samples (measured income)
+}
+
+/** 33 §B.1 — one enemy as this AI believes it to be (built only from its own perception). */
+export interface EnemyBelief {
+  pid: PlayerId;
+  known: number; // ArmyValue of the fighters in sight + remembered
+  est: number; // known + unseen growth since the last good look
+  lastGoodLook: number; // tick the army was last mostly in sight
+  armyAt: Vec2 | null; // centroid of the known fighters
+  home: Vec2 | null; // main yard centre
+  away: boolean; // army far from home → base exposed
+  econEst: number; // estimated income, g/s
+  comp: { infantry: number; ranged: number; heavy: number; siege: number; support: number };
+  tech: { heavy: boolean; siege: boolean; advDef: boolean; taps: boolean };
+  baseDef: number; // DefenseScore at their main yard (known towers)
+  expansions: Vec2[]; // known refineries/taps/yards away from their main
+  attackedMeTick: number; // last tick their fighters were in my territory
+  incoming: number; // value of their fighters closing on my base right now
+  incomingAt: Vec2 | null;
+  incomingEta: number; // s until that force reaches my wall (Infinity = none)
+}
+
+/** 33 §B.1 — one gold source as this AI knows it. */
+export interface MineBelief {
+  id: number;
+  x: number;
+  y: number;
+  gold: number; // last-known gold left
+  max: number;
+  mine: boolean; // I have a drop-off within CLAIM_RADIUS (finished or building)
+  refinery: boolean; // …and it's a Refinery (the ×5 rate)
+  theirs: boolean; // an enemy structure stands within CLAIM_RADIUS
+  dangerTick: number; // last tick enemy fighters were seen at it
+  dist: number; // from my main yard
+  workers: number; // my workers mining it
+}
+
+export interface AIBeliefs {
+  tick: number;
+  enemies: Partial<Record<number, EnemyBelief>>;
+  mines: MineBelief[];
+  alert: { value: number; at: Vec2; eta: number; from: PlayerId } | null;
+  /** 33 §B.3 the last alert actually seen, extrapolated while the attackers are out of sight */
+  alertSeen?: { value: number; at: Vec2; eta: number; from: PlayerId; tick: number; speed: number } | null;
+  lastDist: Map<number, number>; // enemy unit id → distance to my yard at the last update (closing test)
+  mineDanger: Map<number, number>; // gold source id → last tick enemy fighters were seen at it
+  income: number; // my measured income, g/s (last ~60 s)
+}
+
+/** 33 §C.4 — an expansion: creep stepping stones → refinery → guard tower at a gold source. */
+export interface AIExpansion {
+  sourceId: number;
+  at: Vec2; // the gold source
+  started: number; // tick
+  lastProgress: number; // tick of the last placed step
+  steps: number; // stepping stones placed
+  stage: "creep" | "refinery" | "guard" | "done";
 }
 
 export interface Player {

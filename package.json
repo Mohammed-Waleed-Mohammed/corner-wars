@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "aisim": "rolldown src/dev/aisim/main.ts --format esm --platform node --file node_modules/.aisim/out.mjs --log-level warn && node node_modules/.aisim/out.mjs"
   },
   "devDependencies": {
     "typescript": "~6.0.2",

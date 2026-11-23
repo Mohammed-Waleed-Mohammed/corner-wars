@@ -774,7 +774,6 @@ export const COMMANDER = {
   // segment is cheaper to rebuild than to crew; the §G plan re-places destroyed ones.
   REPAIR_PRIORITY: { constructionYard: 5, warFactory: 4, barracks: 4, powerPlant: 4, refinery: 3, lab: 3, defense: 3, other: 2 },
   SUPPLY_AT_CAP_FRAC: 0.85,
-  SUPPLY_MIN_GOLD: 600,
   EXPAND_PACKAGE: { workers: 2, pillboxes: 1 },
   // §G v4 base planning: a terrain-aware ring wall (engine/commander/basePlan.ts)
   WALL_R_MIN: 9, // smallest ring, in walking tiles from the yard
@@ -808,7 +807,7 @@ export const COMMANDER = {
   TECH_INCOME_T1: 20,
   TECH_INCOME_T2: 35,
   ADV_VEHICLES_INCOME: 30,
-  SIEGE_DEFSCORE: 40,
+  SIEGE_DEFSCORE: 25,
   STIMS_MEDICS: 3,
   // §I production
   MIX: { INF_FROM_RANGED: 0.8, INF_BASE: 0.3, RNG_FROM_HEAVY: 1.0, RNG_BASE: 0.2, HVY_FROM_INF: 0.8, HVY_BASE: 0.2 },
@@ -827,6 +826,8 @@ export const COMMANDER = {
   DEFENSE_IN_ATTACK: 0.7,
   FIGHT_ODDS: 0.9,
   RETREAT_ODDS: 0.6,
+  RETREAT_CONFIRM_TICKS: 60, // 33 §F: a committed push retreats only on a losing read that lasts this long…
+  ARRIVE_TILES: 10, // …counting members this much farther out (they arrive within seconds)
   LOCAL_ODDS_RADIUS: 12,
   WORKER_PULL_THREAT: 1.2,
   ROUT_ODDS: 0.35, // §K v2: below this, break formation and run home at full speed
@@ -837,6 +838,8 @@ export const COMMANDER = {
   GATHER_RADIUS: 7, // …until this share of its value is within this of the gather point…
   GATHER_FRAC: 0.75,
   GATHER_TIMEOUT_TICKS: 600, // …or 20 s pass — then it engages as one body instead of a trickle
+  PUSH_STALL_TICKS: 450, // 33 §F: a push that gets no closer for this long breaks formation and breaches loose
+  PUSH_LOOSE_TICKS: 1800, // …for this long
   WALLED_RAZE_DIST: 26, // §K v2: vs a walled base, go loose (units chew blocking walls) from this far out
   RESPONSE_RADIUS: 22, // §K v2: enemy units within this of the push objective can respond in time
   // §K v2: launch when projected FightOdds ≥ 1 + (personality attackRatio − 1) × this. attackRatio was
@@ -846,7 +849,8 @@ export const COMMANDER = {
   FINISH_YARD_FRAC: 0.4, // §K v2 finishing blow: a target yard below this HP fraction…
   FINISH_RADIUS: 14, // …within this of the squad…
   FINISH_ODDS: 0.45, // …is pressed home even at local odds down to this (an elimination is worth it)
-  VICTIM_W: { constructionYard: 3, warFactory: 4, barracks: 3.5, powerPlant: 2.5, POWER_CRIPPLE: 3, refinery: 2.5, lab: 2, defense: 1.5, other: 1 },
+  // 33 §F: the yard is the win condition (22 §W1) — once a push is in, it is THE objective
+  VICTIM_W: { constructionYard: 12, warFactory: 4, barracks: 3.5, powerPlant: 2.5, POWER_CRIPPLE: 3, refinery: 2.5, lab: 2, defense: 1.5, other: 1 },
   COVER_NORM: 40, // §K v2: victim score ÷ (1 + covering defense DPS / this)
   DIST_NORM: 25, // §K v2: victim score ÷ (1 + distance from the squad / this)
   GUARD_RESPOND_ODDS: 0.8, // §J v2: HomeGuard leaves its post for a territory threat only at these odds
@@ -869,17 +873,96 @@ export const COMMANDER = {
   CITADEL_CONTEST: 0.8,
   CITADEL_ODDS: 1.0, // §M v2: contest only if projected FightOdds at the Citadel × citadelWeight ≥ this
   CITADEL_RADIUS: 10, // §M v2: radius used to read the fight around the Citadel
-  CITADEL_RETRY_TICKS: 600, // §M v4: after a Citadel squad falls back, no new one for 20 s (was re-sent every 0.5 s)
+  CITADEL_RETRY_TICKS: 1800, // §M v4: after a Citadel squad falls back, no new one for 20 s (was re-sent every 0.5 s)
   REPEL_LINGER_TICKS: 150, // §K v4: a REPEL holds 5 s after the threat drops out of sight before main re-plans
   THREAT_MIX_WEIGHT: 2.0, // §I v2: enemy force near my territory weighs this × into the counter-mix
   POWERS: { ARTY_CLUSTER: 6, ARTY_RADIUS: 3, FRENZY_ODDS: [0.8, 1.2] as const, REPAIR_COUNT: 5, REPAIR_FRAC: 0.5, ION_CLUSTER: 12, ION_RESERVE_AT: 25, ION_GAP: 15 },
+  // ── 33 §C economy (measured: a Refinery beside a mine ≈ ×5; 10 workers ≈ 29 g/s; mines last 2–5 min) ──
+  ECON: {
+    WORKERS_PER_MINE: 10, // crew per active mine (the measured knee of the saturation curve)
+    BUILDER_SPARE: 2, // workers beyond the crews (builders, repairs)
+    WORKER_CAP: 30,
+    WORKER_CAP_FRAC: 0.33, // …and never more than this share of the unit cap
+    WORKER_QUEUE: 2, // the yard keeps this many workers queued while below target
+    WF_WORKER_DEFICIT: 6, // the War Factory helps train workers when the deficit is this large
+    REFINERY_NEAR: 3, // a Refinery counts as "beside" a mine when its footprint is within this
+    EXPAND_LEAD_S: 120, // start the next expansion when my active mines run dry within this
+    EXPAND_FIRST_S: 150, // …or anyway after this, if a safe mine is free
+    EXPAND_DIST_NORM: 15, // expansion pick: gold ÷ (1 + distance / this), ×INSIDE_BONUS inside my wall
+    INSIDE_BONUS: 1.6,
+    EXPAND_PARALLEL_INCOME: 45, // two projects at once above this income
+    CREEP_MAX_STEPS: 6, // stepping stones per project
+    PROJECT_STALL_TICKS: 2700, // a project that can't place a step for 90 s is dropped
+    RICH_MINE_LEAD: 1.0, // a contested (central) mine needs my army ≥ this × the nearest enemy's est
+    TAP_START_S: 300, // Resonance Tapping from 5 min…
+    TAP_MINES_LEFT_S: 300, // …or earlier when projected mine gold ÷ income < this
+    FLOAT_LIMIT: 1500, // gold above this with nothing to save for → more producers
+    INCOME_WINDOW_TICKS: 1800, // my measured income: goldMined over the last 60 s
+    MIL_SHARE: 0.6, // share of income an army is assumed to get (spend capacity, enemy growth)
+    PRODUCER_RATE: 9, // g/s one Barracks / War Factory turns into units
+    PRODUCERS_MIN: 2,
+    PRODUCERS_MAX: 10,
+    QUEUE_DEPTH: 2, // units queued per producer (gold in a queue is gold locked)
+  },
+  // ── 33 §B intel ──
+  INTEL: {
+    MIL_SHARE: 0.6, // unseen enemy growth: econEst × this per second since the last good look…
+    UNSEEN_GROWTH_CAP: 4000, // …at most this much
+    BANK_BURN: 15, // in the opening an enemy can also spend its starting bank: + this g/s…
+    BANK_BURN_S: 300, // …for this long
+    GOOD_LOOK_FRAC: 0.6, // a "good look" = at least this share of the known army in sight at once
+    ECON_GUESS: 25, // g/s assumed for an enemy whose economy I haven't seen lately
+    ECON_SEEN_TICKS: 3600, // "lately" = its main seen within 2 min
+    ALERT_RADIUS: 45, // enemy fighters this close to my yard and closing raise an alert (at least;
+    BASE_DEF_RADIUS: 18, // an enemy base's fortification = known towers this close to its yard
+    ALERT_RADIUS_FRAC: 0.8, // or this share of the way from their base to mine, whichever is farther)…
+    ALERT_MEMORY_TICKS: 900, // an alert outlives its sighting this long, the attackers' march extrapolated
+    HOME_ALERT_RADIUS: 28, // …or this close whatever they're doing
+    CLOSING_TILES: 2, // closing = distance to my yard fell this much since the last update
+    ALERT_MIN_VALUE: 300, // smaller groups are a raid, not an alert
+    DANGER_MEMORY_TICKS: 600, // a mine stays "in danger" 20 s after enemy fighters were seen there
+    PEEK_DIST: 7, // the scout looks from this far short of its target
+    SENTRY_OUT: 22, // sentries stand this far beyond my wall, toward the nearest enemies
+    SENTRY_MAX: 2,
+    SENTRY_FLEE_DIST: 9, // a sentry falls back from enemy fighters this close…
+    SENTRY_RETURN_TICKS: 600, // …and returns to its post this much later
+    SENTRY_MIN_ARMY: 6, // sentries are posted once main has this many fighters
+  },
+  // ── 33 §D priorities (the budget arbiter) ──
+  PRIO: {
+    SAVE_PRIO: 60, // an unaffordable request at least this important is saved for
+    SAVE_LEAK: 85, // requests at least this important may still spend into the savings (workers, power)
+    SITES_BASE: 2, // concurrent construction sites…
+    SITES_PER_WORKERS: 8, // …+1 per this many workers
+    SITE_SLACK: 1, // economy / survival requests may use this many more
+  },
+  // ── 33 §E defense ──
+  DEFENSE2: {
+    MIN_ARMY_BASE: 600, // desired army floor: this…
+    MIN_ARMY_PER_MIN: 250, // …+ this per minute of match time…
+    MIN_ARMY_MAX: 4000, // …up to this
+    FFA_SECOND_W: 0.35, // the second-strongest enemy counts this much toward the threat
+    DEF_ARMY_CREDIT: 0.6, // my powered towers' gold value counts this much toward the desired army
+    DEFEND_DANGER: 0.55, // DEFEND posture at this danger…
+    DEFEND_EXIT_DANGER: 0.25, // …until it falls below this
+    ALERT_ETA_S: 40, // an alert arriving within this counts toward DEFEND
+    ADAPTIVE_MAX: 2, // adaptive counter towers per attacked approach
+    HIT_MERGE: 8, // attack points this close merge
+    HIT_HALF_LIFE_TICKS: 5400, // attack-point weight halves every 3 min
+    HIT_TOWER_WEIGHT: 2, // an approach needs this much weight before it gets an adaptive tower
+    EMERGENCY_GAP_TICKS: 900, // one emergency tower per 30 s at most
+    EMERGENCY_MIN_ETA_S: 12, // only if the attack is at least this far away (a tower takes 10–20 s)
+    ANCHOR_RADIUS: 9, // defense anchor: the strongest tower group within this of the line threat→yard
+    EVAC_TICKS: 600, // an evacuated mine is left alone this long
+    RAID_MIN_ARMY: 1500, // Hard personalities raid once their army is worth this much
+  },
   // §B personalities — parameter sets, not code (firstPush = Infinity: never initiates).
   PERSONALITIES: {
-    rusher: { workers: 6, firstPush: 600, attackRatio: 1.1, defenseBudget: 0.05, techBudget: 0.05, expandAt: 0.2, raidSquads: 0, citadelWeight: 0.6 },
-    boomer: { workers: 12, firstPush: 1500, attackRatio: 1.4, defenseBudget: 0.1, techBudget: 0.15, expandAt: 0.45, raidSquads: 0, citadelWeight: 0.8 },
-    turtle: { workers: 8, firstPush: Infinity, attackRatio: 1.6, defenseBudget: 0.3, techBudget: 0.15, expandAt: 0.25, raidSquads: 0, citadelWeight: 0.7 },
-    techer: { workers: 9, firstPush: 1200, attackRatio: 1.3, defenseBudget: 0.12, techBudget: 0.35, expandAt: 0.3, raidSquads: 0, citadelWeight: 1.0 },
-    opportunist: { workers: 8, firstPush: 900, attackRatio: 1.2, defenseBudget: 0.1, techBudget: 0.12, expandAt: 0.3, raidSquads: 2, citadelWeight: 1.3 },
+    rusher: { workers: 6, safety: 1.0, firstPush: 600, attackRatio: 1.1, defenseBudget: 0.05, techBudget: 0.05, raidSquads: 1, citadelWeight: 0.6 },
+    boomer: { workers: 12, safety: 0.8, firstPush: 1500, attackRatio: 1.4, defenseBudget: 0.1, techBudget: 0.15, raidSquads: 1, citadelWeight: 0.8 },
+    turtle: { workers: 8, safety: 0.9, firstPush: Infinity, attackRatio: 1.6, defenseBudget: 0.3, techBudget: 0.15, raidSquads: 0, citadelWeight: 0.7 },
+    techer: { workers: 9, safety: 0.9, firstPush: 1200, attackRatio: 1.3, defenseBudget: 0.12, techBudget: 0.35, raidSquads: 1, citadelWeight: 1.0 },
+    opportunist: { workers: 8, safety: 0.9, firstPush: 900, attackRatio: 1.2, defenseBudget: 0.1, techBudget: 0.12, raidSquads: 2, citadelWeight: 1.3 },
   },
   // §N difficulty tiers (EASY = the old simple AI, untouched).
   TIERS: {

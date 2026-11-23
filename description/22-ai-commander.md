@@ -2,6 +2,8 @@
 
 Two parts. **Part 1** restates the victory rule as an exact, testable specification — the game currently ends after defeating one enemy, which is a bug against file 16 §2b. **Part 2** replaces the simple AI with a layered "AI Commander": personalities, situation-driven adaptation, real base-building (walls, gates, defenses, upgrades), counter-composition, formation-vs-formation play, and FFA target priority. All thresholds are concrete config dials.
 
+> **Superseded in part by `33-ai-v2.md`** — the economy (§F), tech (§H), production (§I), priorities and the attack/defense reads (§K) are re-specified there, with the scenario suite that checks them. Part 1 (the win rule) and §G (base planning), §L (formations) and §M (Citadel) still stand.
+
 Consistent with files 14–21. AI runs host-side in MP and emits commands into the lockstep stream (file 17 §4.4); ALL AI randomness goes through the seeded sim RNG — determinism is non-negotiable.
 
 Contents — Part 1: W1 victory rule · W2 elimination procedure · W3 MP spectating. Part 2: A) architecture · B) personalities · C) situation assessment · D) adaptation · E) FFA target priority · F) economy & expansion · G) base planning (walls/defenses) · H) tech planning · I) military production & counter-composition · J) squads · K) attack/defense decisions · L) formation tactics · M) Citadel play · N) difficulty tiers · O) debug tooling · P) data/config · Q) milestones.

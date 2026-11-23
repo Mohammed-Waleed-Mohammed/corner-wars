@@ -1,0 +1,199 @@
+// 33 §E — defense: how much danger am I in, how big an army do I need standing, where have I been hit,
+// which mines to evacuate, and which static defenses to build (the base plan's, adaptive counter
+// towers on the approaches that keep getting hit, and an emergency tower against an attack I can
+// see coming but can't hold). Requests go to the budget arbiter; evacuation marks mines for the
+// worker upkeep.
+
+import { BUILDING_STATS, COMMANDER, DEFENSE_STATS, STRUCTURE_CAP } from "../../config/constants";
+import type { BuildingType, ResearchKey, Vec2 } from "../../core/types";
+import { isLowPower } from "../../state/gameState";
+import { isResearched } from "../../state/upgrades";
+import { armyValue, baseCenter, buildingsOf, compositionNear, fightOdds, territoryThreat, type Composition } from "./assess";
+import type { Budget } from "./budget";
+import { aiLog, type Ctx } from "./commander";
+import { strongestEnemies } from "./intel";
+import { centerOf, cmd, spotNear, legalFor } from "./place";
+import { keepsBaseConnected } from "./basePlan";
+
+const D2 = COMMANDER.DEFENSE2;
+const clamp01 = (v: number): number => Math.max(0, Math.min(1, v));
+const dist = (a: Vec2, b: Vec2): number => Math.hypot(a.x - b.x, a.y - b.y);
+
+/** Gold value of my finished, powered towers (they count toward holding the base). */
+export function towerValue(ctx: Ctx): number {
+  if (isLowPower(ctx.state, ctx.pid)) return 0;
+  return buildingsOf(ctx.state, ctx.pid)
+    .filter((b) => DEFENSE_STATS[b.buildingType] && b.buildProgress >= 1)
+    .reduce((a, b) => a + BUILDING_STATS[b.buildingType].gold * (b.hp / b.maxHp), 0);
+}
+
+/** §E.1–.2 + §E.4 memory + §C.6 evacuation. Sets cs.danger and cs.desiredArmy. */
+export function assessDanger(ctx: Ctx): void {
+  const { state, cs, pid, pers } = ctx;
+  const b = cs.beliefs!;
+  const t = state.tick;
+  const myArmy = armyValue(state, pid);
+  const towers = towerValue(ctx);
+
+  // now: the territory threat against what holds it there
+  let Dnow = 0;
+  const tt = territoryThreat(state, pid);
+  if (tt && tt.value >= COMMANDER.DEFEND_MIN_VALUE) {
+    const odds = fightOdds(state, pid, tt.at, COMMANDER.LOCAL_ODDS_RADIUS, undefined, true);
+    const allOdds = fightOdds(state, pid, tt.at, COMMANDER.LOCAL_ODDS_RADIUS * 3, undefined, true); // + the army that can come
+    Dnow = clamp01(1.2 - Math.max(odds, allOdds * 0.8));
+  }
+  // incoming: an alert against everything I could put at the gate
+  let Dinc = 0;
+  if (b.alert && b.alert.eta < D2.ALERT_ETA_S) Dinc = clamp01(1.3 - (myArmy + D2.DEF_ARMY_CREDIT * towers) / Math.max(1, b.alert.value));
+  // strategic: the strongest enemy's believed army against mine
+  const top = strongestEnemies(b);
+  const threatEst = (top[0]?.est ?? 0) + D2.FFA_SECOND_W * (top[1]?.est ?? 0);
+  const Dstr = clamp01(0.5 * (1 - (myArmy + D2.DEF_ARMY_CREDIT * towers) / Math.max(1, threatEst)));
+  cs.danger = Math.max(Dnow, Dinc, Dstr);
+
+  // desired standing army
+  const minArmy = Math.min(D2.MIN_ARMY_MAX, D2.MIN_ARMY_BASE + D2.MIN_ARMY_PER_MIN * state.time / 60);
+  let desired = Math.max(minArmy, threatEst * pers.safety) - D2.DEF_ARMY_CREDIT * towers;
+  const target = cs.targetPlayer != null ? b.enemies[cs.targetPlayer] : undefined;
+  if ((cs.stance === "PRESSURE" || cs.stance === "ALL_IN") && target) desired = Math.max(desired, target.est * pers.attackRatio * 1.15);
+  if (tt) desired = Math.max(desired, myArmy + tt.value);
+  if (b.alert) desired = Math.max(desired, b.alert.value * 1.2);
+  cs.desiredArmy = Math.max(minArmy * 0.5, desired);
+
+  // where my territory gets hit (decaying memory; the dominant class of the attackers is kept)
+  const hits = (cs.hits ??= []);
+  const decay = Math.pow(0.5, COMMANDER.CADENCE.OPERATIONAL / D2.HIT_HALF_LIFE_TICKS);
+  for (const h of hits) h.w *= decay;
+  if (tt && tt.value >= COMMANDER.BASE_THREAT_MIN) {
+    const w = tt.value / 500;
+    const near = hits.find((h) => dist(h, tt.at) <= D2.HIT_MERGE);
+    if (near) { near.x = (near.x * near.w + tt.at.x * w) / (near.w + w); near.y = (near.y * near.w + tt.at.y * w) / (near.w + w); near.w += w; near.tick = t; }
+    else hits.push({ x: tt.at.x, y: tt.at.y, w, tick: t });
+  }
+  cs.hits = hits.filter((h) => h.w > 0.05).sort((a, c) => c.w - a.w).slice(0, 8);
+
+  // evacuation: a worked mine with enemy fighters at it that what I have there can't beat
+  cs.evac ??= {};
+  for (const m of b.mines) {
+    if (!m.refinery || m.workers === 0 || t - m.dangerTick > 30) continue; // fighters seen there this tick
+    const at = { x: m.x + 0.5, y: m.y + 0.5 };
+    const odds = fightOdds(state, pid, at, COMMANDER.LOCAL_ODDS_RADIUS, undefined, true);
+    if (odds < 1 && (cs.evac[m.id] ?? -1) <= t) {
+      cs.evac[m.id] = t + D2.EVAC_TICKS;
+      aiLog(cs, t, "O", `evacuate mine (${m.x},${m.y}) — raided (odds ${odds.toFixed(2)})`);
+    }
+  }
+}
+
+/** Counter tower for an attacking composition (§E.4). */
+function counterTower(ctx: Ctx, comp: Composition | null, count: number): BuildingType {
+  const p = ctx.p;
+  const adv = isResearched(p, "advancedDefenses" as ResearchKey);
+  if (comp && comp.heavy > COMMANDER.DEF_HEAVY_SHARE && adv) return "antiArmorCannon";
+  if (adv && count >= 15) return "missileTower";
+  if (comp && comp.infantry > 0.55) return "pillbox";
+  return "turret";
+}
+
+export function defenseRequests(ctx: Ctx, budget: Budget, D: number): void {
+  const { state, cs, p, pid, pers } = ctx;
+  const plan = cs.basePlan;
+  const t = state.tick;
+  const myB = buildingsOf(state, pid);
+  const near = (type: BuildingType, x: number, y: number, r: number): boolean =>
+    myB.some((b) => b.buildingType === type && Math.abs(b.x - x) <= r && Math.abs(b.y - y) <= r);
+  const unlocked = (type: BuildingType): boolean => !BUILDING_STATS[type].unlock || isResearched(p, BUILDING_STATS[type].unlock as ResearchKey);
+  const towerAt = (type: BuildingType, x: number, y: number, key: string, prio: number, cat: "defense" | "survival"): void => {
+    budget.add({
+      key, cat, cost: BUILDING_STATS[type].gold, prio, site: true,
+      act: () => {
+        const spot = legalFor(ctx, x, y, 1, 1) && (!plan || keepsBaseConnected(plan, state, x, y, 1, 1)) ? { x, y } : spotNear(ctx, { x, y }, type, 4);
+        if (!spot) return false;
+        cmd(ctx, "PLACE_BUILDING", { buildingType: type, x: spot.x, y: spot.y });
+        cs.intents.push(`defense: ${type}`);
+        return true;
+      },
+    });
+  };
+
+  // 1. the base plan (22 §G v4): core towers, gates, the wall, extras
+  if (plan && plan.radius > 0) {
+    let coreN = 0;
+    for (const d of plan.plannedDefenses) {
+      if (near(d.type, d.x, d.y, 2) || !unlocked(d.type)) continue;
+      if (d.core) {
+        towerAt(d.type, d.x, d.y, `core:${d.type}@${d.x},${d.y}`, 50 + 30 * D - coreN * 2, "defense");
+        coreN++;
+      } else if (pers.defenseBudget >= COMMANDER.DEF_EXTRA_MIN_BUDGET || D > 0.4) {
+        towerAt(d.type, d.x, d.y, `extra:${d.type}@${d.x},${d.y}`, 30 + 20 * D + 50 * pers.defenseBudget, "defense");
+      }
+    }
+    const wallsOwned = myB.filter((b) => b.buildingType === "wall" || b.buildingType === "gate").length;
+    const turtle = cs.personality === "turtle";
+    if (wallsOwned < STRUCTURE_CAP.wallsPerPlayer) {
+      const gate = plan.gates.find((g) => !near("gate", g.x, g.y, 0) && legalFor(ctx, g.x, g.y, 1, 1));
+      if (gate) {
+        budget.add({
+          key: `gate@${gate.x},${gate.y}`, cat: "invest", cost: BUILDING_STATS.gate.gold, prio: turtle ? 57 : 37, site: true,
+          act: () => { cmd(ctx, "PLACE_BUILDING", { buildingType: "gate", x: gate.x, y: gate.y }); plan.frozen = true; return true; },
+        });
+      } else {
+        const tiles = plan.walls.filter((w) => legalFor(ctx, w.x, w.y, 1, 1)).slice(0, Math.min(COMMANDER.WALLS_PER_TICK, STRUCTURE_CAP.wallsPerPlayer - wallsOwned));
+        if (tiles.length) {
+          budget.add({
+            key: "walls", cat: "invest", cost: BUILDING_STATS.wall.gold * tiles.length, prio: turtle ? 55 : 35, site: true,
+            act: () => { for (const w of tiles) cmd(ctx, "PLACE_BUILDING", { buildingType: "wall", x: w.x, y: w.y }); plan.frozen = true; cs.intents.push(`walls +${tiles.length}`); return true; },
+          });
+        }
+      }
+    }
+  }
+
+  // 2. adaptive counter towers on the most-hit approach
+  const home = baseCenter(state, pid);
+  const hit = (cs.hits ?? []).find((h) => h.w >= COMMANDER.DEFENSE2.HIT_TOWER_WEIGHT);
+  if (hit && home) {
+    const towers = myB.filter((b) => DEFENSE_STATS[b.buildingType] && dist(centerOf(b), hit) <= 7).length;
+    if (towers < COMMANDER.DEFENSE2.ADAPTIVE_MAX + 1) {
+      const comp = compositionNear(state, pid, hit, 14);
+      const enemyComp = comp.value > 0 ? comp.comp : mostRecentAttackerComp(ctx);
+      const type = counterTower(ctx, enemyComp, 0);
+      // a few tiles from the hit point toward the yard, inside cover of the base
+      const k = Math.min(1, 3 / Math.max(1, dist(hit, home)));
+      const at = { x: Math.round(hit.x + (home.x - hit.x) * k), y: Math.round(hit.y + (home.y - hit.y) * k) };
+      towerAt(type, at.x, at.y, `adaptive:${type}@${at.x},${at.y}`, 58 + 10 * Math.min(3, hit.w), "defense");
+    }
+  }
+
+  // 3. emergency: an attack I can see coming and can't hold, far enough out to finish a tower first
+  const b = cs.beliefs!;
+  const alert = b.alert;
+  if (alert && home && D >= 0.5 && alert.eta >= COMMANDER.DEFENSE2.EMERGENCY_MIN_ETA_S &&
+      t - (cs.lastEmergencyTick ?? -1e9) >= COMMANDER.DEFENSE2.EMERGENCY_GAP_TICKS) {
+    const gates = plan?.gateCenters ?? [];
+    const gate = gates.length ? gates.reduce((a, g) => (dist(g, alert.at) < dist(a, alert.at) ? g : a)) : null;
+    const from = gate ?? alert.at;
+    const k = Math.min(1, 4 / Math.max(1, dist(from, home)));
+    const at = { x: Math.round(from.x + (home.x - from.x) * k), y: Math.round(from.y + (home.y - from.y) * k) };
+    const eb = b.enemies[alert.from];
+    const type = counterTower(ctx, eb ? eb.comp : null, Math.round(alert.value / 120));
+    budget.add({
+      key: `emergency:${type}`, cat: "survival", cost: BUILDING_STATS[type].gold, prio: 88, site: true,
+      act: () => {
+        const spot = spotNear(ctx, at, type, 5);
+        if (!spot) return false;
+        cmd(ctx, "PLACE_BUILDING", { buildingType: type, x: spot.x, y: spot.y });
+        cs.lastEmergencyTick = t;
+        aiLog(cs, t, "O", `EMERGENCY ${type} — ${Math.round(alert.value)} incoming from P${alert.from}, ETA ${alert.eta.toFixed(0)} s`);
+        return true;
+      },
+    });
+  }
+}
+
+function mostRecentAttackerComp(ctx: Ctx): Composition | null {
+  const b = ctx.cs.beliefs!;
+  const att = Object.values(b.enemies).filter((e) => e && e.known > 0).sort((a, c) => c!.attackedMeTick - a!.attackedMeTick)[0];
+  return att ? att.comp : null;
+}

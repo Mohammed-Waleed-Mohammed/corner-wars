@@ -30,6 +30,7 @@ Each file is the **single source of truth** for its own system and numbers. The 
 | `30-command-hud.md` | The Command HUD: two bands (top bar + bottom console), the 5×3 command card, build categories and name-based hotkeys, selection panel, production tabs, alerts (replaces file 21's layout) |
 | `31-performance.md` | Big battles at 60 fps: how to measure (`?stress=N&clash`), the sim/render/HUD rules and budgets (nav grid, A* budget, re-target interval, per-tile fog, change-only HUD writes) |
 | `32-late-economy-and-research.md` | Late-game gold without mines (the Resonance Tap), the research tree re-planned as six branches × four tiers, the Research board UI, and how the AI uses both |
+| `33-ai-v2.md` | AI v2: beliefs and scouting under fog, the mine-aware economy, the priced-request budget arbiter, danger-driven defense, war posture — and the headless scenario suite (`npm run aisim`) every AI change must pass |
 
 ## Conventions used everywhere
 

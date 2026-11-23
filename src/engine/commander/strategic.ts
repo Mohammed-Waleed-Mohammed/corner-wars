@@ -1,19 +1,18 @@
-// 22 §B/§D/§E — the strategic layer (every 150 ticks): stance adaptation + FFA target priority.
-// Personality supplies the defaults; the §D trigger table overrides (first match wins). Medium
-// difficulty runs only the defensive rows (DEFEND/RECOVER) per §N.
+// 33 §F (over 22 §B/§D/§E) — the strategic layer (every 150 ticks): posture and FFA target, read from
+// BELIEFS (33 §B: what I've seen + what an unseen army could have grown into), never from a peek.
+// First matching row wins; Medium runs only the defensive rows (DEFEND/RECOVER) + the personality
+// default (22 §N).
 
 import { COMMANDER } from "../../config/constants";
-import type { PlayerId } from "../../core/types";
-import {
-  armyCentroid, armyValue, baseCenter, defenseScore, economyScore, fightOdds, frontDistance, livingEnemies, territoryThreat,
-  threatNearBase, biggestThreatPlayer,
-} from "./assess";
-import { aiLog, type Ctx } from "./commander";
+import type { EnemyBelief, PlayerId } from "../../core/types";
 import { isLowPower } from "../../state/gameState";
+import { unitCap } from "../../state/upgrades";
+import { armyValue, baseCenter, biggestThreatPlayer, fightersOf, fightOdds, frontDistance, livingEnemies, projectedOdds, territoryThreat, unitsOf } from "./assess";
+import { aiLog, type Ctx } from "./commander";
+import { updateBeliefs } from "./intel";
 
-const HIST_KEEP_TICKS = 1800; // keep 60 s of samples
+const HIST_KEEP_TICKS = 1800;
 
-/** Value `window` ticks ago from a sample series (nearest older sample). */
 function valueAgo(hist: { tick: number; v: number }[], now: number, window: number): number | null {
   let best: number | null = null;
   for (const h of hist) if (h.tick <= now - window) best = h.v;
@@ -23,140 +22,131 @@ function valueAgo(hist: { tick: number; v: number }[], now: number, window: numb
 export function runStrategic(ctx: Ctx): void {
   const { state, cs, pid, pers, tier } = ctx;
   const t = state.tick;
+  const b = updateBeliefs(ctx);
   const myArmy = armyValue(state, pid);
 
-  // ── sample histories (mine + every enemy) ──
   cs.armyHist.push({ tick: t, v: myArmy });
   cs.armyHist = cs.armyHist.filter((h) => h.tick > t - HIST_KEEP_TICKS);
-  // peak decays slowly (~half-life 6 min) so RECOVER's "rebuild to 80% of peak" tracks the RECENT
-  // peak — otherwise one huge early army locks everyone into RECOVER forever (stalemate).
   cs.peakArmy = Math.max(cs.peakArmy * 0.98, myArmy);
   const enemies = livingEnemies(state, pid);
   for (const e of enemies) {
     const hist = (cs.enemyHist[e] ??= []);
-    hist.push({ tick: t, v: armyValue(state, e) });
+    hist.push({ tick: t, v: b.enemies[e]?.known ?? 0 });
     cs.enemyHist[e] = hist.filter((h) => h.tick > t - HIST_KEEP_TICKS);
   }
-
-  // ── grudges: anyone with an army parked near my base attacked me (30 s memory) ──
   const aggressor = biggestThreatPlayer(state, pid);
   if (aggressor != null) cs.grudges[aggressor] = t;
 
-  // ── §E target scoring (sticky ×1.25; grudge; citadel; busy penalty) ──
   pickTarget(ctx, enemies, t);
 
-  // ── §D adaptation — first matching row wins ──
-  const threat = threatNearBase(state, pid);
-  const strongest = Math.max(1, ...enemies.map((e) => armyValue(state, e)));
+  const est = (e: PlayerId | null): number => (e != null ? b.enemies[e]?.est ?? 0 : 0);
+  const D2 = COMMANDER.DEFENSE2;
+  const tt = territoryThreat(state, pid);
+  const ttOdds = tt ? fightOdds(state, pid, tt.at, COMMANDER.LOCAL_ODDS_RADIUS * 3, undefined, true) : 99;
+  const losingAtHome = tt != null && tt.value >= COMMANDER.DEFEND_MIN_VALUE && ttOdds < COMMANDER.DEFEND_ODDS;
+  const alertBad = b.alert != null && b.alert.eta < D2.ALERT_ETA_S && (cs.danger ?? 0) >= D2.DEFEND_DANGER;
   const lostRecently = (() => {
     const before = valueAgo(cs.armyHist, t, COMMANDER.RECOVER_WINDOW_TICKS);
     return before != null && before > 0 && (before - myArmy) / before > COMMANDER.RECOVER_LOSS_FRAC;
   })();
   const target = cs.targetPlayer;
-  const targetCrippled = target != null && (() => {
-    if (isLowPower(state, target)) return true;
-    const hist = cs.enemyHist[target] ?? [];
-    const before = valueAgo(hist, t, COMMANDER.ALLIN_DROP_WINDOW_TICKS);
-    const nowV = armyValue(state, target);
-    return before != null && before > 0 && (before - nowV) / before > COMMANDER.ALLIN_ENEMY_DROP;
-  })();
-  // two enemies fighting each other → pressure the weaker (opportunism; Hard only per §N raids/opportunism)
-  const brawlers = tier.fullAdaptation
-    ? enemies.filter((e) => {
-        const hist = cs.enemyHist[e] ?? [];
-        const before = valueAgo(hist, t, COMMANDER.ALLIN_DROP_WINDOW_TICKS);
-        const nowV = armyValue(state, e);
-        return before != null && before > 0 && (before - nowV) / before > 0.15 && cs.grudges[e] !== t;
-      })
-    : [];
-
-  // §D v2 Row 1 context: also read the fight at the most-threatened point of my territory (my units +
-  // powered defenses there vs the attackers) — a big army parked at home doesn't need to recall the
-  // push for a poke, but a raid my base can't hold does, even if my total army is large.
-  const tt = territoryThreat(state, pid);
-  const ttOdds = tt ? fightOdds(state, pid, tt.at, COMMANDER.LOCAL_ODDS_RADIUS, undefined, true) : 99;
-  const losingAtHome = tt != null && tt.value >= COMMANDER.DEFEND_MIN_VALUE && ttOdds < COMMANDER.DEFEND_ODDS;
+  const tb: EnemyBelief | undefined = target != null ? b.enemies[target] : undefined;
+  const dropped = (e: PlayerId, frac: number): boolean => {
+    const before = valueAgo(cs.enemyHist[e] ?? [], t, COMMANDER.ALLIN_DROP_WINDOW_TICKS);
+    const nowV = b.enemies[e]?.known ?? 0;
+    return before != null && before > 0 && (before - nowV) / before > frac;
+  };
+  const desired = cs.desiredArmy ?? 0;
+  const rebuildTo = Math.min(cs.peakArmy * COMMANDER.RECOVER_REBUILD_FRAC, Math.max(desired, 1));
 
   const prev = cs.stance;
-  // Row 1 (all tiers): serious threat at home → DEFEND.
-  if (threat > COMMANDER.DEFEND_THREAT * Math.max(1, myArmy) || losingAtHome) {
-    cs.stance = "DEFEND";
-  } else if (cs.stance === "DEFEND" && (threat >= COMMANDER.DEFEND_EXIT * Math.max(1, myArmy) ||
+  if (losingAtHome || alertBad) {
+    cs.stance = "DEFEND"; // row 1
+  } else if (cs.stance === "DEFEND" && ((cs.danger ?? 0) >= D2.DEFEND_EXIT_DANGER ||
       (tt != null && tt.value >= COMMANDER.DEFEND_MIN_VALUE && ttOdds < COMMANDER.DEFEND_ODDS * 1.5))) {
-    // stay in DEFEND until the exit threshold (§K) — and until the threatened point is held comfortably
-  } else if (lostRecently && myArmy < cs.peakArmy * COMMANDER.RECOVER_REBUILD_FRAC) {
-    cs.stance = "RECOVER"; // Row 2 (all tiers)
-  } else if (cs.stance === "RECOVER" && myArmy < cs.peakArmy * COMMANDER.RECOVER_REBUILD_FRAC) {
-    // keep rebuilding to 80% of peak
+    // hold DEFEND until the danger is really gone
+  } else if (lostRecently && myArmy < rebuildTo) {
+    cs.stance = "RECOVER"; // row 2
+  } else if (cs.stance === "RECOVER" && myArmy < rebuildTo) {
+    // keep rebuilding
   } else if (!tier.fullAdaptation) {
-    // §N Medium: only the defensive rows; otherwise personality default.
-    cs.stance = defaultStance(ctx, myArmy, strongest);
+    cs.stance = defaultStance(ctx, myArmy, est(target));
   } else if (cs.stance === "ALL_IN" && t < cs.stanceUntilTick) {
     // hold the ALL_IN window
-  } else if (targetCrippled && target != null) {
-    cs.stance = "ALL_IN"; // Row 4: low power or just lost a fight → ALL_IN 45 s
+  } else if (target != null && tb && allInWindow(ctx, tb, myArmy, dropped(target, COMMANDER.ALLIN_ENEMY_DROP))) {
+    cs.stance = "ALL_IN"; // row 3
     cs.stanceUntilTick = t + COMMANDER.ALLIN_WINDOW_TICKS;
-  } else if (myArmy > pers.attackRatio * strongest) {
-    cs.stance = "PRESSURE"; // Row 3
-  } else if (brawlers.length >= 2) {
-    // Row 5: pressure the weaker brawler
-    const weaker = brawlers.reduce((a, b) => (armyValue(state, a) < armyValue(state, b) ? a : b));
-    cs.targetPlayer = weaker;
-    cs.stance = "PRESSURE";
+  } else if (target != null && myArmy > pers.attackRatio * est(target)) {
+    cs.stance = "PRESSURE"; // row 4
   } else {
-    cs.stance = defaultStance(ctx, myArmy, strongest);
+    const brawlers = enemies.filter((e) => dropped(e, 0.15) && cs.grudges[e] !== t);
+    if (brawlers.length >= 2) {
+      cs.targetPlayer = brawlers.reduce((a, c) => (est(a) < est(c) ? a : c));
+      cs.stance = "PRESSURE";
+    } else {
+      cs.stance = defaultStance(ctx, myArmy, est(target));
+    }
   }
-
-  if (cs.stance !== prev) aiLog(cs, t, "S", `stance ${prev}→${cs.stance} (threat ${threat | 0}, army ${myArmy | 0}, target ${cs.targetPlayer})`);
+  if (cs.stance !== prev) {
+    aiLog(cs, t, "S", `stance ${prev}→${cs.stance} (army ${myArmy | 0} vs P${cs.targetPlayer} est ${est(cs.targetPlayer) | 0}, danger ${(cs.danger ?? 0).toFixed(2)}${b.alert ? `, alert ${b.alert.value | 0} ETA ${b.alert.eta.toFixed(0)} s` : ""})`);
+  }
 }
 
-function defaultStance(ctx: Ctx, myArmy: number, strongest: number): Ctx["cs"]["stance"] {
+/** §F.1 row 3: a decisive window. */
+function allInWindow(ctx: Ctx, tb: EnemyBelief, myArmy: number, justLost: boolean): boolean {
+  const { state, pid } = ctx;
+  if (myArmy < COMMANDER.DEFENSE2.MIN_ARMY_BASE) return false;
+  if (isLowPower(state, tb.pid) || justLost) return myArmy >= 0.8 * tb.est;
+  const fighters = fightersOf(state, pid);
+  if (tb.away && tb.home && fighters.length >= COMMANDER.ATTACK_MIN_UNITS) {
+    // their army is out: do I reach their base before it gets back, and win there?
+    const home = baseCenter(state, pid);
+    const mine = home ? Math.hypot(home.x - tb.home.x, home.y - tb.home.y) : 9999;
+    const theirs = tb.armyAt ? Math.hypot(tb.armyAt.x - tb.home.x, tb.armyAt.y - tb.home.y) : 0;
+    if (mine < theirs * 1.6 && projectedOdds(state, pid, fighters, tb.pid, tb.home) >= 1) return true;
+  }
+  const atCap = unitsOf(state, pid).length >= unitCap(ctx.p) * 0.95;
+  return atCap && myArmy >= tb.est;
+}
+
+function defaultStance(ctx: Ctx, myArmy: number, targetEst: number): Ctx["cs"]["stance"] {
   const { cs, pers } = ctx;
-  // First-push rule (§B): once army value crosses the personality trigger, apply pressure.
-  if (myArmy >= pers.firstPush && myArmy >= pers.attackRatio * strongest * 0.8) return "PRESSURE";
-  if (cs.personality === "rusher" && myArmy >= pers.firstPush) return "PRESSURE";
+  if (myArmy >= pers.firstPush && myArmy >= pers.attackRatio * targetEst * 0.8) return "PRESSURE";
+  if (cs.personality === "rusher" && myArmy >= pers.firstPush && myArmy >= 0.7 * targetEst) return "PRESSURE";
   return "BUILD_UP";
 }
 
-/** §E: score every living enemy; switch only on a 25% score beat (stickiness). Never voluntarily
- *  open a second war: while PRESSURE/ALL_IN, the target only changes if it died. */
+/** 22 §E target scoring, from beliefs; switch only on a 25 % beat; never a second war while pushing. */
 function pickTarget(ctx: Ctx, enemies: PlayerId[], t: number): void {
   const { state, cs, pid } = ctx;
+  const b = cs.beliefs!;
   if (enemies.length === 0) { cs.targetPlayer = null; return; }
   if (cs.targetPlayer != null && !enemies.includes(cs.targetPlayer)) cs.targetPlayer = null;
   if ((cs.stance === "PRESSURE" || cs.stance === "ALL_IN") && cs.targetPlayer != null) return;
 
-  const invArmy = enemies.map((e) => 1 / (1 + armyValue(state, e)));
+  const est = (e: PlayerId): number => b.enemies[e]?.est ?? 0;
+  const invArmy = enemies.map((e) => 1 / (1 + est(e)));
   const invDist = enemies.map((e) => 1 / (1 + frontDistance(state, pid, e)));
   const maxInvArmy = Math.max(...invArmy), maxInvDist = Math.max(...invDist);
-  // §E v2 fortification: a base full of powered turrets is a worse target than the same army in the open.
-  const fort = enemies.map((e) => { const c = baseCenter(state, e); return c ? defenseScore(state, e, c) : 0; });
+  const fort = enemies.map((e) => b.enemies[e]?.baseDef ?? 0);
   const maxFort = Math.max(1, ...fort);
   const W = COMMANDER.SCORE_W;
-  const myBase = baseCenter(state, pid);
   const scores = new Map<PlayerId, number>();
   enemies.forEach((e, i) => {
-    let s = W.WEAKNESS * (invArmy[i] / maxInvArmy) + W.PROXIMITY * (invDist[i] / maxInvDist) -
-      W.FORTIFIED * (fort[i] / maxFort);
+    let s = W.WEAKNESS * (invArmy[i] / maxInvArmy) + W.PROXIMITY * (invDist[i] / maxInvDist) - W.FORTIFIED * (fort[i] / maxFort);
     if ((cs.grudges[e] ?? -1e9) > t - COMMANDER.GRUDGE_TICKS) s += W.GRUDGE;
     if (state.citadel.controllingPlayer === e) s += W.CITADEL;
-    // busy: they recently lost value and it wasn't near my base → someone else is on them.
     const hist = cs.enemyHist[e] ?? [];
     const before = valueAgo(hist, t, COMMANDER.ALLIN_DROP_WINDOW_TICKS);
-    const nowV = armyValue(state, e);
-    const busy = before != null && before > 0 && (before - nowV) / before > 0.1 && cs.grudges[e] !== t;
-    if (busy && myBase) s -= W.BUSY;
-    // §E v2 exposed base: their army is far from home (out raiding, fighting someone, sieging me) —
-    // the base is the softest it will ever be.
-    const eb = baseCenter(state, e), ea = armyCentroid(state, e);
-    if (eb && ea && Math.hypot(eb.x - ea.x, eb.y - ea.y) > COMMANDER.EXPOSED_DIST) s += W.EXPOSED;
+    const nowV = b.enemies[e]?.known ?? 0;
+    if (before != null && before > 0 && (before - nowV) / before > 0.1 && cs.grudges[e] !== t) s -= W.BUSY;
+    if (b.enemies[e]?.away) s += W.EXPOSED;
     scores.set(e, s);
   });
-  const best = enemies.reduce((a, b) => ((scores.get(a) ?? 0) >= (scores.get(b) ?? 0) ? a : b));
+  const best = enemies.reduce((a, c) => ((scores.get(a) ?? 0) >= (scores.get(c) ?? 0) ? a : c));
   const cur = cs.targetPlayer;
   if (cur == null || (scores.get(best) ?? 0) > (scores.get(cur) ?? 0) * COMMANDER.TARGET_STICKINESS) {
     if (cs.targetPlayer !== best) aiLog(cs, t, "S", `target → P${best} (score ${(scores.get(best) ?? 0).toFixed(2)})`);
     cs.targetPlayer = best;
   }
-  void economyScore; // (weighted into future scoring refinements)
 }
