@@ -5,7 +5,7 @@ competent alone, but each one **decides alone**: it reads the game state, makes 
 requests, and nobody asks the part that knows. This file reorganises the Medium/Hard AI into a
 **court**: a King who holds the plan and rules on disputes, and six councillors who each own one
 aspect of winning, keep a report on it, answer the others' questions, and petition for what their
-aspect needs, each with a written reason. Part §W gives the Marshal the art of war: a field manual of every unit, task forces with different jobs, a profile of how each enemy behaves, and operations (pincers, feints, baits and traps, ambushes, sieges, base trades) — and the sense not to fall for the enemy's.
+aspect needs, each with a written reason. Part §M makes the King plan the whole match as a campaign (the situation estimate, grand strategies, the flow of the match, map control, logistics, windows, the centre of gravity, the information war, FFA politics, defense in depth, the comeback). Part §W gives the Marshal the art of war: a field manual of every unit, task forces with different jobs, a profile of how each enemy behaves, and operations (pincers, feints, baits and traps, ambushes, sieges, base trades) — and the sense not to fall for the enemy's.
 
 Everything in 33 that this file does not restate still holds (beliefs, the mine economy, the
 priced-request arbiter, danger, static defense, push discipline, the scenario suite). Everything in 22
@@ -431,6 +431,240 @@ added to the game for everyone, with HUD buttons and hotkeys:
    hit, or when the order is lifted. Without it, an ambush gives itself away at the first unit in range.
 
 Both are lockstep commands like every other, so determinism is unaffected; both are checksummed state.
+The guard order changes too (§W.7).
+
+### §W.7 Guarding a zone (a sim change, and the doctrine for it)
+
+Today a guarding unit only targets enemies within 8 tiles of its guard **point** (`GUARD.radius`), and
+it may chase up to 12 tiles (`chaseMultiplier` 1.5) for as long as the enemy stays. So a rocket on the
+edge of the circle watches an enemy 3 tiles outside it that is well within its own range, and a
+rifleman chases a bait 12 tiles out and stays there. The guard order becomes:
+
+1. **Shoot what you can reach.** A guarding unit targets any enemy within **its own weapon range from
+   where it stands** (and the guard radius as before), so a ranged unit on the edge covers beyond the
+   circle without moving.
+2. **Step out briefly.** It may leave the circle to engage, at most `GUARD.stepOut` tiles beyond it
+   and for at most `GUARD.outS` seconds per sortie; then it returns even if the enemy is still there,
+   and may not sortie again for `GUARD.outCooldownS`. A ranged unit that can shoot from inside never
+   steps out.
+3. **Stay together.** If more than half the guards are outside the circle, the rest don't follow. A
+   guard group never empties its circle chasing.
+4. **Fight back when hit.** A guard hit by a unit it can't reach (artillery, a long-range tower) steps
+   out toward it only if the group's odds against it are ≥ 1; otherwise the group pulls back out of
+   its range and reports it to the Warden ("being shelled from (x,y)").
+
+This is a player-facing change too (the same GUARD button), with its own unit tests.
+
+### §W.8 Standoffs, dances and mutual traps
+
+Two careful commanders can lock each other in a loop: A advances, B sees a bad fight and falls back,
+A follows, sees B's towers or a forest and falls back, B follows… or both set baits and neither bites.
+The council breaks this deliberately:
+
+**Detect it.** A captain reports a **standoff** when its task force and an enemy force have stayed
+within `STANDOFF_RANGE` of each other for `STANDOFF_S` without a real exchange (value lost on both
+sides below `STANDOFF_TRADE`), or when its own advance/withdraw has reversed `DANCE_CYCLES` times over
+the same ground.
+
+**Every retreat ends somewhere chosen.** A withdrawal is never "away": the captain falls back to a
+named **position**: the nearest good ground (a hill, a forest edge, a bridge exit, my towers' reach)
+on the way home. There it stands (HOLD), reports "repositioned at X, odds Y, need Z more", and the
+Marshal decides. Following a retreating enemy is allowed only up to CHASE_MAX unless the Marshal
+orders a pursuit (the enemy is routing: its odds < 0.5 and it is not heading toward its own towers or
+a forest).
+
+**The resolution ladder**, taken one step at a time; a step that has been used on this standoff is
+not repeated, so the loop can't recur:
+
+1. **Hold the better ground.** Whoever stands on the better position (hill, cover, towers, a
+   chokepoint the other must cross) stays and lets the other choose. If that is me, I hold and spend
+   the time elsewhere (step 5).
+2. **Reinforce.** The Marshal asks the Quartermaster `timeTo(value needed for nerve odds)` and sends
+   the reinforcements **as a group** (§W.9) to the force. If they arrive in time, commit.
+3. **Bring the tool that breaks standoffs.** A standing enemy is the ideal target for artillery,
+   Hammerfall and the Sundering Hymn; a standoff is where they are worth their price. The
+   Quartermaster is asked for artillery; abilities are cast on the enemy line.
+4. **Go around.** Leave a pin (enough to hold the position) and send the rest at something the enemy
+   force is no longer protecting: an expansion, a Tap, their base (the indirect approach).
+5. **Disengage on purpose.** If the King's estimate (§M.1) says time is on my side (I out-earn, I
+   out-tech, or I hold the Citadel), the force withdraws to its position and the King spends the time
+   on economy and tech: a standoff I can afford to wait out is a win.
+6. **Commit.** If none of the above is open and the odds are ≥ the King's nerve, fight.
+
+Both sides baiting and neither biting is not a failure: the standoff detector fires and the ladder
+moves the war somewhere else.
+
+### §W.9 Battle craft (inside a fight)
+
+The captain's techniques once a fight has started:
+
+* **Focus fire.** Fire is concentrated by the manual's priority (artillery in range → medics → the unit
+  I counter → the most damaged), so enemies die instead of all being wounded.
+* **Rotate the wounded.** A unit below `WOUNDED_FRAC` hp, with a medic in the force, steps back behind
+  the line and returns when healed; a lost unit is a permanent loss, a wounded one is not.
+* **Spread against splash.** Against grenadiers, artillery or a telegraphed Hymn, loosen the formation
+  (or step out of the ring); against single-target enemies, keep it tight.
+* **Hit the line where it is weak.** Formations have counters (19, `FORMATION_COUNTERS`); a captain
+  facing a Line answers with a Spear, a Spear with a Box. Flank a stationary line with a second group;
+  go for the backline (artillery and medics) with fast units.
+* **Keep the way home open.** A force never fights with an enemy group between it and its retreat
+  position, unless it is a decisive battle the King ordered.
+* **No trickling.** Reinforcements never walk into a fight one by one. They gather at a rally point
+  behind the force and join as a group; units arriving piecemeal is the most common way armies are
+  lost.
+* **Win the first contact.** The Spear's charge, Rally or Frenzy at the moment of contact, and Aegis on
+  the line land as the fight begins, not halfway through.
+* **Fight on my terms.** A force that can choose waits on a hill or at a forest edge in Line (Volley)
+  and lets the enemy walk the last tiles under fire.
+
+---
+
+## §M The whole war: the match as a campaign
+
+Fights are a means. The match is won by removing the enemy's Construction Yards (22 §W1) and lost by
+losing mine, and between the first worker and that moment lies a whole campaign: economy, map,
+intelligence, timing, politics, and choosing which fights to have. The King plans this campaign; the
+council carries it out.
+
+### §M.1 The situation estimate (the King, every strategic tick)
+
+The King keeps one sober picture of the war, from the reports:
+
+| measure | from |
+|---|---|
+| `worth` | my army + buildings + bank vs each enemy's believed equivalent |
+| `income` | my income vs each enemy's `econEst`, and the projection over the next 3 minutes (mines running out, Taps) |
+| `army` | my army vs `believed` (§D), and vs what each can be in 60 s (`timeTo`) |
+| `trade` | the value I killed ÷ the value I lost over the last 5 minutes (am I winning the fights I take?) |
+| `tech` | the research tiers each side holds, and spikes coming (a seen Lab, Heavy Tanks) |
+| `map` | the share of mines, Taps and the Citadel I hold vs each enemy; vision over the approaches |
+| `time` | who the clock favours: the side with the better income and tech wins a long war |
+
+From it the King reads **who is winning, by what, and whether time is on my side**. That answer is
+logged every minute (`[King] estimate: ahead in income 1.4×, behind in army 0.8×, time favours me →
+attrition`) and drives the grand strategy.
+
+### §M.2 Grand strategies
+
+The King chooses one grand strategy at a time; the plan phases (§C.2) are its opening book, and the
+operations (§W.4) are its tools. It switches only on a clear change in the estimate (with hysteresis),
+logged with the reason.
+
+| strategy | when | what it does |
+|---|---|---|
+| **Decisive battle** | army ahead and time not on my side (they out-earn or out-tech me) | concentrate everything, force the battle soon, on my ground if possible |
+| **Attrition** | I out-earn them, fights are about even | take only good trades (towers, hills, ambushes), refuse bad ones, let the economy win |
+| **Strangulation** | their income depends on few mines or Taps, they're hard to break head-on | kill expansions and Taps, hold the mines, raid in rotation, hold the Citadel; starve them |
+| **Fortress and tech** | behind in army, safe base, a tech spike is reachable | defend in depth, tech to the spike (Heavy Tanks, artillery, tier 3), then break them |
+| **Opportunism** (FFA) | several enemies at war with each other | stay out of fights, take what the fights leave: the weakened winner, the exposed loser |
+| **Comeback** | behind on most measures | §M.10 |
+
+### §M.3 The flow of the match
+
+| stage | aims | the council's emphasis |
+|---|---|---|
+| **Opening** (0–3 min) | a safe economy, the first scout out, know their personality early | Treasurer leads; Spymaster sends the first scout early and kills theirs; Warden builds the core towers its character wants |
+| **Early** (3–6 min) | map control: sentries on the approaches, the first expansion, the first raids | Spymaster's vision network; first contact read for the profile; the plan's first timing |
+| **Middle** (6–12 min) | the expansions war: take mines, deny theirs; tech transitions; the Citadel | the Marshal's operations; Scholar's spikes; windows (§M.6) |
+| **Late** (mines dry) | Taps and the Citadel are the income; unit caps are reached | strangulation of Taps, Citadel control, siege, attrition at the cap |
+| **End** | close out a won war, or survive a lost one | the finishing blow (yards first); the insurance yard (§M.7); the comeback |
+
+### §M.4 Map control and territory
+
+* **A vision network.** Sentries on every approach (33 §B.2), watch posts on hills (+2 sight), and a
+  unit near every contested mine. What the AI can see, it can't be surprised by.
+* **Counter-intelligence.** Enemy scouts and sentries are hunted (the `hunt` task force): an enemy
+  that can't see my army can't time its attacks or dodge my traps. The Spymaster tracks **what the
+  enemy knows about me**: when their scout last saw my base and my army.
+* **Forward positions.** A forward tower or a forward Barracks (built by the stepping-stone creep, 33
+  §C) shortens the reinforcement path and holds ground the army doesn't have to stand on.
+* **Contested ground.** Mines, Taps and the Citadel are terrain worth fighting for; open ground is
+  not. The army stands where it denies the enemy something.
+
+### §M.5 Logistics
+
+* **The reinforcement path.** The time from my producers to the front is a real cost. The Marshal
+  prefers fronts close to my production or a forward Barracks, and sets rally points behind the front,
+  never at it (no trickling, §W.9).
+* **Production follows the war.** The Quartermaster builds what the active operations need (artillery
+  for a siege, buggies for raids and hunts, rockets against their Heavy Tanks) on top of the counter
+  mix.
+* **The unit cap is a resource.** Near the cap, units are worth spending (33 §F ALL_IN at the cap):
+  trade them for the enemy's economy. Supply Lines are researched before the cap blocks the plan.
+
+### §M.6 Windows and tempo
+
+The King keeps a list of **windows**, each with an opening and a closing time, and the operations
+check them:
+
+* **Counter-punch.** Right after I win a defense, their army is gone and mine is home: strike within
+  `COUNTERPUNCH_S`, before they rebuild.
+* **Tech transition.** They just bought a Lab or a costly research: their army is smaller for a
+  while.
+* **Army away.** (33) their army is far from home.
+* **My spike.** My Weapons/Armor upgrade or my first Heavy Tanks are done: their beliefs about me are
+  now out of date.
+* **Their spike coming.** A seen Lab or War Factory means their spike is due: strike before it lands,
+  or prepare its counter.
+
+**Initiative.** The side that makes the other react controls the war. Raids, feints and threats to
+their expansions make them spend their attention and army where I choose; when the AI has the
+initiative it keeps it (another raid before the last one is answered), and when it has lost it, it
+takes it back cheaply (a raid on their weakest mine) instead of only reacting.
+
+### §M.7 The centre of gravity
+
+The yard is the only thing that eliminates, so the war is ultimately about yards:
+
+* **Insurance.** A second Construction Yard (2 are allowed) is built away from the main base, in the
+  least-scouted corner of my territory, once the gold allows it in the middle game, and immediately
+  when the main base is threatened and the war is going badly. A player with two yards cannot be
+  killed by one raid.
+* **The finishing blow.** When the enemy's army is broken, the Marshal goes for the yards first
+  (victim weight 12, 33 §T.1), not the nearest buildings, and looks for a second yard.
+* **Their economy is their staying power.** Workers and Taps are the target whenever the yard is out
+  of reach.
+
+### §M.8 The information war
+
+Deception at the scale of the whole match:
+
+* **Hide the army's size.** Part of the army waits in a forest or under Ghost Roads; the enemy's
+  `est` of me is then wrong in my favour.
+* **A false front.** A visible gather at one gate while the real force forms at another.
+* **Hide the tech.** Kill their scouts before the spike is ready, so it arrives unexpected.
+* **Read their deception.** A suddenly small visible army after a long silence is treated as
+  "the rest is hidden" (the Spymaster's `est` already assumes growth; `trust` decides how much).
+
+### §M.9 FFA politics
+
+* **Never two wars.** (33) one enemy at a time; a second attacker makes peace with the first a
+  priority: disengage from the one I was fighting.
+* **Let them fight.** When two neighbours are at war with each other, stay out, build, and strike the
+  winner while it is weakened, or the loser's exposed base.
+* **Hit the leader.** When one player's worth pulls clearly ahead, the AI turns on it, even if
+  another enemy is nearer: a runaway leader wins an FFA.
+* **Don't be the leader on display.** An AI that is ahead keeps part of its strength hidden and
+  doesn't provoke everyone at once.
+* **Leave the quiet ones alone.** An enemy that hasn't attacked me isn't attacked while a worse one
+  exists (grudges, 22 §E).
+
+### §M.10 Defense in depth and the comeback
+
+* **Layers.** Sentries (warning) → an ambush or a pin on the approach (§W.4) → the wall and towers → the
+  yard's guard. Each layer costs the attacker time and units; the army fights at the layer where its
+  odds are best (the elastic defense), and counter-punches when the attack breaks (§M.6).
+* **When behind.** Don't throw the army away; consolidate behind the towers; trade only at good odds;
+  raid their economy with cheap fast units (an asymmetric war costs them more than it costs me); build
+  the insurance yard; go for the Citadel if it is open; and look for one decisive window: an all-in
+  only when the estimate says waiting is certain to lose.
+
+### §M.11 After-action review
+
+Every battle (an exchange above `AAR_MIN_VALUE`) is recorded: where, who had the ground, the forces,
+the value traded, the operation it belonged to, and whether the profile's prediction held. The King's
+estimate (`trade`), the profile and the operation scores learn from it within the match; the record
+is in the log and the harness (`npm run aisim -- match … AAR`) prints it.
 
 ---
 
@@ -451,6 +685,8 @@ commander/
   captain.ts      the execution half: formations, driveSquad, retreat mechanics, the stall watchdog, the job → command table
   manual.ts       NEW   the field manual (§W.1), derived from UNIT_STATS / COUNTERS / terrain / formation traits
   profile.ts      NEW   the Spymaster's behaviour profile of each enemy (§W.3)
+  estimate.ts     NEW   the King's situation estimate, grand strategy and windows (§M.1–2, §M.6)
+  aar.ts          NEW   battle records (§M.11)
   ops/            NEW   one module per operation (§W.4): assault, pincer, feint, trap, ambush, pin, siege, trade, rotation, citadel
   assess.ts / basePlan.ts / place.ts / aiPerception.ts   kept
 ```
@@ -503,6 +739,12 @@ Treasurer, `cs.hits` for the Warden …) so the migration moves code, not data.
 | `OP_COOLDOWN_S` | 300 | a failed operation is not repeated on the same enemy for this long |
 | `CHASE_MAX` | 10 | tiles a unit may pursue beyond its task force |
 | `HOLD_FIRE_TRIGGER` | 4 | tiles at which a hold-fire ambush opens fire |
+| `GUARD.stepOut` / `outS` / `outCooldownS` | 4 / 6 / 4 | how far and how long a guard may leave its circle, and the rest between sorties |
+| `STANDOFF_RANGE` / `STANDOFF_S` / `STANDOFF_TRADE` | 14 / 30 / 150 | two forces this close this long, trading less than this, are in a standoff |
+| `DANCE_CYCLES` | 2 | advance/withdraw reversals over the same ground that count as a dance |
+| `WOUNDED_FRAC` | 0.35 | a unit below this hp rotates behind the line when a medic is there |
+| `COUNTERPUNCH_S` | 45 | the window to strike after winning a defense |
+| `AAR_MIN_VALUE` | 400 | the least value traded for a fight to get a battle record |
 
 Personalities gain `strikeOdds`, `trustEst`, `cunning` and `plan` (§C.1–2).
 
@@ -527,6 +769,11 @@ Personalities gain `strikeOdds`, `trustEst`, `cunning` and `plan` (§C.1–2).
    measures the enemy.
 9. **Operations** (§W.4–5), one per commit, each with its scenario, counter-craft first (so the AI
    stops falling for traps before it starts setting them).
+10. **The guard order and battle craft** (§W.7, §W.9) in the sim and the captains.
+11. **Standoffs** (§W.8): detection, chosen positions, the resolution ladder.
+12. **The campaign** (§M): the situation estimate and grand strategies first, then windows, map
+    control and counter-intelligence, logistics, the insurance yard, FFA politics, the comeback, and
+    the after-action review.
 
 ---
 
@@ -564,6 +811,20 @@ War-craft scenarios (§W). The scripted opponents are harness puppets that behav
 | **op.variety** | 3 seeds, Opportunist vs Medium | ≥ 3 different operations used; no failed one repeated on the same enemy within OP_COOLDOWN_S |
 | **counter.nochase** | a puppet bait retreats past an unscouted forest with an ambush in it | no unit of mine enters the forest or chases beyond CHASE_MAX |
 | **counter.drawn** | a small raid on my mine, then the puppet's army at my other gate | the Warden answers the raid in proportion; the army is home for the second force |
+| **guard.reach** | rockets guard a point; an enemy stands 2 tiles outside the circle, inside their range | they fire without leaving the circle |
+| **guard.leash** | a puppet bait lingers just outside a guarded circle | no guard is outside the circle for more than GUARD.outS at a time; the circle is never empty |
+| **standoff.dance** | two AIs whose forces meet at even odds, each with a bait and an ambush | no more than DANCE_CYCLES reversals; a ladder step is logged; the match moves on (a trade, a reinforcement, a go-around or a disengage) within 90 s |
+| **standoff.position** | a force withdraws from a 2× force | it stops at a named position (hill, cover or towers) and reports, instead of walking home |
+| **standoff.artillery** | a standoff against a stationary enemy line, artillery available | artillery or an ability is used on the line within 60 s |
+| **craft.notrickle** | reinforcements produced during a fight | they join as groups of ≥ 3 from a rally point behind the force, never singly into contact |
+| **craft.wounded** | a fight with medics in the force | units below WOUNDED_FRAC step back; fewer units lost than with rotation off (same seed) |
+| **camp.estimate** | scripted economies (I out-earn 1.5×; they out-earn 1.5×) | the King picks attrition in the first and a decisive battle or strangulation in the second |
+| **camp.counterpunch** | the AI wins a defense against the puppet's whole army | it strikes within COUNTERPUNCH_S |
+| **camp.insurance** | the AI's main base is under a winning attack in the middle game | a second Construction Yard is placed away from the main base before the main yard falls |
+| **camp.counterintel** | puppet scouts and sentries watch the AI | they are hunted: the puppet's view of the AI's army is ≥ 60 s old most of the match |
+| **camp.thirdparty** | FFA: two puppets fight each other | the AI waits, then strikes the weakened winner within 60 s of the battle's end |
+| **camp.leader** | FFA: one puppet's worth pulls 1.5× ahead | the AI's target becomes the leader |
+| **camp.comeback** | the AI starts 40 % behind in army and income | it doesn't lose its army in a bad fight; it raids, consolidates, and survives ≥ 10 min |
 | **read.profile** | puppets with known response time, chase distance and route | the profile measures each within 25 % after PROFILE_MIN_SAMPLES |
 
 Regression targets after every step: all 42 scenarios of 33 §T; `war.vsMedium` ≥ 2 of 3 (it is 3 of 3
