@@ -18,6 +18,7 @@ import { runScout, runSentries } from "./spymaster";
 import { defenseAnchor, runHomeGuard } from "./warden";
 import { ask, homeRadius, strikeRead, veto } from "./reports";
 import { opReady, runLeash, siegeHolds, watchFeint } from "./operations";
+import { runStandoff } from "./standoff";
 
 export function runMarshal(ctx: Ctx): void {
   const { cs } = ctx;
@@ -192,6 +193,7 @@ function runMainArmy(ctx: Ctx, s: Squad): void {
     return;
   }
   if (s.mission === "repel" || s.mission === "defend" || (s.mission === "hold" && !blocked)) s.mission = "idle"; // threat cleared
+  if (runStandoff(ctx, s, center, value, home)) return; // 34 §W.8 a standoff or a dance: climb the ladder
 
   const target = cs.targetPlayer;
   if ((cs.stance === "PRESSURE" || cs.stance === "ALL_IN") && target != null && !regrouping) {

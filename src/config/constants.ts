@@ -973,6 +973,19 @@ export const COMMANDER = {
     KITE_MARGIN: 1.2, // a kiter steps away when its foe is within the foe's range + this
     KITE_STEP: 2.5, // tiles a kiter steps back
   },
+  // 34 §W.8 standoffs and dances
+  STANDOFF: {
+    RANGE: 14, // a force this close to my main army, facing it…
+    SECONDS: 30, // …this long with little blood traded is a standoff
+    TRADE: 150, // gold value lost (both sides) that means they are fighting, not facing off
+    DANCE_CYCLES: 2, // advance-then-back cycles in one standoff that make it a dance
+    DANCE_FORGET_S: 120, // the cycle count lapses after this long without facing anyone
+    STEP_S: 15, // seconds on each rung of the ladder
+    MIN_FRAC: 0.4, // a force worth less than this share of mine is not a standoff (it is a target)
+    GROUND_SCAN: 6, // tiles searched for a hill or forest to stand on
+    MIN_GAP: 8, // a standoff starts only this far apart (closer, they are in contact: the retreat rule decides)
+    COMMIT_MARGIN: 1.15, // odds this far above FIGHT_ODDS skip the waiting rungs and commit at once
+  },
   // 34 §W.9 battle craft
   BATTLE: {
     ROAD_BAND: 6, // tiles either side of a road that count as "on it"

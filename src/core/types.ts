@@ -387,6 +387,7 @@ export interface AISquad {
   stageLogTick?: number; // 33 dev: last time a held launch logged its reason
   chaseWatch?: { from: Vec2; enemy: PlayerId | null; max: number }; // 34 §W.3 measuring a pursuit of this squad
   leashLogTick?: number; // 34 §W.5 last leash log
+  standoff?: { since: number; step: number; stepAt: number; v0: number; f0: number; cycles: number; lastMission: string; facedAt?: number }; // 34 §W.8
   trickleLogTick?: number; // 34 §W.9 last "reinforcements wait" log
   shellTick?: number; // 34 §W.9 last answer to shelling
   lastSpot?: Vec2; // 34 §W.4 raid rotation: where this raid last struck
@@ -439,6 +440,7 @@ export interface CommanderState {
   beliefs?: AIBeliefs; // 33 §B: what this AI believes about its enemies and the map
   council?: CouncilState; // 34: reports, rulings
   opsOff?: boolean; // dev harness only: operations + counter-craft off (op.* ablation)
+  standoffOff?: boolean; // dev harness only: the standoff ladder alone off (standoff.* ablation)
   manualOff?: boolean; // dev harness only: switch the captains' manual off (craft.* ablation)
   allInWhy?: "crippled" | "away" | "cap" | "plan"; // 34 §E.2: which window opened the ALL_IN (sets the launch odds)
   projects?: AIExpansion[]; // 33 §C.4: running expansion projects

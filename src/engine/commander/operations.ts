@@ -200,7 +200,7 @@ export function runLeash(ctx: Ctx, home: Vec2, radius: number): void {
   if (cs.opsOff) return;
   const leash = radius + COMMANDER.OPS.CHASE_MAX;
   for (const s of cs.squads) {
-    if (!["repel", "defend", "hold", "idle", "regroup", "guard"].includes(s.mission) || s.role === "scout" || s.role === "raid") continue;
+    if (!["repel", "defend", "hold", "idle", "guard"].includes(s.mission) || s.role === "scout" || s.role === "raid") continue; // not regroup: a beaten push walking home is no chase (its retreat road may detour round the foe)
     const strays = squadUnits(state, s).filter((u) => dist(u, home) > leash);
     if (!strays.length) continue;
     const back = s.objective && dist(s.objective, home) <= radius ? s.objective : home;

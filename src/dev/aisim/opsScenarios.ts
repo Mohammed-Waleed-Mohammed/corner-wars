@@ -195,7 +195,50 @@ function cutOffBout(ops: boolean): { kept: number; pushed: boolean; detoured: bo
   return { kept: valueOf(mine) / Math.max(1, v0), pushed: true, detoured, trace: tr.join(" ") };
 }
 
+/** standoff.dance bout: a line stronger than my army stands across the road mid-map and never moves or
+ *  shoots first. Without the ladder my army walks into it push after push; with it the Marshal sees the
+ *  advance-and-back and climbs the rungs (hold, ground, guns, raid, commit or disengage). */
+function danceBout(ops: boolean): { pushes: number; rungs: string[]; trace: string[]; lost: number } {
+  const m = vsPuppet("rusher", 95);
+  const y = m.yard(P1)!;
+  y.maxHp = 1e8; y.hp = 1e8;
+  m.run(1);
+  m.cs(P0)!.standoffOff = !ops; // the ladder alone: the rest of the ops craft stays on in both runs
+  m.run(90);
+  const home = m.home(P0), them = m.home(P1);
+  const at = { x: home.x + (them.x - home.x) * 0.55, y: home.y + (them.y - home.y) * 0.55 };
+  const line = spawnMix(m, P1, [["rifleman", 12], ["rocket", 10], ["tank", 8]], at);
+  attachPuppet(m, P1, "standLine", { units: ids(line), at, tough: true });
+  let pushes = 0, last = "", spent = 0, prev = m.army(P0);
+  const rungs: string[] = [], trace: string[] = [];
+  const seen = new Set<string>();
+  for (let i = 0; i < 300; i++) {
+    m.run(1);
+    const q = m.cs(P0)!.squads.find((s) => s.role === "main");
+    const ms = q?.mission ?? "";
+    if ((ms === "engage" || ms === "attack") && ["", "idle", "stage", "gather", "regroup", "retreat", "standoff"].includes(last)) pushes++;
+    if (ms !== last) trace.push(`${m.state.time | 0}:${ms}`);
+    last = ms;
+    const a = m.army(P0);
+    if (a < prev) spent += prev - a; // value lost (new units don't offset it)
+    prev = a;
+    for (const l of m.log(P0)) if (!seen.has(l)) { seen.add(l); if (l.includes("standoff")) rungs.push(l.replace(/^\d+s T \[Marshal\] /, "")); }
+  }
+  return { pushes, rungs, trace, lost: spent };
+}
+
 export const OPS_SCENARIOS: Scenario[] = [
+  {
+    id: "standoff.dance", title: "An advance-and-back dance with a line is noticed and resolved (34 §W.8)",
+    make: () => vsPuppet("rusher", 95),
+    run: () => {
+      const on = danceBout(true), off = danceBout(false);
+      // the dance is seen; once seen, the ladder never makes it worse: no extra push, no extra loss
+      const seen = on.rungs.some((r) => r.includes("a dance"));
+      const ok = seen && on.pushes <= off.pushes && on.lost <= off.lost * 1.02;
+      return res(ok, `pushes into the line ${on.pushes} vs ${off.pushes}, army value lost ${on.lost | 0} vs ${off.lost | 0} without the ladder; ${on.rungs.join(" | ") || "no standoff seen"}; trace ${on.trace.join(" ")}`);
+    },
+  },
   {
     id: "battle.shelled", title: "Units shelled by artillery they can't reach charge it (34 §W.9)",
     make: () => vsPuppet("turtle", 91),
