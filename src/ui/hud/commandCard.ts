@@ -6,7 +6,7 @@
 // the second within SELL.confirmMs (Shift sells at once).
 
 import { ABILITIES, COMMANDERS, factionOf } from "../../config/commanders";
-import { BUILDING_DESC, BUILDING_LABEL, BUILDING_STATS, CITADEL_POWERS, HUD, POWER_INFO, PRODUCTION_QUEUE_MAX, SELL, UNIT_DESC, UNIT_LABEL, UNIT_STATS } from "../../config/constants";
+import { BUILDING_DESC, BUILDING_LABEL, BUILDING_STATS, CITADEL_POWERS, GUARD, HOLD_FIRE_TRIGGER, HUD, POWER_INFO, PRODUCTION_QUEUE_MAX, SELL, UNIT_DESC, UNIT_LABEL, UNIT_STATS } from "../../config/constants";
 import { COMMANDER_INFO, UNIT_NAMES, abilityCooldownText, abilityText } from "../../content/factions";
 import type { GameState, Player, PlayerId } from "../../core/types";
 import { buildAvailability, unitAvailability } from "../../state/buildRules";
@@ -32,7 +32,9 @@ const POWER_SHORT: Record<string, string> = { artillery: "Artillery", reinforcem
 const CMD_INFO: Record<Cmd, { label: string; tip: string }> = {
   attack: { label: "Attack", tip: "Attack-move: click a destination — the units fight anything they meet on the way. (Ctrl + right-click does the same.)" },
   stop: { label: "Stop", tip: "Cancel all orders and halt." },
-  guard: { label: "Guard", tip: "Click a point to hold: the units stay near it and engage anything that comes close." },
+  guard: { label: "Guard", tip: `Click a point to defend an ${GUARD.radius}-tile circle around it: the units shoot anything inside it or in their own range, step out at most ${GUARD.stepOut} tiles for ${GUARD.outS}s to chase, and never leave the circle empty.` },
+  hold: { label: "Hold", tip: "Hold ground: the units stand where they are and fire at anything in their weapon range, but never move to chase. Medics heal in reach without walking. Lasts until the next order." },
+  holdfire: { label: "Hold Fire", tip: `Toggle hold fire (an ambush): the units don't shoot on their own, so a forest keeps them hidden. The group opens fire together when an enemy comes within ${HOLD_FIRE_TRIGGER} tiles of any of them, when one of them is hit, or when you lift it. Attack orders also lift it. Combine with Hold.` },
   fallback: { label: "Fall Back", tip: "The formation withdraws toward home while still firing." },
   breakform: { label: "Break", tip: "Dissolve the formation — every unit goes loose." },
   rally: { label: "Rally", tip: "Click the ground to set where new units gather. (Right-click the ground does the same.)" },
@@ -210,6 +212,10 @@ export class CommandCard {
         if (a.cmd === "fallback" || a.cmd === "breakform") { out.enabled = info.selection.inFormation; out.reason = out.enabled ? "" : "Not in a formation — form up first"; }
         else if (a.cmd === "rally") out.enabled = !!info.selectedBuilding;
         else out.enabled = units;
+        // 34 §W.6: the stance buttons light while every selected unit is in that stance.
+        const sel = info.selection.units;
+        if (a.cmd === "hold") out.active = sel.length > 0 && sel.every((u) => u.holdGround === true);
+        if (a.cmd === "holdfire") out.active = sel.length > 0 && sel.every((u) => u.holdFire != null);
         break;
       }
       case "ability": {
@@ -270,6 +276,8 @@ export class CommandCard {
         if (a.cmd === "attack") c.enterAttackMove();
         else if (a.cmd === "stop") c.stopSelected();
         else if (a.cmd === "guard") c.enterGuard();
+        else if (a.cmd === "hold") c.holdSelected();
+        else if (a.cmd === "holdfire") c.toggleHoldFireSelected();
         else if (a.cmd === "fallback") c.fallBackSelected();
         else if (a.cmd === "breakform") c.breakFormationSelected();
         else c.enterRallyMode();

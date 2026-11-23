@@ -13,6 +13,8 @@ export interface HudControls {
   activatePower(key: string): void;
   activateAbility(): void;
   stopSelected(): void;
+  holdSelected(): void; // 34 §W.6 hold ground
+  toggleHoldFireSelected(): void; // 34 §W.6 hold fire (on unless every selected unit already holds fire)
   enterGuard(): void;
   enterAttackMove(): void;
   fallBackSelected(): void;

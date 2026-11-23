@@ -58,8 +58,19 @@ export function checksum(state: GameState): number {
       h = mix(h, e.buildTargetId ?? -1);
       h = mix(h, e.repairTarget ?? -1);
       h = mix(h, e.forcedTargetId ?? -1);
+      // 34 §W.6–7: hold ground / hold fire stances and the guard order's point, group, sortie and rest.
+      h = mix(h, (e.holdGround ? 1 : 0) + (e.guardPoint ? 2 : 0));
+      h = mix(h, e.holdFire ?? -1);
+      if (e.guardPoint) {
+        h = mix(h, Math.round(e.guardPoint.x * 100));
+        h = mix(h, Math.round(e.guardPoint.y * 100));
+        h = mix(h, e.guardGroup ?? -1);
+        h = mix(h, e.guardSortie == null ? -1 : Math.round(e.guardSortie * 100));
+        h = mix(h, Math.round((e.guardRest ?? 0) * 100));
+      }
     }
   }
+  h = mix(h, state.nextOrderGroup ?? 0);
 
   for (const p of state.players) {
     h = mix(h, Math.round(p.gold * 100));

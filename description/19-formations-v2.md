@@ -124,6 +124,7 @@ This is what makes a formation behave like a disciplined army instead of a shape
 - **Smart targeting (the triangle finally fires itself):** in-formation units prioritize (1) an enemy they **counter** within range, then (2) the nearest enemy. Artillery prefers buildings and dense clumps. This one rule makes army composition pay off automatically, with zero player micro.
 - **Fall Back (new order, hotkey e.g. `V`):** the formation withdraws **in good order** — it keeps facing the enemy, moves away at 80% speed, and everyone keeps firing at what's in range as they go. This creates the missing decision: *commit or save the army*. An ordered fighting withdrawal (covered by your ranged rear) versus a rout is exactly the kind of moment that makes battles memorable.
 - Break Formation remains the explicit dissolve; a subset manually pulled out becomes loose units.
+- **Hold and hold fire (34 §W.6) in a formation:** HOLD stops the shape where it stands (and ends a Fall Back); its members drop the leash — each fires only at what is in its own band from where it stands, and otherwise keeps its slot. A move or attack-move of the formation ends the hold. Hold fire silences the members (they keep their slots and fire at nothing) until the group's trigger, exactly as for loose units.
 
 ---
 

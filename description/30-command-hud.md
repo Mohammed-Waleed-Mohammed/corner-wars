@@ -79,7 +79,7 @@ A button's key is a **letter of its name**: Refinery = **R**, Barracks = **B**, 
   - Z and X are reserved.
   - A letter is never used twice on one card.
   - The fallback is the first free letter of the alphabet.
-- **Who picks first:** orders (Attack, Stop, Guard), then what you build, train, research or call down, then formations, then the buttons that open sub-cards, then Fall back / Break formation / Rally, then Sell. So Stop keeps S and the Spear formation takes P.
+- **Who picks first:** orders (Attack, Stop, Guard, Fall back, Hold, Hold Fire — in slot order, so Hold Fire, after Hold = H and Fall back = F, takes O), then what you build, train, research or call down, then formations, then the buttons that open sub-cards, then Break formation / Rally, then Sell. So Stop keeps S and the Spear formation takes P.
 - **Fixed for a given card:** the keys depend only on the card and its labels. Unit names come from your faction (file 27), so each faction's unit names decide their letters.
 - **Sell** keeps its letter while it shows "Confirm", so the second press lands on the same key.
 - **Matching:** keys match the **typed character** (`KeyboardEvent.key`), so they follow the keyboard layout.
@@ -95,7 +95,7 @@ Current keys:
 | **Production** (B.2) | P | **B** Barracks · **F** War Factory · **L** Lab · Z · X · Esc |
 | **Defense** (B.2) | D | **P** Pillbox · **T** Gun Turret · **A** Anti-Armor Cannon · **M** Missile Tower · Z · X · Esc |
 | **Walls** (B.2) | W | **W** Wall · **G** Gate · Z · X · Esc |
-| **Army** | any combat unit selected | **A** Attack-move · **S** Stop · **G** Guard · **P** Spear · **L** Line · **B** Box · **C** Column · *More… (custom)* · **F** Fall back · **R** Break formation · Z · X |
+| **Army** | any combat unit selected | **A** Attack-move · **S** Stop · **G** Guard · **P** Spear · **L** Line · **B** Box · **C** Column · *More… (custom)* · **F** Fall back · **R** Break formation · **H** Hold (ground) · **O** Hold Fire (toggle; lit while the whole selection holds fire) · Z · X |
 | **Production** (building) | a finished Yard, Barracks or War Factory | its units in `PRODUCES` order (letters from their names) · **R** Rally · **S** Sell (not on the Yard) · the Yard adds **B** Build… |
 | **Lab** | a finished Lab | **R** Research (opens the board, file 32 §C) · **S** Sell · Z · X |
 | **Structure** | any other building of yours, or a site | **B** Build… (finished only) · **S** Sell (a site: **C** Cancel) · Z · X |

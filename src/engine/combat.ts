@@ -16,6 +16,7 @@ import {
   FORMATIONS,
   GATE,
   GUARD,
+  HOLD_FIRE_TRIGGER,
   PROJECTILE,
   SIEGE_BUILDING_BONUS,
   UNIT_WEAPON,
@@ -76,6 +77,8 @@ export function dealDamage(state: GameState, target: AnyEntity, dmg: number, att
   dmg *= coverMult(state, target);
   dmg *= damageTakenMult(state, target); // 27 §C Aegis Field
   target.hp -= dmg;
+  // 34 §W.6: a hit on any member of a hold-fire group gives the ambush away — the whole group opens fire.
+  if (target.kind === "unit" && target.holdFire != null && dmg > 0) openFire(state, target.holdFire);
   if (attacker !== undefined && attacker !== "neutral") target.lastHitBy = attacker;
   target.hitFlashTimer = EFFECTS.hitFlashTime;
   const c = entityCenter(target);
@@ -173,11 +176,15 @@ export function pickFormationTarget(u: Unit, slot: Vec2, reach: number): AnyEnti
  *  (caller then walks the unit back to its slot). Charge ends at first shot. */
 export function formationEngage(state: GameState, u: Unit, f: Formation, slot: Vec2, dt: number): boolean {
   if (u.combatType === undefined || u.owner === "neutral") return false;
-  const leash = FORMATIONS.LEASH;
+  if (u.holdFire != null) { u.target = null; return false; } // 34 §W.6 hold fire: hold the slot, silent
   const range = rangeOf(state, u); // 24 §B: +1 from high ground
+  // 34 §W.6 hold ground: no leash — fire only at what is in the band from where it stands.
+  const leash = u.holdGround ? 0 : FORMATIONS.LEASH;
   const reach = leash + range;
   // 31 §C: pick a counter-first target on the rescan tick; in between keep the last one while valid.
-  const target = rescanTick(state, u) ? pickFormationTarget(u, slot, reach) : keptTarget(state, u, slot.x, slot.y, reach);
+  const target = u.holdGround
+    ? (rescanTick(state, u) ? nearestEnemyInBand(u.owner, u, u.minRange ?? 0, range) : keptInBand(state, u, u.minRange ?? 0, range))
+    : rescanTick(state, u) ? pickFormationTarget(u, slot, reach) : keptTarget(state, u, slot.x, slot.y, reach);
   u.target = target ? target.id : null;
   if (!target) return false;
 
@@ -216,8 +223,101 @@ export function nearestEnemyTo(owner: Owner, from: Vec2, range: number): AnyEnti
   return nearestEnemy(owner, from, range);
 }
 
-/** Guard-area command (15-logic §6): defend a fixed GUARD.radius around the guard point, chasing
- *  no farther than chaseMultiplier×radius from it, then return and hold. Non-combat units just hold. */
+// ── 34 §W.6 hold ground + hold fire ─────────────────────────────────────────────
+
+/** HOLD (hold ground): stand still and fire at the nearest enemy inside the weapon band (minRange ..
+ *  range) from where the unit stands; never move to chase, never back off. Workers and units on hold
+ *  fire just stand. Lasts until another order. */
+export function updateHoldGround(state: GameState, u: Unit, dt: number): void {
+  if (u.owner === "neutral") return;
+  u.attackTimer = Math.max(0, u.attackTimer - dt);
+  u.moveTarget = null;
+  u.path = [];
+  u.pathGoal = null;
+  if (!fights(u) || u.holdFire != null) {
+    u.target = null;
+    u.state = "holding";
+    return;
+  }
+  const minR = u.minRange ?? 0;
+  const range = rangeOf(state, u);
+  const t = rescanTick(state, u) ? nearestEnemyInBand(u.owner, u, minR, range) : keptInBand(state, u, minR, range);
+  u.target = t ? t.id : null;
+  if (!t) {
+    u.state = "holding";
+    return;
+  }
+  u.state = "attacking";
+  if (u.attackTimer <= 0) {
+    fireUnitWeapon(state, u, t, u.damage * combatMults(state, u).dmgMult);
+    u.attackTimer = u.cooldown;
+  }
+}
+
+const triggerScratch: AnyEntity[] = [];
+
+/** Hold-fire trigger (§W.6.2): an enemy unit within HOLD_FIRE_TRIGGER of this unit opens fire for its
+ *  whole group. Called first in the unit's dispatch, every tick, while the unit holds fire. */
+export function checkHoldFireTrigger(state: GameState, u: Unit): void {
+  if (u.holdFire == null) return;
+  entityHash.queryInto(u.x, u.y, HOLD_FIRE_TRIGGER + 1, triggerScratch);
+  for (let i = 0; i < triggerScratch.length; i++) {
+    const e = triggerScratch[i];
+    if (e.kind !== "unit" || e.hp <= 0 || !isEnemy(u.owner, e)) continue;
+    if (Math.hypot(e.x - u.x, e.y - u.y) <= HOLD_FIRE_TRIGGER) {
+      openFire(state, u.holdFire);
+      return;
+    }
+  }
+}
+
+/** Lift hold fire for every unit of a hold-fire group (ascending-id order; ids are unique per order). */
+export function openFire(state: GameState, group: number): void {
+  for (const e of state.entities) if (e.kind === "unit" && e.holdFire === group) e.holdFire = null;
+}
+
+/** True for units that shoot (workers fight only when force-ordered; the Medic never does). */
+function fights(u: Unit): boolean {
+  return u.combatType !== undefined && u.combatType !== "support";
+}
+
+// ── 34 §W.7 the guard order ─────────────────────────────────────────────────────
+
+// Live counts per guard group (§W.7.3 stay together): rebuilt by indexGuards before the per-unit loop,
+// then kept current as each guard goes out or comes back in, so two guards deciding in the same tick
+// see each other. Derived purely from the sim step (no cross-tick module state).
+const guardGroups = new Map<number, { n: number; out: number }>();
+
+/** The units that run the guard brain and count toward their group (fighters, loose, unforced). */
+function countsAsGuard(u: Unit): boolean {
+  return u.guardPoint != null && u.guardGroup != null && u.formationId == null && u.forcedTargetId == null && fights(u);
+}
+
+/** "Out" for the stay-together rule: on a sortie, or outside the circle (incl. walking in). */
+function guardIsOut(u: Unit, gp: Vec2): boolean {
+  return u.guardSortie != null || Math.hypot(u.x - gp.x, u.y - gp.y) > GUARD.radius + GUARD.slack;
+}
+
+/** Index every guard group's size and how many are out. Call once per tick before the unit loop. */
+export function indexGuards(state: GameState): void {
+  guardGroups.clear();
+  for (const e of state.entities) {
+    if (e.kind !== "unit" || e.hp <= 0 || !countsAsGuard(e)) continue;
+    let g = guardGroups.get(e.guardGroup!);
+    if (!g) { g = { n: 0, out: 0 }; guardGroups.set(e.guardGroup!, g); }
+    g.n++;
+    if (guardIsOut(e, e.guardPoint!)) g.out++;
+  }
+}
+
+/** Guard-area command (15-logic §6, 34 §W.7). The unit defends a fixed GUARD.radius circle:
+ *  1. it shoots what it can reach — any enemy inside its weapon band from where it stands — and
+ *     anything inside the circle, and enemy units just outside it (stepOut);
+ *  2. a target it can shoot from inside the circle never draws it out; one it can't may be chased up to
+ *     GUARD.stepOut past the edge, for at most GUARD.outS per sortie, after which it walks back even if
+ *     the enemy is still there and rests GUARD.outCooldownS before the next sortie;
+ *  3. no sortie starts while it would put more than half its guard group outside the circle.
+ *  Walking in (just ordered, or back from a sortie) it doesn't stop to fight. Non-combat units hold. */
 export function updateGuard(state: GameState, u: Unit, dt: number): void {
   if (u.owner === "neutral") return;
   const gp = u.guardPoint;
@@ -226,22 +326,132 @@ export function updateGuard(state: GameState, u: Unit, dt: number): void {
     return;
   }
   u.attackTimer = Math.max(0, u.attackTimer - dt);
-  const { dmgMult, speedMult } = combatMults(state, u);
+  if ((u.guardRest ?? 0) > 0) u.guardRest = Math.max(0, (u.guardRest ?? 0) - dt);
+  const g = countsAsGuard(u) ? guardGroups.get(u.guardGroup!) : undefined;
+  const wasOut = g ? guardIsOut(u, gp) : false;
+  guardStep(state, u, gp, g, dt);
+  if (g) {
+    const isOut = guardIsOut(u, gp);
+    if (isOut !== wasOut) g.out += isOut ? 1 : -1;
+  }
+}
 
-  if (u.combatType !== undefined && Math.hypot(u.x - gp.x, u.y - gp.y) <= GUARD.radius * GUARD.chaseMultiplier) {
-    const enemy = nearestEnemy(u.owner, gp, GUARD.radius); // nearest enemy near the guard point
-    if (enemy) {
-      u.target = enemy.id;
-      engageTarget(state, u, enemy, dt, dmgMult, speedMult);
-      return;
+function guardStep(state: GameState, u: Unit, gp: Vec2, g: { n: number; out: number } | undefined, dt: number): void {
+  const R = GUARD.radius;
+  const { dmgMult, speedMult } = combatMults(state, u);
+  const speed = u.speed * speedMult;
+  const dgp = Math.hypot(u.x - gp.x, u.y - gp.y);
+  const outside = dgp > R + GUARD.slack;
+
+  // The sortie clock runs only while outside; a sortie ends on time — turning back early enough to be
+  // inside again by GUARD.outS, enemy or not — or when the unit is back inside after having been out.
+  // Either way the rest period starts.
+  if (u.guardSortie != null) {
+    if (outside) u.guardSortie += dt;
+    // Walking back is estimated with headroom (+50 %, +0.3 s) for friends in the way and the turn.
+    const walkBack = (1.5 * Math.max(0, dgp - R - GUARD.slack)) / Math.max(0.1, speed) + 0.3;
+    if (u.guardSortie + walkBack >= GUARD.outS || (!outside && u.guardSortie > 0)) {
+      u.guardSortie = null;
+      u.guardRest = GUARD.outCooldownS;
     }
   }
-  // No enemy in range (or strayed past the leash): return to and hold the guard point.
-  u.target = null;
-  const arrived = navigateTo(state, u, gp.x, gp.y, dt, 0.4, u.speed * speedMult);
-  // Label by proximity, not navigateTo's exact ≤0.4 (movers settle a hair outside it, otherwise
-  // leaving the unit stuck in "moving" while parked at its point).
-  u.state = arrived || Math.hypot(u.x - gp.x, u.y - gp.y) <= 0.6 ? "guarding" : "moving";
+
+  let t: AnyEntity | null = null;
+  if (!(outside && u.guardSortie == null) && fights(u) && u.holdFire == null) {
+    const minR = u.minRange ?? 0;
+    const range = rangeOf(state, u);
+    t = rescanTick(state, u)
+      ? nearestEnemyInBand(u.owner, u, minR, range) ?? nearestInGuardZone(u.owner, gp)
+      : keptGuardTarget(state, u, gp, minR, range);
+  }
+  if (!t) {
+    // Nothing to fight (or walking in): return to and hold the guard point.
+    u.target = null;
+    if (u.guardSortie === 0) u.guardSortie = null; // a sortie that never left the circle costs nothing
+    const arrived = navigateTo(state, u, gp.x, gp.y, dt, 0.4, speed);
+    // Label by proximity, not navigateTo's exact ≤0.4 (movers settle a hair outside it, otherwise
+    // leaving the unit stuck in "moving" while parked at its point).
+    u.state = arrived || Math.hypot(u.x - gp.x, u.y - gp.y) <= 0.6 ? "guarding" : "moving";
+    return;
+  }
+  u.target = t.id;
+  const minR = u.minRange ?? 0;
+  const range = rangeOf(state, u);
+  const d = distToEntity(u, t);
+  if (d <= range && d >= minR) {
+    u.state = "attacking";
+    u.path = [];
+    if (u.attackTimer <= 0) {
+      fireUnitWeapon(state, u, t, u.damage * dmgMult);
+      u.attackTimer = u.cooldown;
+    }
+    return;
+  }
+  // Where it would fire from: straight toward the target at the band (away from it inside minRange).
+  const c = entityCenter(t);
+  const standOff = d < minR ? minR + 1 : Math.max(minR + 0.25, range - 0.25);
+  const ux = u.x - c.x, uy = u.y - c.y;
+  const ul = Math.hypot(ux, uy) || 1;
+  const want: Vec2 = { x: c.x + (ux / ul) * standOff, y: c.y + (uy / ul) * standOff };
+  let dest: Vec2;
+  if (Math.hypot(want.x - gp.x, want.y - gp.y) <= R) {
+    dest = want;
+  } else {
+    const gx = c.x - gp.x, gy = c.y - gp.y;
+    const dGT = Math.hypot(gx, gy) || 1;
+    if (dGT - standOff <= R) {
+      // §W.7.2: it can shoot this target from inside the circle — take the spot on the near side, never step out.
+      const k = Math.max(0, dGT - standOff) / dGT;
+      dest = { x: gp.x + gx * k, y: gp.y + gy * k };
+    } else if (u.guardSortie != null || ((u.guardRest ?? 0) <= 0 && (!g || g.n <= 1 || (g.out + 1) * 2 <= g.n))) {
+      // A sortie: chase, but never more than stepOut past the edge.
+      if (u.guardSortie == null) u.guardSortie = 0;
+      const lim = R + GUARD.stepOut;
+      const wx = want.x - gp.x, wy = want.y - gp.y;
+      const wl = Math.hypot(wx, wy);
+      dest = wl <= lim ? want : { x: gp.x + (wx / wl) * lim, y: gp.y + (wy / wl) * lim };
+    } else {
+      // Resting, or half the group is already out: wait on the edge, facing it.
+      const k = (R - 0.25) / dGT;
+      dest = { x: gp.x + gx * k, y: gp.y + gy * k };
+    }
+  }
+  const arrived = navigateTo(state, u, dest.x, dest.y, dt, 0.2, speed);
+  u.state = arrived ? "guarding" : "moving";
+}
+
+/** The guard zone: enemy units within radius + stepOut of the guard point (worth a sortie), enemy
+ *  buildings only inside the circle (a structure never comes at the guard, so it never draws one out). */
+function inGuardZone(e: AnyEntity, gp: Vec2): boolean {
+  return distTo(e, gp.x, gp.y) <= (e.kind === "building" ? GUARD.radius : GUARD.radius + GUARD.stepOut);
+}
+
+const zoneScratch: AnyEntity[] = [];
+
+/** Nearest enemy to the guard point inside its guard zone (never walls/gates). */
+function nearestInGuardZone(owner: Owner, gp: Vec2): AnyEntity | null {
+  entityHash.queryInto(gp.x, gp.y, GUARD.radius + GUARD.stepOut + 1, zoneScratch);
+  let best: AnyEntity | null = null;
+  let bestD = Infinity;
+  for (let i = 0; i < zoneScratch.length; i++) {
+    const e = zoneScratch[i];
+    if (e.hp <= 0 || !isEnemy(owner, e) || isWallLike(e) || !inGuardZone(e, gp)) continue;
+    const d = distTo(e, gp.x, gp.y);
+    if (d < bestD) {
+      bestD = d;
+      best = e;
+    }
+  }
+  return best;
+}
+
+/** The guard's current target, if still valid: in its weapon band, or inside the guard zone. */
+function keptGuardTarget(state: GameState, u: Unit, gp: Vec2, minR: number, range: number): AnyEntity | null {
+  if (u.target == null) return null;
+  const t = findEntityById(state, u.target);
+  if (!t || t.hp <= 0 || !isEnemy(u.owner, t) || isWallLike(t)) return null;
+  const d = distTo(t, u.x, u.y);
+  return (d <= range && d >= minR) || inGuardZone(t, gp) ? t : null;
 }
 
 /** `baseDmg` = base × Frenzy × Weapons (NO type multiplier). Single-target shots apply the type
@@ -382,7 +592,8 @@ function resolveTarget(state: GameState, u: Unit): AnyEntity | null {
     u.forcedTargetId = null;
   }
   // Only combat units auto-acquire; workers fight strictly when force-ordered (05-units.md).
-  if (u.combatType === undefined) {
+  // 34 §W.6: neither does a unit on hold fire (until its group's trigger, or the order is lifted).
+  if (u.combatType === undefined || u.holdFire != null) {
     u.target = null;
     return null;
   }
@@ -455,6 +666,34 @@ function nearestEnemy(owner: Owner, from: Vec2, range: number): AnyEntity | null
     }
   }
   return best;
+}
+
+const bandScratch: AnyEntity[] = [];
+
+/** Nearest enemy whose distance from `from` lies in the weapon band [minR, maxR] (never walls/gates). */
+function nearestEnemyInBand(owner: Owner, from: Vec2, minR: number, maxR: number): AnyEntity | null {
+  entityHash.queryInto(from.x, from.y, maxR + 1, bandScratch);
+  let best: AnyEntity | null = null;
+  let bestD = Infinity;
+  for (let i = 0; i < bandScratch.length; i++) {
+    const e = bandScratch[i];
+    if (e.hp <= 0 || !isEnemy(owner, e) || isWallLike(e)) continue;
+    const d = distTo(e, from.x, from.y);
+    if (d <= maxR && d >= minR && d < bestD) {
+      bestD = d;
+      best = e;
+    }
+  }
+  return best;
+}
+
+/** The unit's current auto-target, if it is still inside its weapon band from where it stands. */
+function keptInBand(state: GameState, u: Unit, minR: number, maxR: number): AnyEntity | null {
+  if (u.target == null) return null;
+  const t = findEntityById(state, u.target);
+  if (!t || t.hp <= 0 || !isEnemy(u.owner, t) || isWallLike(t)) return null;
+  const d = distTo(t, u.x, u.y);
+  return d <= maxR && d >= minR ? t : null;
 }
 
 /** Distance from (x, y) to an entity (a building's nearest footprint point). Allocation-free: it runs

@@ -4,7 +4,7 @@
 import { HUD } from "../../config/constants";
 import { renderIcon, type IconKind } from "../iconRenderer";
 
-export type GlyphName = "attack" | "stop" | "fallback" | "breakform" | "rally" | "back" | "more" | "menu" | "idle" | "army" | "alert" | "sell" | "build";
+export type GlyphName = "attack" | "stop" | "hold" | "holdfire" | "fallback" | "breakform" | "rally" | "back" | "more" | "menu" | "idle" | "army" | "alert" | "sell" | "build";
 
 const cache = new Map<string, HTMLCanvasElement>();
 
@@ -60,6 +60,15 @@ function draw(g: CanvasRenderingContext2D, name: GlyphName): void {
       line(g, 8, 12, 16, 12);
       break;
     }
+    case "hold": // a stake driven into the ground: post, crossbar, ground line
+      line(g, 12, 3, 12, 18); line(g, 7, 8, 17, 8);
+      line(g, 4, 20, 20, 20); line(g, 8, 18, 12, 14, 16, 18);
+      break;
+    case "holdfire": // a crosshair struck through (weapons held)
+      g.beginPath(); g.arc(12, 12, 7, 0, Math.PI * 2); g.stroke();
+      line(g, 12, 2, 12, 6); line(g, 12, 18, 12, 22); line(g, 2, 12, 6, 12); line(g, 18, 12, 22, 12);
+      line(g, 5, 19, 19, 5);
+      break;
     case "fallback": // double chevron pointing back (down)
       line(g, 6, 6, 12, 11, 18, 6); line(g, 6, 13, 12, 18, 18, 13);
       break;

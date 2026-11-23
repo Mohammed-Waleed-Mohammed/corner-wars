@@ -660,8 +660,16 @@ export const RENDER = {
 // Spacing between units when a multi-unit move spreads into a formation (tiles).
 export const FORMATION_SPACING = 0.9;
 
-// Guard-area command (15-logic §6): fixed radius, leash to avoid being baited.
-export const GUARD = { radius: 8, chaseMultiplier: 1.5 } as const;
+// Guard-area command (15-logic §6, reworked by 34 §W.7): a fixed circle around the guard point. A guard
+// shoots anything in its own weapon range from where it stands plus anything inside the circle; it may
+// step out at most `stepOut` tiles past the edge for at most `outS` per sortie, then returns and rests
+// `outCooldownS` before the next one. At most half a guard group may be out at once (`slack` absorbs
+// separation pushes at the edge).
+export const GUARD = { radius: 8, stepOut: 4, outS: 6, outCooldownS: 4, slack: 0.5 } as const;
+
+// Hold fire (34 §W.6): a unit on hold fire never auto-acquires; its group opens fire when an enemy unit
+// comes within this many tiles of any member, or when any member is damaged.
+export const HOLD_FIRE_TRIGGER = 4;
 
 // Queue cancel refunds (15-logic §7): full if not started, half if in progress.
 export const REFUND = { queued: 1.0, inProgress: 0.5 } as const;

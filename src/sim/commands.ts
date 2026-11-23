@@ -28,6 +28,7 @@ import type { BuildingType, ResearchKey, UnitType } from "../core/types";
 
 export type CommandType =
   | "MOVE" | "ATTACK_MOVE" | "ATTACK_TARGET" | "GUARD" | "STOP" | "HOLD"
+  | "HOLD_FIRE" // 34 §W.6 ambush stance { unitIds, on } — composes with HOLD / GUARD / MOVE
   | "PLACE_BUILDING" | "PLACE_WALL_LINE" | "ASSIGN_BUILD" | "SET_RALLY"
   | "QUEUE_UNIT" | "CANCEL_QUEUE" | "RESEARCH" | "REPAIR" | "HARVEST" | "USE_POWER"
   | "USE_ABILITY" // 27 §C commander ability (target point or null)
@@ -69,12 +70,24 @@ function wallCount(state: GameState, pid: PlayerId): number {
   return n;
 }
 
-/** Clear the shared "new order" fields on a unit (drops stale path + auto-jobs). */
+/** Clear the shared "new order" fields on a unit (drops stale path + auto-jobs + the guard and
+ *  hold-ground orders). Hold fire is a stance, not an order: only ATTACK_MOVE / ATTACK_TARGET and
+ *  HOLD_FIRE off lift it (34 §W.6). */
 function clearOrder(u: Unit): void {
   u.guardPoint = null;
+  u.guardGroup = null;
+  u.guardSortie = null;
+  u.guardRest = 0;
+  u.holdGround = false;
   u.repairTarget = null;
   u.path = [];
   u.pathGoal = null;
+}
+
+/** A fresh id for a GUARD / HOLD_FIRE order group (deterministic: a counter on the sim state). */
+function nextOrderGroup(state: GameState): number {
+  state.nextOrderGroup = (state.nextOrderGroup ?? 0) + 1;
+  return state.nextOrderGroup;
 }
 
 // ── the single order-driven mutation point ──────────────────────────────────
@@ -95,10 +108,14 @@ export function executeCommand(state: GameState, cmd: Command): void {
     case "ATTACK_TARGET":
       applyAttackTarget(state, pid, pl.unitIds, pl.targetId, pl.keepHarvest === true);
       break;
-    case "GUARD":
-      for (const u of ownedUnits(state, pid, pl.unitIds)) {
+    case "GUARD": {
+      const units = ownedUnits(state, pid, pl.unitIds);
+      if (units.length === 0) break;
+      const group = nextOrderGroup(state); // 34 §W.7.3: the units guarding together
+      for (const u of units) {
         clearOrder(u);
         u.guardPoint = { x: pl.x, y: pl.y };
+        u.guardGroup = group;
         u.state = "guarding";
         u.moveTarget = null;
         u.forcedTargetId = null;
@@ -106,18 +123,34 @@ export function executeCommand(state: GameState, cmd: Command): void {
         if (u.unitType === "worker") { u.autoHarvest = false; u.buildTargetId = null; }
       }
       break;
+    }
     case "STOP":
-    case "HOLD": // no distinct hold-ground behavior in v1 — HOLD stops in place like STOP
-      for (const u of ownedUnits(state, pid, pl.unitIds)) {
+    case "HOLD": { // 34 §W.6.1: HOLD = hold ground (stand, fire at what is in range, never chase)
+      const hold = cmd.type === "HOLD";
+      const units = ownedUnits(state, pid, pl.unitIds);
+      for (const u of units) {
         clearOrder(u);
         u.moveTarget = null;
         u.forcedTargetId = null;
         u.target = null;
         u.attackMove = false;
-        u.state = "idle";
+        u.holdGround = hold;
+        u.state = hold ? "holding" : "idle";
         if (u.unitType === "worker") { u.autoHarvest = false; u.buildTargetId = null; }
       }
+      if (hold) haltFormationsOf(state, pid, units); // a formed unit holds its slot: the shape stops
       break;
+    }
+    case "HOLD_FIRE": { // 34 §W.6.2: the ambush stance; the units issued together form one group
+      const units = ownedUnits(state, pid, pl.unitIds);
+      if (units.length === 0) break;
+      const group = pl.on === false ? null : nextOrderGroup(state);
+      for (const u of units) {
+        u.holdFire = group;
+        if (group != null && u.forcedTargetId == null) u.target = null; // drop the auto-target it had
+      }
+      break;
+    }
     case "PLACE_BUILDING":
       placeBuilding(state, pid, pl.buildingType, pl.x, pl.y);
       break;
@@ -243,7 +276,11 @@ function applyMove(state: GameState, pid: PlayerId, ids: number[], x: number, y:
   // Loose units keep the classic per-unit spread move.
   const formIds = new Set<number>();
   const units: Unit[] = [];
-  for (const u of all) { if (u.formationId != null) formIds.add(u.formationId); else units.push(u); }
+  for (const u of all) {
+    u.holdGround = false; // a move ends hold ground, formed or loose (34 §W.6)
+    if (attackMove) u.holdFire = null; // an attack-move is an order to fight: it lifts hold fire
+    if (u.formationId != null) formIds.add(u.formationId); else units.push(u);
+  }
   for (const fid of formIds) {
     const f = state.formations.find((ff) => ff.id === fid && ff.owner === pid);
     if (f) orderFormationMove(f, x, y, attackMove);
@@ -271,11 +308,26 @@ function applyMove(state: GameState, pid: PlayerId, ids: number[], x: number, y:
 function applyAttackTarget(state: GameState, pid: PlayerId, ids: number[], targetId: number, keepHarvest: boolean): void {
   for (const u of ownedUnits(state, pid, ids)) {
     clearOrder(u);
+    u.holdFire = null; // 34 §W.6: an explicit attack opens fire for this unit (its group keeps holding)
     u.forcedTargetId = targetId;
     u.target = targetId;
     u.attackMove = false;
     u.moveTarget = null;
     if (u.unitType === "worker" && !keepHarvest) { u.autoHarvest = false; u.buildTargetId = null; }
+  }
+}
+
+/** HOLD on formed units: their formations stop where they stand (the members hold their slots). */
+function haltFormationsOf(state: GameState, pid: PlayerId, units: Unit[]): void {
+  for (const u of units) {
+    if (u.formationId == null) continue;
+    const f = state.formations.find((ff) => ff.id === u.formationId && ff.owner === pid);
+    if (!f || (f.moveTarget == null && !f.fallingBack)) continue;
+    f.moveTarget = null;
+    f.path = [];
+    f.pathGoal = null;
+    f.fallingBack = false;
+    if (f.stationarySince == null) f.stationarySince = state.time;
   }
 }
 

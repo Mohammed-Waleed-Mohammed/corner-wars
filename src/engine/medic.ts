@@ -61,6 +61,10 @@ export function updateMedic(state: GameState, m: Unit, dt: number): void {
     return;
   }
 
+  if (m.holdGround) { // 34 §W.6 hold ground: heal whoever is in range, never walk
+    m.state = "holding";
+    return;
+  }
   if (m.moveTarget || m.guardPoint != null) { // ordered elsewhere — don't wander
     if (!m.moveTarget) m.state = "idle";
     return;

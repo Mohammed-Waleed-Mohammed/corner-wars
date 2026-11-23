@@ -694,6 +694,20 @@ export class InputController {
     if (ids.length) this.emit("STOP", { unitIds: ids });
   }
 
+  /** 34 §W.6 Hold ground: stand here, fire at what comes in range, never chase. */
+  holdSelected(): void {
+    const ids = this.selectedUnits().map((u) => u.id);
+    if (ids.length) this.emit("HOLD", { unitIds: ids });
+  }
+
+  /** 34 §W.6 Hold fire toggle: on for the whole selection (one group) unless all of it already holds fire. */
+  toggleHoldFireSelected(): void {
+    const units = this.selectedUnits();
+    if (units.length === 0) return;
+    const on = !units.every((u) => u.holdFire != null);
+    this.emit("HOLD_FIRE", { unitIds: units.map((u) => u.id), on });
+  }
+
   /** Only one of {placement, power-targeting, guard-targeting} may be pending at a time. */
   private clearPendingModes(): void {
     this.pendingAbility = false;

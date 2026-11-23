@@ -95,8 +95,9 @@ interface Command {
 | MOVE | `{ unitIds: number[], x, y }` |
 | ATTACK_MOVE | `{ unitIds, x, y }` |
 | ATTACK_TARGET | `{ unitIds, targetId }` |
-| GUARD | `{ unitIds, x, y }` (fixed 8-tile radius, file 15 §6) |
-| STOP / HOLD | `{ unitIds }` |
+| GUARD | `{ unitIds, x, y }` (fixed 8-tile radius, file 15 §6; the units of one order form a guard group, 34 §W.7) |
+| STOP / HOLD | `{ unitIds }` (HOLD = hold ground, 34 §W.6) |
+| HOLD_FIRE | `{ unitIds, on: boolean }` (34 §W.6 ambush stance; `on` gives the units one new hold-fire group, `false` lifts it) |
 | PLACE_BUILDING | `{ buildingType, x, y }` (pays cost, creates construction site) |
 | PLACE_WALL_LINE | `{ fromX, fromY, toX, toY }` (expands to segments deterministically, file 16 §1) |
 | ASSIGN_BUILD | `{ workerIds, buildingId }` (assign workers to a construction site) |

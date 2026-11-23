@@ -7,6 +7,7 @@ import type { AIPersonality, Building, PlayerId, Unit, UnitType, Vec2 } from "..
 import { isLowPower } from "../../state/gameState";
 import { unitCap } from "../../state/upgrades";
 import { incomeBetween, Match, TPS, type Seat } from "./harness";
+import { SIM_SCENARIOS } from "./simScenarios";
 
 export interface Scenario { id: string; title: string; make: () => Match; run: (m: Match) => { ok: boolean; detail: string }; }
 
@@ -636,6 +637,8 @@ export const SCENARIOS: Scenario[] = [
       return res(m.state.winner !== null, `winner ${m.state.winner ?? "none"} at ${(m.state.time / 60).toFixed(1)} min; out ${out.join(" ") || "nobody"}; ${left} left`);
     },
   })),
+  // ───────────────────────────── sim: stances + guard (34 §W.6–7, simScenarios.ts) ─────────────────────────────
+  ...SIM_SCENARIOS,
 ];
 
 /** Groups whose pass rule is "≥ need of the group" rather than every member. */

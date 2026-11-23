@@ -127,7 +127,7 @@ A "defend this spot" order with a **non-customizable** radius.
 
 - **Issue:** select units → press **G** (or pick the Guard cursor) → click a point. Units move there and enter **Guard** state.
 - **Fixed guard radius = 8 tiles** (not adjustable — by design).
-- **Behavior:** any enemy entering the radius is attacked; units pursue only to the radius edge (chase limit ~1.5× radius to avoid being baited), then **return to the guard point** when no enemies remain. Idle otherwise.
+- **Behavior** (reworked by 34 §W.7; numbers in `GUARD`): a guard attacks any enemy inside the radius **or inside its own weapon range from where it stands** (so a rocket on the edge covers beyond it). A target it can shoot from inside the circle never draws it out; for an enemy unit (never a building) up to 4 tiles past the edge that it can't, it may step out at most **4 tiles** past the edge (`stepOut`) for at most **6 s** per sortie (`outS`, turning back in time to be inside by then), then returns even if the enemy is still there and rests **4 s** (`outCooldownS`) before the next sortie. The units of one Guard order are a group: a sortie never takes more than half of them out of the circle at once (a lone guard may go). Guards walking in (just ordered, or back from a sortie) don't stop to fight. With no enemy they **return to the guard point**.
 - **Visual:** a fixed-radius circle preview appears at the cursor while issuing the order; guarding units show a faint ring at the guard point.
 - Differs from attack-move (which advances toward a destination) — Guard **holds a location** and defends around it indefinitely.
 

@@ -458,6 +458,23 @@ added to the game for everyone, with HUD buttons and hotkeys:
 Both are lockstep commands like every other, so determinism is unaffected; both are checksummed state.
 The guard order changes too (§W.7).
 
+**As built** (`sim/commands.ts`, `engine/combat.ts`; tests `sim.hold.*`, `sim.holdfire.*`):
+
+- **HOLD** `{ unitIds }` sets a hold-ground stance that lasts until the next order (any move, attack,
+  guard, stop, build, repair or harvest order ends it). The unit stands, fires at the nearest enemy
+  in its band (`minRange` .. range, so artillery neither fires inside 3 tiles nor backs off), never
+  moves to chase. A Medic heals whoever is in reach without walking; a Worker just stands. HOLD on a
+  formed unit stops its formation (and a Fall Back); the members fire from where they stand, without
+  the leash (19 §H).
+- **HOLD_FIRE** `{ unitIds, on }` is a stance that composes with every order: HOLD, GUARD, MOVE,
+  formations. `on` gives the units of the command one new hold-fire **group** (a sim counter);
+  `on: false` lifts it. While it holds, the unit auto-acquires nothing (loose, guarding, holding or
+  formed). The whole group opens fire when an enemy **unit** comes within `HOLD_FIRE_TRIGGER` = 4
+  tiles of any member (enemy buildings don't trigger it), or when any member takes damage from
+  anything. ATTACK_TARGET lifts it for the ordered units, and so does ATTACK_MOVE (an order to fight);
+  MOVE, HOLD, GUARD, STOP and the formation orders keep it. HUD: **H** Hold, **O** Hold Fire (a
+  toggle: on unless the whole selection already holds fire).
+
 ### §W.7 Guarding a zone (a sim change, and the doctrine for it)
 
 Today a guarding unit only targets enemies within 8 tiles of its guard **point** (`GUARD.radius`), and
@@ -479,6 +496,28 @@ rifleman chases a bait 12 tiles out and stays there. The guard order becomes:
    its range and reports it to the Warden ("being shelled from (x,y)").
 
 This is a player-facing change too (the same GUARD button), with its own unit tests.
+
+**As built** (points 1–3 in the sim, `engine/combat.ts` `updateGuard`; tests `sim.guard.*`). Point 4
+is the AI's to decide (the captains), not the sim's. `GUARD = { radius 8, stepOut 4, outS 6,
+outCooldownS 4, slack 0.5 }`; `chaseMultiplier` is gone (radius + stepOut = 12 is the old bound).
+
+- **Targets:** on its rescan tick a guard takes the nearest enemy inside its band from where it
+  stands; failing that, the enemy nearest the guard point within its zone: units within
+  radius + stepOut, buildings only inside the circle (a structure never comes at the guard, so it
+  never draws one out).
+- **Inside first:** if a spot inside the circle (on the guard-point→target line) is within its range
+  of the target, it moves there and never leaves the circle. Only a target it can't reach from inside
+  starts a sortie.
+- **Sortie:** a chase clamped to radius + stepOut from the guard point. Its clock runs while the unit
+  is outside (`slack` absorbs separation pushes at the edge), and it turns back in time to be inside
+  again by `outS`, enemy or not. Any sortie that took it outside ends with an `outCooldownS` rest.
+  Resting, or held back by the group, it waits on the edge nearest the target.
+- **Stay together:** the units of one GUARD order are a guard group (a sim counter, like hold fire).
+  A sortie may start only if it leaves at most half of the group out, counting units on a sortie and
+  units still walking in. This is slightly stricter than "more than half out → the rest stay", so that
+  even a group of two never empties its circle. A lone guard may sortie.
+- **Walking in:** a guard outside the circle and not on a sortie (just ordered, or coming back)
+  walks to the point without stopping to fight.
 
 ### §W.8 Standoffs, dances and mutual traps
 

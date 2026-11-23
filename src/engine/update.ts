@@ -13,7 +13,7 @@ import type { GameState, Unit } from "../core/types";
 import { updateCitadel } from "./citadel";
 import { updateAbilities } from "./abilities";
 import { updateMission } from "./campaign/director";
-import { updateCombatUnit, updateDefense, updateGates, updateGuard, removeDead } from "./combat";
+import { checkHoldFireTrigger, indexGuards, updateCombatUnit, updateDefense, updateGates, updateGuard, updateHoldGround, removeDead } from "./combat";
 import { updateBuilder, updateConstruction, updateRepair, updateRepairer } from "./construction";
 import { DEFENSE_STATS, NAV } from "../config/constants";
 import { updateEffects } from "./effects";
@@ -65,6 +65,7 @@ export function updateGame(state: GameState, dt: number): void {
   entityHash.rebuild(state);
   updateGates(state, dt); // open/close gates by friendly proximity (uses the fresh hash)
   updateFormations(state, dt); // 19 §I: advance each formation's anchor before units chase slots
+  indexGuards(state); // 34 §W.7.3: guard-group sizes + how many are out, kept live through the loop
 
   for (const e of state.entities) {
     if (e.kind !== "unit" || e.hp <= 0) continue;
@@ -101,6 +102,9 @@ export function updateGame(state: GameState, dt: number): void {
 }
 
 function dispatchUnit(state: GameState, u: Unit, dt: number): void {
+  // 34 §W.6 hold fire: an enemy within the trigger distance opens fire for the unit's whole group
+  // (before anything else, so the unit can already fight this tick).
+  if (u.holdFire != null) checkHoldFireTrigger(state, u);
   // In a formation: hold the slot (19). Handles medics internally (heal + slot). Falls through if
   // the unit turned out not to be in a live formation.
   if (u.formationId != null && updateFormationUnit(state, u, dt)) return;
@@ -108,6 +112,11 @@ function dispatchUnit(state: GameState, u: Unit, dt: number): void {
   // orders degrade to hold/move and it heals wherever it stands.
   if (u.unitType === "medic") {
     updateMedic(state, u, dt);
+    return;
+  }
+  // 34 §W.6 hold ground: stand and shoot what is in range, never chase (workers just stand).
+  if (u.holdGround && u.forcedTargetId == null) {
+    updateHoldGround(state, u, dt);
     return;
   }
   // Guard order holds a point and defends a radius around it (any unit type).

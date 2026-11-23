@@ -49,7 +49,7 @@ export type ResearchKey =
   | "resonanceTapping" | "deepResonance" // 32 §A — the Resonance Tap and its +50% output
   | "reinforcedStructures"; // 32 §B — +25% HP for walls, gates and towers
 
-export type UnitState = "idle" | "moving" | "attacking" | "gathering" | "guarding" | "repairing" | "healing";
+export type UnitState = "idle" | "moving" | "attacking" | "gathering" | "guarding" | "holding" | "repairing" | "healing";
 // "void" (18 §A) = outside the playable shape — not rendered as terrain, not pathable; lets maps be
 // non-rectangular. Impassable like mountain/water/rock (isGround only permits "ground").
 // 24 §A: passable `ground | road | bridge | hill | forest | shallows`; impassable `water | mountain | rock |
@@ -233,8 +233,14 @@ export interface Unit extends Entity {
   // Expanded units (15-logic §4):
   minRange?: number; // artillery: cannot fire at targets closer than this
   splashRadius?: number; // grenadier/artillery: area damage on the projectile
-  // Guard-area command (15-logic §6): hold a point and defend a fixed radius around it.
+  // Guard-area command (15-logic §6, 34 §W.7): hold a point and defend a fixed radius around it.
   guardPoint?: Vec2 | null;
+  guardGroup?: number | null; // engine-only: units given the same GUARD order (stay together, §W.7.3)
+  guardSortie?: number | null; // engine-only: seconds spent outside the circle on this sortie (null = none)
+  guardRest?: number; // engine-only: seconds before the next sortie may start (GUARD.outCooldownS)
+  // 34 §W.6 stances (engine-only, hashed):
+  holdGround?: boolean; // HOLD: stand, fire at what is in weapon range, never move to chase
+  holdFire?: number | null; // hold-fire group id (null = free to fire); the group opens fire together
 }
 
 export interface Building extends Entity {
@@ -648,6 +654,7 @@ export interface GameState {
   winner: PlayerId | null;
   nextId: number; // engine-only: monotonic id allocator
   nextFormationId: number; // engine-only: monotonic formation id allocator (19)
+  nextOrderGroup?: number; // engine-only: monotonic id for GUARD / HOLD_FIRE order groups (34 §W.6–7; unset = 0)
   seed: number; // engine-only: RNG seed used to generate this match
   humanLowPower?: boolean; // engine-only: last frame's human low-power state (for the cue)
   fogTimer?: number; // engine-only: accumulator for the periodic fog recompute

@@ -8,7 +8,7 @@ import { CITADEL_POWERS, PRODUCES } from "../../config/constants";
 import type { Building, BuildingType, UnitType } from "../../core/types";
 import type { FormationOption, SelectionDetail } from "../../input/controller";
 
-export type Cmd = "attack" | "stop" | "guard" | "fallback" | "breakform" | "rally";
+export type Cmd = "attack" | "stop" | "guard" | "hold" | "holdfire" | "fallback" | "breakform" | "rally";
 
 export type SlotAction =
   | { kind: "place"; building: BuildingType }
@@ -89,6 +89,8 @@ export function cardSlots(card: CardId, ctx: { building: Building | null; format
       if (ctx.formations.some((o) => !PRESETS.includes(o.id))) s[4] = { kind: "open", sub: "formations" };
       (["attack", "stop", "guard", "fallback", "breakform"] as Cmd[]).forEach((c, i) => (s[5 + i] = { kind: "cmd", cmd: c }));
       common();
+      s[12] = { kind: "cmd", cmd: "hold" }; // 34 §W.6 stances: Hold (ground) = H, Hold Fire = O
+      s[13] = { kind: "cmd", cmd: "holdfire" };
       break;
     }
     case "production": {

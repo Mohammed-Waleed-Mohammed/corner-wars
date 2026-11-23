@@ -94,7 +94,7 @@ export class SelectionPanel {
       const row = (keys: string, text: string): void => { const r = el("div", "sp-help-row"); r.append(el("span", "sp-kbd", keys), el("span", "", text)); help.append(r); };
       row("Left-drag", "select units · double-click selects every unit of that type");
       row("Right-click", "move / attack · Ctrl + right-click attack-moves");
-      row("Letters", "the key on each card button is a letter of its name (Refinery = R) · arrows / edge / middle-drag move the camera");
+      row("Letters", "the key on each card button is a letter of its name (Refinery = R, Hold = H, Hold Fire = O) · arrows / edge / middle-drag move the camera");
       this.body.append(help);
       return;
     }
