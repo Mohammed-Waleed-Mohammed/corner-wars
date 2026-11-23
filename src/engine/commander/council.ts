@@ -14,6 +14,7 @@ import { planBase } from "./basePlan";
 import { techRequests } from "./scholar";
 import { briefMarshal, briefQuartermaster, briefScholar, briefSpymaster, briefTreasurer, briefWarden, openSession } from "./reports";
 import { minesRunwayS } from "./treasurer";
+import { updateProfiles } from "./profile";
 import { towerValue } from "./warden";
 import type { Seat } from "../../core/types";
 
@@ -29,6 +30,7 @@ export function runSession(ctx: Ctx): void {
   // 34 §B Brief, in seat order: Spymaster → Treasurer → Warden → Quartermaster → (Scholar) → Marshal
   openSession(ctx);
   updateBeliefs(ctx);
+  updateProfiles(ctx); // 34 §W.3 how each enemy behaves
   briefSpymaster(ctx);
   briefTreasurer(ctx, minesRunwayS(ctx));
   assessDanger(ctx);

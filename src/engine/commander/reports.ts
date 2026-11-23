@@ -12,7 +12,7 @@ import type {
   CouncilState, FieldReport, PlayerId, QMReport, Reports, ResearchKey, Seat, SpyReport, TreasuryReport, Unit, Vec2, WardenReport,
 } from "../../core/types";
 import { armyValue, baseCenter, buildingsOf, fightersOf } from "./assess";
-import type { Ctx } from "./commander";
+import { aiLog, type Ctx } from "./commander";
 
 const dist = (a: Vec2, b: Vec2): number => Math.hypot(a.x - b.x, a.y - b.y);
 const SIM_HZ = 30;
@@ -80,6 +80,30 @@ export function briefSpymaster(ctx: Ctx): void {
   }
   const threats: SpyReport["threats"] = [];
   if (b?.alert) threats.push({ from: b.alert.from, value: b.alert.value, at: b.alert.at, etaS: b.alert.eta, target: "base" });
+  // 34 §E.5 raid warning: enemy fighters closing on a worked mine (or already beside it), with an ETA
+  const watch = (c.mineWatch ??= {});
+  const foes = state.entities.filter((e): e is Unit => e.kind === "unit" && e.hp > 0 && e.owner !== ctx.pid && e.owner !== "neutral" &&
+    e.unitType !== "worker" && e.combatType !== undefined);
+  for (const m of b?.mines ?? []) {
+    if (!m.refinery || m.workers === 0) { delete watch[m.id]; continue; }
+    const at = { x: m.x + 0.5, y: m.y + 0.5 };
+    const before = watch[m.id] ?? {};
+    const now: Record<number, number> = {};
+    let value = 0, eta = Infinity, from: PlayerId | null = null;
+    for (const e of foes) {
+      const d = dist(e, at);
+      if (d > C.MINE_WARN_RADIUS) continue;
+      now[e.id] = d;
+      const was = before[e.id];
+      if (d <= 8 || (was != null && was - d >= 1)) {
+        value += (e.hp / e.maxHp) * UNIT_STATS[e.unitType].gold;
+        eta = Math.min(eta, Math.max(0, d - 4) / Math.max(0.5, e.speed));
+        from ??= e.owner as PlayerId;
+      }
+    }
+    watch[m.id] = now;
+    if (from != null && value >= C.MINE_WARN_MIN) threats.push({ from, value, at, etaS: eta, target: "mine", mineId: m.id });
+  }
   file(ctx, "spymaster", { tick: t, enemies, threats });
 }
 
@@ -194,6 +218,28 @@ export const ask = {
   /** Marshal */
   field(ctx: Ctx): FieldReport | undefined { return read(ctx, "marshal").r; },
 };
+
+/** 34 §E.1–3: the King's read of a decisive attack on `target` with `myValue`: odds against what we
+ *  BELIEVE is there (the trust-weighted estimate, not just what is in sight; an army that is not located
+ *  counts as at home), and how sure the Spymaster is. */
+export function strikeRead(ctx: Ctx, target: PlayerId, myValue: number): { odds: number; conf: number; located: boolean; believed: number } {
+  const s = ask.strength(ctx, target);
+  const w = ask.whereabouts(ctx, target);
+  const tb = ctx.cs.beliefs?.enemies[target];
+  const away = w.located && !w.atHome ? COMMANDER.FAR_ARMY_WEIGHT : 1;
+  const odds = Math.sqrt(myValue / Math.max(1, s.believed * away + 4 * (tb?.baseDef ?? 0)));
+  return { odds, conf: s.conf, located: w.located, believed: s.believed };
+}
+
+/** A veto (34 §E): a ruling with a reason, written to the AI log at most once per VETO_LOG_TICKS per key. */
+export function veto(ctx: Ctx, seat: Seat, layer: "S" | "O" | "T", key: string, why: string): void {
+  const c = councilOf(ctx);
+  rule(ctx, seat, key, "deny", why);
+  const log = (c.vetoLog ??= {});
+  if (ctx.state.tick - (log[key] ?? -1e9) < COMMANDER.COUNCIL.VETO_LOG_TICKS) return;
+  log[key] = ctx.state.tick;
+  aiLog(ctx.cs, ctx.state.tick, layer, `[${seat[0].toUpperCase()}${seat.slice(1)}] ${why}`);
+}
 
 /** Record a ruling (34 §B.4) in the council's ring (overlay + harness); `log` also writes the AI log. */
 export function rule(ctx: Ctx, seat: Seat, key: string, verdict: "fund" | "deny" | "save", why: string): void {

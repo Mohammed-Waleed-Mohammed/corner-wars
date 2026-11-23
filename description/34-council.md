@@ -168,7 +168,12 @@ Rules:
 * **Timing strikes.** In a STRIKE phase, the Quartermaster is told the target value and the time; it
   answers `timeTo(value)`. If the answer is later than `by`, the King either strikes with what it has
   (if the odds still clear nerve) or drops the strike and logs why ("timing missed: 1840/2600 at 8:00,
-  odds 0.9 < 1.35 → ARM").
+  odds 0.9 < 1.35 → CONTROL").
+
+  *As built:* the strike launches when the army reaches the value, or at the deadline, provided the
+  odds against the believed army clear nerve (stance ALL_IN, `allInWhy = "plan"`). A missed timing
+  moves the plan on to the next phase (CONTROL, where the stance table runs the war) rather than back
+  to ARM, so a plan can never loop. The plans live in `engine/commander/plan.ts`; Medium has none.
 * **One plan change per 30 s at most**, logged as `plan GROW→ARM (12 workers, 2 refineries)`.
 
 ### §C.3 Posture and target
@@ -250,6 +255,26 @@ Each veto is a rule the King applies at ruling time; each logs a line naming the
 
 The vetoes replace 33's scattered checks (`allInWindow`'s projected odds, the DEFEND invest filter,
 the launch gate at FIGHT_ODDS) with one place that says why.
+
+**As built (step 3), and why it differs:**
+
+* *Confidence decides close calls only.* An enemy army is almost never wholly in sight, so `known/est`
+  is near 0 for most of a match; a hard confidence gate froze every launch (measured: a Boomer sat on
+  3× the Rusher's army for 8 minutes). The odds are already read against `est`, which assumes unseen
+  growth, so an army that wins against it doesn't need confidence. The gate applies when the odds are
+  below `need × CONF_MARGIN` (1.25). In the King's ALL_IN "army away" window it denies; in the
+  Marshal's launch it asks the Spymaster for a look at their main and does not block (look-before-
+  you-leap already waited for a look at the objective).
+* *Not located.* An army the Spymaster has lost counts as at home in the odds (no far-army discount),
+  and a launch also needs home (guard + towers) to hold its `est` at ≥ `UNLOCATED_HOLD` (0.5).
+* *No investment while short* needs a threat in sight, or a stronger target **and** danger ≥
+  `SHORT_DANGER` (0.25) — otherwise it held every investment from the first minute for whichever side
+  was smaller. Mining research is exempt (it pays back in a minute), and so are Taps and Resonance
+  Tapping once the Treasurer projects income falling (`in60 < 0.6 × income`). Held investments drop
+  to priority `INVEST_WHILE_SHORT` (44), below every unit, so they are bought only from gold the army
+  can't spend.
+* *Evacuation on warning* fires when a raid closing on a worked mine (or within 8 tiles of it) will
+  arrive within `EVAC_LEAD_S` + one session, and what stands there holds it at < `EVAC_ODDS`.
 
 ---
 

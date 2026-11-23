@@ -379,6 +379,7 @@ export interface AISquad {
   progressTick?: number; // …and when it last got closer
   looseUntil?: number; // while > tick the push moves loose (no formation) — breaching // 33 §F: first tick of the current run of sub-FIGHT_ODDS reads at their base // 33 §F: first tick of the current run of losing reads (retreat hysteresis)
   stageLogTick?: number; // 33 dev: last time a held launch logged its reason
+  chaseWatch?: { from: Vec2; enemy: PlayerId | null; max: number }; // 34 §W.3 measuring a pursuit of this squad
   fleeUntil?: Partial<Record<number, number>>; // 33 §B.2 sentries: unit id → tick it may return to its post
 }
 
@@ -427,6 +428,7 @@ export interface CommanderState {
   saveKey?: string; // 33 §D: which request that is (F5 overlay, logs)
   beliefs?: AIBeliefs; // 33 §B: what this AI believes about its enemies and the map
   council?: CouncilState; // 34: reports, rulings
+  allInWhy?: "crippled" | "away" | "cap" | "plan"; // 34 §E.2: which window opened the ALL_IN (sets the launch odds)
   projects?: AIExpansion[]; // 33 §C.4: running expansion projects
   hits?: { x: number; y: number; w: number; tick: number }[]; // 33 §E.4: where my territory was attacked (decaying weight)
   danger?: number; // 33 §E.1: danger D ∈ [0, 1] from the last operational tick
@@ -456,6 +458,18 @@ export interface Reports {
   quartermaster: QMReport; scholar: ScholarReport; marshal: FieldReport;
 }
 export interface Ruling { tick: number; seat: Seat; key: string; verdict: "fund" | "deny" | "save"; why: string }
+/** 34 §W.3 — how one enemy behaves, measured by the Spymaster (samples, oldest first). */
+export interface EnemyProfile {
+  attacks: number[]; // ticks their army began closing on me
+  lastAttackTick: number;
+  routes: Record<string, number>; // route heat map: "cx,cy" cell → sightings of their army closing on me
+  response: { s: number; ratio: number }[]; // my raids: seconds until their defenders arrived, their value ÷ the raid's
+  chase: number[]; // tiles their units followed a force of mine that was falling back
+  homeGuard: number[]; // share of their army seen at home while the rest was away
+  lastGuardTick?: number;
+  raidWatch?: { at: Vec2; start: number; value: number; done: boolean } | null;
+}
+
 /** 34 §F — the council blackboard (cs.council). Host-only, never hashed. */
 export interface CouncilState {
   session: number;
@@ -463,6 +477,11 @@ export interface CouncilState {
   prev: Partial<Reports>; // the latest earlier report of each seat (answers to seats that brief later)
   rulings: Ruling[]; // ring, COUNCIL.RULINGS_KEEP
   sightings: Partial<Record<number, { at: Vec2; tick: number }[]>>; // last two army fixes per enemy (heading)
+  mineWatch?: Partial<Record<number, Record<number, number>>>; // mine id → enemy unit id → distance at the last session (closing test)
+  vetoLog?: Record<string, number>; // veto key → tick last logged (throttle)
+  profiles?: Partial<Record<number, EnemyProfile>>; // 34 §W.3 per enemy
+  /** 34 §C.2 the grand plan: phase index, when it began, ticks paused by emergencies, the strike launch */
+  plan?: { phase: number; since: number; paused: number; pauseStart?: number; launched?: number; strikeLogged?: boolean };
 }
 
 /** 33 §B.1 — one enemy as this AI believes it to be (built only from its own perception). */

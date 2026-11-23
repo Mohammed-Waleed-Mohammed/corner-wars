@@ -4,15 +4,16 @@
 // see coming but can't hold). Requests go to the budget arbiter; evacuation marks mines for the
 // worker upkeep.
 
-import { BUILDING_STATS, COMMANDER, DEFENSE_STATS, STRUCTURE_CAP } from "../../config/constants";
+import { BUILDING_STATS, COMMANDER, DEFENSE_STATS, STRUCTURE_CAP, UNIT_STATS } from "../../config/constants";
 import type { BuildingType, ResearchKey, Vec2 } from "../../core/types";
 import { isLowPower } from "../../state/gameState";
 import { isResearched } from "../../state/upgrades";
-import { armyValue, baseCenter, buildingsOf, compositionNear, defenseCover, fightOdds, territoryThreat, type Composition } from "./assess";
+import { armyValue, baseCenter, buildingsOf, compositionNear, defenseCover, fightersOf, fightOdds, territoryThreat, type Composition } from "./assess";
 import type { Budget } from "./budget";
 import { aiLog, type Ctx } from "./commander";
 import { strongestEnemies } from "./spymaster";
 import { centerOf, cmd, spotNear, legalFor } from "./place";
+import { ask, homeRadius, veto } from "./reports";
 import { nearestPassableTile } from "../pathfinding";
 import { baseThreatened, ensureFormation, gatePost, squadUnits, type Squad } from "./captain";
 import { keepsBaseConnected } from "./basePlan";
@@ -47,7 +48,19 @@ export function assessDanger(ctx: Ctx): void {
   }
   // incoming: an alert against everything I could put at the gate
   let Dinc = 0;
-  if (b.alert && b.alert.eta < D2.ALERT_ETA_S) Dinc = clamp01(1.3 - (myArmy + D2.DEF_ARMY_CREDIT * towers) / Math.max(1, b.alert.value));
+  // 34 §E.4 count only who is home: the field army helps only if the Marshal can have it back first
+  const field = ask.field(ctx);
+  const home = baseCenter(state, pid);
+  let atHome = 0;
+  if (home) for (const u of fightersOf(state, pid)) if (dist(u, home) <= homeRadius(ctx)) atHome += (u.hp / u.maxHp) * UNIT_STATS[u.unitType].gold;
+  if (b.alert) {
+    const armyBack = !field || field.etaHomeS < b.alert.eta;
+    const holds = (armyBack ? Math.max(atHome, myArmy) : atHome) + D2.DEF_ARMY_CREDIT * towers;
+    if (b.alert.eta < D2.ALERT_ETA_S || !armyBack) Dinc = clamp01(1.3 - holds / Math.max(1, b.alert.value));
+    if (!armyBack && Dinc >= D2.DEFEND_DANGER) {
+      veto(ctx, "warden", "O", "alert:army-away", `alert ${b.alert.value | 0} ETA ${b.alert.eta | 0} s — the army is ${field!.etaHomeS | 0} s away, home holds ${holds | 0} → DEFEND`);
+    }
+  }
   // strategic: the strongest enemy's believed army against mine
   const top = strongestEnemies(b);
   const threatEst = (top[0]?.est ?? 0) + D2.FFA_SECOND_W * (top[1]?.est ?? 0);
@@ -77,6 +90,21 @@ export function assessDanger(ctx: Ctx): void {
 
   // evacuation: a worked mine with enemy fighters at it that what I have there can't beat
   cs.evac ??= {};
+  // 34 §E.5 evacuate on warning, not on contact: a raid the Spymaster sees closing on a worked mine that
+  // what stands there can't beat → the crew leaves EVAC_LEAD_S before the raiders arrive
+  const CC = COMMANDER.COUNCIL;
+  for (const th of ask.threats(ctx)) {
+    if (th.target !== "mine" || th.mineId == null || (cs.evac[th.mineId] ?? -1) > t) continue;
+    if (th.etaS > CC.EVAC_LEAD_S + COMMANDER.CADENCE.OPERATIONAL / 30) continue;
+    let mine = 0;
+    for (const u of fightersOf(state, pid)) if (dist(u, th.at) <= 12) mine += (u.hp / u.maxHp) * UNIT_STATS[u.unitType].gold;
+    for (const tw of buildingsOf(state, pid)) if (DEFENSE_STATS[tw.buildingType] && tw.buildProgress >= 1 && dist(centerOf(tw), th.at) <= 8) mine += D2.DEF_ARMY_CREDIT * BUILDING_STATS[tw.buildingType].gold;
+    const odds = Math.sqrt(mine / Math.max(1, th.value));
+    if (odds < CC.EVAC_ODDS) {
+      cs.evac[th.mineId] = t + D2.EVAC_TICKS;
+      aiLog(cs, t, "O", `[Treasurer] evacuate mine (${th.at.x | 0},${th.at.y | 0}) — raid ${th.value | 0} ETA ${th.etaS.toFixed(0)} s, Warden odds ${odds.toFixed(2)}`);
+    }
+  }
   for (const m of b.mines) {
     if (!m.refinery || m.workers === 0 || t - m.dangerTick > 30) continue; // fighters seen there this tick
     const at = { x: m.x + 0.5, y: m.y + 0.5 };

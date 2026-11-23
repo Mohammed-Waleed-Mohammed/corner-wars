@@ -16,6 +16,7 @@ import { planAbility } from "../aiAbilities";
 import { baseThreatened, centerOf, cmd, dist, driveSquad, ensureFormation, gatePost, myFormation, pickFormation, retreat, squadOdds, squadUnits, valueOf, type Squad } from "./captain";
 import { runScout, runSentries } from "./spymaster";
 import { defenseAnchor, runHomeGuard } from "./warden";
+import { ask, strikeRead, veto } from "./reports";
 
 export function runMarshal(ctx: Ctx): void {
   const { cs } = ctx;
@@ -159,7 +160,23 @@ function runMainArmy(ctx: Ctx, s: Squad): void {
       return;
     }
   }
-  if (cs.stance === "DEFEND") {
+  // 34 §E.4 / §W.6 the way home is blocked: an alerted force I can't beat sits on the road between
+  // the army and the gate. Marching through it is a rout; a committed push keeps going (a base trade —
+  // the towers and the home guard hold what they can), an idle army holds where it is.
+  const alert = cs.beliefs?.alert;
+  const gate = cs.stance === "DEFEND" && home ? gatePost(ctx) ?? home : null;
+  const blocked = !!gate && !!alert && dist(center, gate) > 16 && dist(alert.at, gate) > 12 &&
+    distToSegment(alert.at, center, gate) <= COMMANDER.COUNCIL.ROUTE_BAND &&
+    Math.sqrt(value / Math.max(1, alert.value)) < COMMANDER.FIGHT_ODDS;
+  if (blocked && state.tick - (s.stageLogTick ?? -1e9) >= 900) {
+    s.stageLogTick = state.tick;
+    aiLog(cs, state.tick, "T", `[Marshal] the way home is blocked by ${alert!.value | 0} at (${alert!.at.x | 0},${alert!.at.y | 0}) (odds ${Math.sqrt(value / Math.max(1, alert!.value)).toFixed(2)}) → ${committed ? "base trade: the push goes on" : "hold here"}`);
+  }
+  if (blocked && !committed) {
+    if (s.mission !== "hold") { cmd(ctx, "STOP", { unitIds: s.unitIds }); s.mission = "hold"; s.objective = center; s.lastOrderTick = state.tick; }
+    return;
+  }
+  if (cs.stance === "DEFEND" && !blocked) {
     const post = gatePost(ctx) ?? home;
     if (post && (s.mission !== "defend" || dist(center, post) > 10)) {
       ensureFormation(ctx, s, "box", null);
@@ -169,7 +186,7 @@ function runMainArmy(ctx: Ctx, s: Squad): void {
     }
     return;
   }
-  if (s.mission === "repel" || s.mission === "defend") s.mission = "idle"; // threat cleared
+  if (s.mission === "repel" || s.mission === "defend" || (s.mission === "hold" && !blocked)) s.mission = "idle"; // threat cleared
 
   const target = cs.targetPlayer;
   if ((cs.stance === "PRESSURE" || cs.stance === "ALL_IN") && target != null && !regrouping) {
@@ -205,12 +222,51 @@ function runMainArmy(ctx: Ctx, s: Squad): void {
       // §K v2 launch read: my main army vs what can actually meet it at the objective.
       // 33 §F: never launch on less than the belief — an army I can't see but could exist (est) caps
       // the projection on the same sqrt-of-value scale
+      // 34 §E.1: the belief is the Spymaster's — trust-weighted, and an army it has lost counts as at home
       const tb = cs.beliefs?.enemies[target];
-      const beliefOdds = tb ? Math.sqrt(value / Math.max(1, tb.est * (tb.away ? COMMANDER.FAR_ARMY_WEIGHT : 1) + 4 * tb.baseDef)) : 99;
+      const read = strikeRead(ctx, target, value);
+      const beliefOdds = tb ? read.odds : 99;
       const proj = Math.min(beliefOdds, projectedOdds(state, pid, fighters, target, objective) * (stale ? COMMANDER.STALE_INTEL_DISCOUNT : 1));
+      // 34 §E.2 no coin flips: a decisive ALL_IN launches at the King's nerve, except in the windows that
+      // really are decisive (a crippled target; at the unit cap, where units I can't add are worth spending)
       const need = cs.stance === "ALL_IN"
-        ? COMMANDER.FIGHT_ODDS
+        ? (cs.allInWhy === "crippled" || cs.allInWhy === "cap" ? COMMANDER.FIGHT_ODDS : pers.strikeOdds)
         : +(1 + (pers.attackRatio - 1) * COMMANDER.ATTACK_ODDS_SCALE).toFixed(2);
+      // 34 §E.1 no strike on a guess: a close call on low confidence asks the Spymaster for a look at
+      // their main (where an unlocated army is assumed to be). It doesn't block: look-before-you-leap
+      // above already waited for a look at the objective, and the odds are read against the estimate,
+      // which assumes unseen growth. The King's ALL_IN window is where confidence decides (king.ts).
+      const CC = COMMANDER.COUNCIL;
+      if (read.conf < CC.CONF_TO_STRIKE && proj >= need && proj < need * CC.CONF_MARGIN && tb?.home &&
+          (!cs.scoutRequest || state.tick - cs.scoutRequest.tick > 2 * COMMANDER.ATTACK_INTEL_WAIT_TICKS)) {
+        cs.scoutRequest = { x: tb.home.x, y: tb.home.y, tick: state.tick };
+        veto(ctx, "marshal", "T", "launch:guess", `close call on P${target} (odds ${proj.toFixed(2)} vs ${need}) on confidence ${read.conf.toFixed(2)} → Spymaster to look at their main`);
+      }
+      // 34 §E.3 know where their army is: on my route → it is the objective (or no launch); lost → home must hold
+      const where = ask.whereabouts(ctx, target);
+      let fieldTarget: Vec2 | null = null;
+      if (where.located && !where.atHome && where.at && distToSegment(where.at, center, objective) <= CC.ROUTE_BAND) {
+        const armyOdds = Math.sqrt(value / Math.max(1, ask.strength(ctx, target).believed));
+        if (armyOdds < need) {
+          veto(ctx, "marshal", "T", "launch:route", `launch on P${target} denied — their army stands on my route at (${where.at.x | 0},${where.at.y | 0}), odds ${armyOdds.toFixed(2)} < ${need}`);
+          if (home && s.mission !== "stage") {
+            ensureFormation(ctx, s, "line", where.at);
+            cmd(ctx, "ATTACK_MOVE", { unitIds: s.unitIds, x: home.x, y: home.y, spread: false });
+            s.mission = "stage";
+            s.objective = home;
+          }
+          return;
+        }
+        fieldTarget = { x: where.at.x, y: where.at.y };
+      }
+      if (!where.located && fighters.length >= COMMANDER.ATTACK_MIN_UNITS) {
+        const homeHold = Math.sqrt(ask.homeStrength(ctx).total / Math.max(1, ask.strength(ctx, target).est));
+        if (homeHold < CC.UNLOCATED_HOLD) {
+          veto(ctx, "marshal", "T", "launch:unlocated", `launch on P${target} denied — their army is not located and home holds it only at ${homeHold.toFixed(2)}`);
+          if (tb?.home) cs.scoutRequest = { x: tb.home.x, y: tb.home.y, tick: state.tick };
+          return;
+        }
+      }
       if (fighters.length < COMMANDER.ATTACK_MIN_UNITS || proj < need) {
         if (s.mission === "stage" && state.tick - (s.stageLogTick ?? -1e9) >= 900) {
           s.stageLogTick = state.tick;
@@ -227,6 +283,17 @@ function runMainArmy(ctx: Ctx, s: Squad): void {
       }
       // Launch = GATHER first, outside turret reach on my side of the objective: the projected read
       // counted the whole army, so it must arrive as one body, not a trickle into the defenses.
+      if (fieldTarget) {
+        // their army is in the way and I win against it: it is the objective
+        ensureFormation(ctx, s, pickFormation(ctx, center, "meet"), fieldTarget);
+        cmd(ctx, "ATTACK_MOVE", { unitIds: s.unitIds, x: fieldTarget.x, y: fieldTarget.y, spread: false });
+        s.mission = "engage";
+        s.bestDist = undefined; s.progressTick = state.tick; s.looseUntil = undefined;
+        s.objective = fieldTarget;
+        s.lastOrderTick = state.tick;
+        aiLog(cs, state.tick, "T", `[Marshal] launch → P${target}'s army in the field at (${fieldTarget.x | 0},${fieldTarget.y | 0}) (odds ${proj.toFixed(2)} ≥ ${need})`);
+        return;
+      }
       const gp = gatherPoint(state, objective, center);
       ensureFormation(ctx, s, pickFormation(ctx, center, "travel"), objective);
       cmd(ctx, "ATTACK_MOVE", { unitIds: s.unitIds, x: gp.x, y: gp.y, spread: false });
@@ -335,6 +402,14 @@ function runMainArmy(ctx: Ctx, s: Squad): void {
     s.mission = "hold";
     s.objective = home;
   }
+}
+
+/** Distance from p to the segment a→b. */
+function distToSegment(p: Vec2, a: Vec2, b: Vec2): number {
+  const vx = b.x - a.x, vy = b.y - a.y;
+  const L2 = vx * vx + vy * vy || 1;
+  const k = Math.max(0, Math.min(1, ((p.x - a.x) * vx + (p.y - a.y) * vy) / L2));
+  return Math.hypot(a.x + vx * k - p.x, a.y + vy * k - p.y);
 }
 
 /** Where a launched push gathers: GATHER_DIST from the objective, on the side I'm coming from. */

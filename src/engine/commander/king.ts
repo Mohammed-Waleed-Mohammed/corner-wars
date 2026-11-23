@@ -10,6 +10,8 @@ import { unitCap } from "../../state/upgrades";
 import { armyValue, baseCenter, biggestThreatPlayer, fightersOf, fightOdds, frontDistance, livingEnemies, projectedOdds, territoryThreat, unitsOf } from "./assess";
 import { aiLog, type Ctx } from "./commander";
 import { updateBeliefs } from "./spymaster";
+import { ask, strikeRead, veto } from "./reports";
+import { runPlan } from "./plan";
 
 const HIST_KEEP_TICKS = 1800;
 
@@ -44,7 +46,10 @@ export function runKing(ctx: Ctx): void {
   const tt = territoryThreat(state, pid);
   const ttOdds = tt ? fightOdds(state, pid, tt.at, COMMANDER.LOCAL_ODDS_RADIUS * 3, undefined, true) : 99;
   const losingAtHome = tt != null && tt.value >= COMMANDER.DEFEND_MIN_VALUE && ttOdds < COMMANDER.DEFEND_ODDS;
-  const alertBad = b.alert != null && b.alert.eta < D2.ALERT_ETA_S && (cs.danger ?? 0) >= D2.DEFEND_DANGER;
+  // 34 §E.4: an alert counts when it is close, or when the field army can't be home before it lands
+  const field = ask.field(ctx);
+  const armyFar = b.alert != null && !!field && field.etaHomeS >= b.alert.eta - 5;
+  const alertBad = b.alert != null && (b.alert.eta < D2.ALERT_ETA_S || armyFar) && (cs.danger ?? 0) >= D2.DEFEND_DANGER;
   const lostRecently = (() => {
     const before = valueAgo(cs.armyHist, t, COMMANDER.RECOVER_WINDOW_TICKS);
     return before != null && before > 0 && (before - myArmy) / before > COMMANDER.RECOVER_LOSS_FRAC;
@@ -73,7 +78,7 @@ export function runKing(ctx: Ctx): void {
     cs.stance = defaultStance(ctx, myArmy, est(target));
   } else if (cs.stance === "ALL_IN" && t < cs.stanceUntilTick) {
     // hold the ALL_IN window
-  } else if (target != null && tb && allInWindow(ctx, tb, myArmy, dropped(target, COMMANDER.ALLIN_ENEMY_DROP))) {
+  } else if (target != null && tb && (cs.allInWhy = allInWindow(ctx, tb, myArmy, dropped(target, COMMANDER.ALLIN_ENEMY_DROP)) ?? undefined)) {
     cs.stance = "ALL_IN"; // row 3
     cs.stanceUntilTick = t + COMMANDER.ALLIN_WINDOW_TICKS;
   } else if (target != null && myArmy > pers.attackRatio * est(target)) {
@@ -87,26 +92,39 @@ export function runKing(ctx: Ctx): void {
       cs.stance = defaultStance(ctx, myArmy, est(target));
     }
   }
+  runPlan(ctx, myArmy); // 34 §C.2 the grand plan: phase, postures, the timing strike
   if (cs.stance !== prev) {
     aiLog(cs, t, "S", `stance ${prev}→${cs.stance} (army ${myArmy | 0} vs P${cs.targetPlayer} est ${est(cs.targetPlayer) | 0}, danger ${(cs.danger ?? 0).toFixed(2)}${b.alert ? `, alert ${b.alert.value | 0} ETA ${b.alert.eta.toFixed(0)} s` : ""})`);
   }
 }
 
-/** §F.1 row 3: a decisive window. */
-function allInWindow(ctx: Ctx, tb: EnemyBelief, myArmy: number, justLost: boolean): boolean {
-  const { state, pid } = ctx;
-  if (myArmy < COMMANDER.DEFENSE2.MIN_ARMY_BASE) return false;
-  if (isLowPower(state, tb.pid) || justLost) return myArmy >= 0.8 * tb.est;
+/** §F.1 row 3: a decisive window — and which one (it sets the launch odds, 34 §E.2). The "army
+ *  away" window asks the Spymaster first (34 §E.1): only a located army, a confident estimate, and
+ *  odds against the BELIEVED strength (not just the units in sight) at the King's nerve. */
+function allInWindow(ctx: Ctx, tb: EnemyBelief, myArmy: number, justLost: boolean): "crippled" | "away" | "cap" | null {
+  const { state, pid, pers } = ctx;
+  if (myArmy < COMMANDER.DEFENSE2.MIN_ARMY_BASE) return null;
+  const believed = ask.strength(ctx, tb.pid).believed;
+  if (isLowPower(state, tb.pid) || justLost) return myArmy >= 0.8 * believed ? "crippled" : null;
   const fighters = fightersOf(state, pid);
   if (tb.away && tb.home && fighters.length >= COMMANDER.ATTACK_MIN_UNITS) {
     // their army is out: do I reach their base before it gets back, and win there?
     const home = baseCenter(state, pid);
     const mine = home ? Math.hypot(home.x - tb.home.x, home.y - tb.home.y) : 9999;
     const theirs = tb.armyAt ? Math.hypot(tb.armyAt.x - tb.home.x, tb.armyAt.y - tb.home.y) : 0;
-    if (mine < theirs * 1.6 && projectedOdds(state, pid, fighters, tb.pid, tb.home) >= 1) return true;
+    if (mine < theirs * 1.6) {
+      const read = strikeRead(ctx, tb.pid, myArmy);
+      const odds = Math.min(read.odds, projectedOdds(state, pid, fighters, tb.pid, tb.home));
+      if (!read.located || (read.conf < COMMANDER.COUNCIL.CONF_TO_STRIKE && odds < pers.strikeOdds * COMMANDER.COUNCIL.CONF_MARGIN)) {
+        veto(ctx, "king", "S", "allin:guess", `ALL_IN on P${tb.pid} denied — Spymaster ${read.located ? `confidence ${read.conf.toFixed(2)} < ${COMMANDER.COUNCIL.CONF_TO_STRIKE}` : "has lost their army"} (believed ${read.believed | 0} vs my ${myArmy | 0})`);
+        if (tb.home) ctx.cs.scoutRequest = { x: tb.home.x, y: tb.home.y, tick: state.tick };
+      } else if (odds < pers.strikeOdds) {
+        veto(ctx, "king", "S", "allin:odds", `ALL_IN on P${tb.pid} denied — odds ${odds.toFixed(2)} < nerve ${pers.strikeOdds} (believed ${read.believed | 0} vs my ${myArmy | 0})`);
+      } else return "away";
+    }
   }
   const atCap = unitsOf(state, pid).length >= unitCap(ctx.p) * 0.95;
-  return atCap && myArmy >= tb.est;
+  return atCap && myArmy >= believed ? "cap" : null;
 }
 
 function defaultStance(ctx: Ctx, myArmy: number, targetEst: number): Ctx["cs"]["stance"] {

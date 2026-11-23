@@ -7,7 +7,8 @@
 import { COMMANDER } from "../../config/constants";
 import { aiLog, type Ctx } from "./commander";
 import { sitesOf } from "./place";
-import { rule } from "./reports";
+import { ask, rule, veto } from "./reports";
+import { leanFor } from "./plan";
 import type { Seat } from "../../core/types";
 
 /** eco/survival may use the extra site slot; invest is capped while defending. */
@@ -38,8 +39,28 @@ export function arbitrate(ctx: Ctx, budget: Budget): void {
   const { cs, p, state } = ctx;
   const P = COMMANDER.PRIO;
   // 33 §D: while the base is in danger every coin goes to surviving it — no research, no Taps
+  for (const r of budget.reqs) r.prio += leanFor(ctx, r.cat); // 34 §C.2 the plan's lean
   const defend = cs.stance === "DEFEND" || (cs.danger ?? 0) >= COMMANDER.DEFENSE2.DEFEND_DANGER;
   if (defend) budget.reqs = budget.reqs.filter((r) => r.cat !== "invest");
+  // 34 §E.6 no investment while short: the Quartermaster is under strength and the Spymaster sees a
+  // threat (or a target believed stronger than my army) → investments queue behind every unit, so they
+  // are bought only from gold the army can't spend, and never saved for. A Tap is exempt once the
+  // Treasurer sees income collapsing (mines running dry), and so are refineries and power (eco).
+  const qm = ask.army(ctx);
+  const fear = ask.threats(ctx).length > 0 ||
+    ((cs.danger ?? 0) >= COMMANDER.COUNCIL.SHORT_DANGER && cs.targetPlayer != null && ask.strength(ctx, cs.targetPlayer).believed > (qm?.value ?? 0));
+  if (!defend && qm && qm.desired > 0 && qm.shortfall > COMMANDER.COUNCIL.SHORT_FRAC * qm.desired && fear) {
+    const tr = ask.income(ctx);
+    const collapsing = !!tr && tr.in60 < 0.6 * tr.income;
+    let held = 0;
+    for (const r of budget.reqs) {
+      if (r.cat !== "invest" || r.prio <= P.INVEST_WHILE_SHORT || r.key === "research:mining1" || r.key === "research:mining2") continue; // mining pays back in a minute
+      if (collapsing && (r.key === "tap" || r.key === "research:resonanceTapping")) continue;
+      r.prio = P.INVEST_WHILE_SHORT;
+      held++;
+    }
+    if (held > 0) veto(ctx, "king", "O", "invest:short", `investments wait — army ${qm.value | 0} of ${qm.desired | 0} wanted, ${ask.threats(ctx).length ? "a threat in sight" : "the target believed stronger"}`);
+  }
   budget.reqs.sort((a, b) => b.prio - a.prio || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
 
   let gold = p.gold;

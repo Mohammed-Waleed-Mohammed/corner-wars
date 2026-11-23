@@ -931,6 +931,7 @@ export const COMMANDER = {
   // ── 33 §D priorities (the budget arbiter) ──
   PRIO: {
     SAVE_PRIO: 60, // an unaffordable request at least this important is saved for
+    INVEST_WHILE_SHORT: 44, // 34 §E.6: investments drop to this (below every unit) while the army is short
     SAVE_LEAK: 85, // requests at least this important may still spend into the savings (workers, power)
     SITES_BASE: 2, // concurrent construction sites…
     SITES_PER_WORKERS: 8, // …+1 per this many workers
@@ -959,7 +960,8 @@ export const COMMANDER = {
   // 34 the Council (§H dials)
   COUNCIL: {
     CONF_HALF_LIFE_S: 60, // a good look loses half its weight in this long
-    CONF_TO_STRIKE: 0.55, // the least confidence for a decisive launch
+    CONF_TO_STRIKE: 0.55, // the least confidence for a decisive launch that is a close call…
+    CONF_MARGIN: 1.25, // …i.e. whose odds against the (pessimistic) estimate are below need × this
     LOCATE_S: 45, // an army unseen this long is "not located"
     ROUTE_BAND: 12, // tiles either side of the launch route that count as "on the route"
     EVAC_ODDS: 1.2, // evacuate a mine when the Warden's odds there are below this
@@ -967,6 +969,17 @@ export const COMMANDER = {
     SHORT_FRAC: 0.2, // shortfall (share of desired) above which investments may not be saved for
     RULINGS_KEEP: 40,
     PLAN_MIN_GAP_S: 30,
+    MINE_WARN_RADIUS: 24, // enemy fighters this close to a worked mine and closing are a raid warning
+    MINE_WARN_MIN: 200, // …worth at least this much
+    SHORT_DANGER: 0.25, // §E.6: a stronger target counts as a reason to hold investments only at this danger
+    UNLOCATED_HOLD: 0.5, // launching while their army is not located: home (guard + towers) must hold its est this well
+    VETO_LOG_TICKS: 900,
+    PROFILE_MIN_SAMPLES: 2, // 34 §W.3 observations before an operation may rely on a profile trait
+    OVERREACT_RATIO: 1.5, // they answer a raid with ≥ this × its value: feints work
+    TURTLE_TOWERS: 8, // known towers that make an enemy a turtle
+    ATTACK_MIN_VALUE: 400, // an incoming army worth this counts as an attack (aggression, routes)
+    ATTACK_GAP_TICKS: 1800, // sightings closer than this are the same attack
+ // the same veto is written to the AI log at most this often
   },
   // §B personalities — parameter sets, not code (firstPush = Infinity: never initiates).
   PERSONALITIES: {

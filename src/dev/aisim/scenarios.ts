@@ -58,6 +58,12 @@ function newUnitsTracker(m: Match, pid: PlayerId): () => Unit[] {
   return () => m.units(pid).filter((u) => !seen.has(u.id));
 }
 const mainMission = (m: Match, pid: PlayerId): string => m.cs(pid)?.squads.find((s) => s.role === "main")?.mission ?? "";
+/** the main army's centre (null if it has no living units) */
+function mainAt(m: Match, pid: PlayerId): Vec2 | null {
+  const main = m.cs(pid)?.squads.find((s) => s.role === "main");
+  const us = main ? m.units(pid).filter((u) => main.unitIds.includes(u.id)) : [];
+  return us.length ? { x: us.reduce((a, u) => a + u.x, 0) / us.length, y: us.reduce((a, u) => a + u.y, 0) / us.length } : null;
+}
 function ring(m: Match, pid: PlayerId, n: number, r: number): void {
   const h = m.home(pid);
   for (let i = 0; i < n; i++) {
@@ -472,10 +478,19 @@ export const SCENARIOS: Scenario[] = [
   },
   {
     id: "def.nochase", title: "A stronger force outside the wall is not charged",
-    make: () => vsIdle("boomer", 9, true),
+    make: () => {
+      // a garrison at their yard: an idle base with no army would (rightly) be attacked, and this
+      // yard is unbreakable, so the push would never come home
+      const m = vsIdle("boomer", 9, true);
+      m.spawn(P1, "tank", 20, m.home(P1), 1.2);
+      return m;
+    },
     run: (m) => {
       m.run(240);
       const home = m.home(P0);
+      const atHome = (): boolean => { const c = mainAt(m, P0); return !!c && dist(c, home) <= 14 && !["gather", "engage", "attack", "raze", "flank"].includes(mainMission(m, P0)); };
+      const trace: string[] = [];
+      if (runUntil(m, 300, () => { if (m.state.tick % (15 * TPS) === 0) { const c = mainAt(m, P0); trace.push(`${m.state.time | 0}:${mainMission(m, P0)}@${c ? dist(c, home) | 0 : "-"}/${m.cs(P0)?.stance}`); } return atHome(); }) === null) return res(false, `the army never came home: ${trace.join(" ")}`);
       const v0 = m.army(P0);
       const n = Math.max(4, Math.ceil((v0 * 1.6) / UNIT_STATS.tank.gold));
       // on the road toward the enemy, out of reach of everything I own (tank range + slack)
@@ -531,7 +546,8 @@ export const SCENARIOS: Scenario[] = [
       m.run(300);
       const far = { x: m.state.mapWidth - m.home(P0).x, y: m.home(P0).y };
       m.order(P1, "MOVE", { unitIds: ids(m.fighters(P1)), x: far.x, y: far.y, spread: false });
-      const y = m.yard(P1)!;
+      const y = m.yard(P1);
+      if (!y) return res(true, `enemy yard already destroyed before their army left (winner ${m.state.winner ?? "none"})`);
       const hp0 = y.hp;
       const bld0 = m.buildings(P1).length;
       m.run(180);
@@ -543,7 +559,7 @@ export const SCENARIOS: Scenario[] = [
     id: "war.retreat", title: "A push meeting a force twice its size falls back",
     make: () => vsIdle("rusher", 13, true),
     run: (m) => {
-      const out = runUntil(m, 480, () => ["gather", "engage", "attack"].includes(mainMission(m, P0)));
+      const out = runUntil(m, 480, () => { const c = mainAt(m, P0); return ["gather", "engage", "attack"].includes(mainMission(m, P0)) && !!c && dist(c, m.home(P0)) >= 22; });
       if (out === null) return res(false, "never pushed");
       const main = m.cs(P0)!.squads.find((s) => s.role === "main")!;
       const mine = m.units(P0).filter((u) => main.unitIds.includes(u.id));

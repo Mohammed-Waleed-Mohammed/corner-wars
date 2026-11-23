@@ -6,6 +6,7 @@
 import { HUD, UNIT_STATS, ownerColor } from "../../config/constants";
 import type { GameState, Unit } from "../../core/types";
 import type { Camera } from "../camera";
+import { PLANS } from "../../engine/commander/plan";
 
 export function drawAIOverlay(ctx: CanvasRenderingContext2D, state: GameState, camera: Camera): void {
   let panelY = 52;
@@ -78,10 +79,23 @@ export function drawAIOverlay(ctx: CanvasRenderingContext2D, state: GameState, c
     const tb = cs.targetPlayer != null ? cs.beliefs?.enemies[cs.targetPlayer] : undefined;
     lines.push(`belief ${tb ? `${tb.known | 0}/${tb.est | 0}` : "—"} · danger ${(cs.danger ?? 0).toFixed(2)} · want ${(cs.desiredArmy ?? 0) | 0}`);
     lines.push(`income ${(cs.beliefs?.income ?? 0).toFixed(1)}/s${cs.saveKey ? ` · saving ${(cs.saveFor ?? 0) | 0} for ${cs.saveKey}` : ""}${cs.beliefs?.alert ? ` · ALERT ETA ${cs.beliefs.alert.eta | 0}s` : ""}`);
+    // 34 §G the council: the plan phase and one line per seat, then the latest rulings that weren't "fund"
+    const c = cs.council;
+    if (c) {
+      const plan = PLANS[cs.personality];
+      const ph = c.plan ? plan[Math.min(plan.length - 1, c.plan.phase)].name : "—";
+      const spy = cs.targetPlayer != null ? c.reports.spymaster?.enemies[cs.targetPlayer] ?? c.prev.spymaster?.enemies[cs.targetPlayer] : undefined;
+      const w = c.reports.warden ?? c.prev.warden;
+      const qm = c.reports.quartermaster ?? c.prev.quartermaster;
+      const f = c.reports.marshal ?? c.prev.marshal;
+      lines.push(`plan ${ph}${c.plan?.pauseStart != null ? " (paused)" : ""} · Spymaster conf ${spy ? spy.conf.toFixed(2) : "—"}${spy && !spy.at ? " (army lost)" : ""}`);
+      lines.push(`Warden home ${(w?.home.total ?? 0) | 0} · QM short ${(qm?.shortfall ?? 0) | 0} · Marshal ${f?.mission ?? "—"}${f && f.etaHomeS > 0 && Number.isFinite(f.etaHomeS) ? ` ${f.etaHomeS | 0}s out` : ""}`);
+      for (const r of c.rulings.filter((x) => x.verdict !== "fund").slice(-2)) lines.push(`⚖ ${r.seat} ${r.verdict} ${r.key}: ${r.why}`.slice(0, 64));
+    }
     for (const it of cs.intents.slice(0, 3)) lines.push(`» ${it}`);
     for (const s of cs.squads) lines.push(`[${s.role}] ${s.unitIds.length}u ${s.formation ?? "-"} ${s.mission}`);
 
-    const w = 240, lh = 13, h = lines.length * lh + 12;
+    const w = 300, lh = 13, h = lines.length * lh + 12;
     const x = camera.viewportW - w - 12;
     ctx.save();
     ctx.fillStyle = "rgba(10,12,15,0.85)";

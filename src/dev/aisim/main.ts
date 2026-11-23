@@ -7,7 +7,12 @@
 
 import type { AIPersonality, PlayerId } from "../../core/types";
 import { incomeBetween, Match, type Seat } from "./harness";
-import { GROUPS, SCENARIOS } from "./scenarios";
+import { GROUPS as BASE_GROUPS, SCENARIOS as BASE_SCENARIOS } from "./scenarios";
+import { COUNCIL_GROUPS, COUNCIL_SCENARIOS } from "./councilScenarios";
+
+// 33 §T + 34 §T — every scenario list the suite runs
+const SCENARIOS = [...BASE_SCENARIOS, ...COUNCIL_SCENARIOS];
+const GROUPS = [...BASE_GROUPS, ...COUNCIL_GROUPS];
 import { expMining } from "./exp";
 
 declare const process: { argv: string[]; exit(code: number): never; stdout: { write(s: string): void } };
@@ -107,7 +112,8 @@ if (mode === "exp") {
     if (grp) groupRes.set(grp.prefix, [...(groupRes.get(grp.prefix) ?? []), res.ok]);
     else if (!res.ok) fails++;
     out(`${res.ok ? "PASS" : grp ? "miss" : "FAIL"} ${sc.id.padEnd(34)} ${res.detail} (${((Date.now() - t) / 1000).toFixed(1)} s)`);
-    if (!res.ok && m && process.argv.includes("--log")) for (const p of m.state.players) if (p.ai) for (const l of m.log(p.id).slice(-15)) out(`       P${p.id} ${l}`);
+    const logN = Number(process.argv.find((a) => a.startsWith("--log="))?.slice(6) ?? (process.argv.includes("--log") ? 15 : 0));
+    if (!res.ok && m && logN > 0) for (const p of m.state.players) if (p.ai) for (const l of m.log(p.id).slice(-logN)) out(`       P${p.id} ${l}`);
   }
   for (const g of GROUPS) {
     const r = groupRes.get(g.prefix);
