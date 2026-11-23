@@ -12,6 +12,10 @@ import { updateBeliefs } from "./spymaster";
 import { militaryRequests } from "./quartermaster";
 import { planBase } from "./basePlan";
 import { techRequests } from "./scholar";
+import { briefMarshal, briefQuartermaster, briefScholar, briefSpymaster, briefTreasurer, briefWarden, openSession } from "./reports";
+import { minesRunwayS } from "./treasurer";
+import { towerValue } from "./warden";
+import type { Seat } from "../../core/types";
 
 export { counterMix } from "./quartermaster";
 export { findSpot } from "./place";
@@ -22,8 +26,14 @@ export function runSession(ctx: Ctx): void {
   if (!cy) return;
   cs.intents = [];
 
+  // 34 §B Brief, in seat order: Spymaster → Treasurer → Warden → Quartermaster → (Scholar) → Marshal
+  openSession(ctx);
   updateBeliefs(ctx);
+  briefSpymaster(ctx);
+  briefTreasurer(ctx, minesRunwayS(ctx));
   assessDanger(ctx);
+  briefWarden(ctx, towerValue(ctx));
+  briefQuartermaster(ctx);
   // worker orders FIRST so their HARVEST takes the lowest seq this tick; build assignments win after
   manageWorkers(ctx);
   crewSites(ctx);
@@ -32,10 +42,16 @@ export function runSession(ctx: Ctx): void {
 
   const D = cs.danger ?? 0;
   const budget = new Budget();
-  economyRequests(ctx, budget, D);
-  militaryRequests(ctx, budget, D);
-  defenseRequests(ctx, budget, D);
-  techRequests(ctx, budget, D);
+  // 34 §B Petition: each seat posts its priced requests (tagged with the seat), then the Ruling
+  const tag = (seat: Seat, from: number): void => { for (let i = from; i < budget.reqs.length; i++) budget.reqs[i].seat ??= seat; };
+  let n = 0;
+  economyRequests(ctx, budget, D); tag("treasurer", n); n = budget.reqs.length;
+  militaryRequests(ctx, budget, D); tag("quartermaster", n); n = budget.reqs.length;
+  defenseRequests(ctx, budget, D); tag("warden", n); n = budget.reqs.length;
+  techRequests(ctx, budget, D); tag("scholar", n);
+  const research = budget.reqs.filter((r) => r.key.startsWith("research:")).sort((a, b) => b.prio - a.prio || (a.key < b.key ? -1 : 1))[0];
+  briefScholar(ctx, research ? { key: research.key.slice(9) as never, why: research.reason ?? `prio ${research.prio.toFixed(0)}` } : null);
+  briefMarshal(ctx);
   arbitrate(ctx, budget);
 
   if (cs.intents.length > 0) aiLog(cs, state.tick, "O", cs.intents.slice(0, 3).join(" · "));

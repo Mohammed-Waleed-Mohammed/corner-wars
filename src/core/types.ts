@@ -426,6 +426,7 @@ export interface CommanderState {
   saveFor?: number; // 33 §D: gold the budget arbiter is saving for (the top unaffordable request; 0 = none)
   saveKey?: string; // 33 §D: which request that is (F5 overlay, logs)
   beliefs?: AIBeliefs; // 33 §B: what this AI believes about its enemies and the map
+  council?: CouncilState; // 34: reports, rulings
   projects?: AIExpansion[]; // 33 §C.4: running expansion projects
   hits?: { x: number; y: number; w: number; tick: number }[]; // 33 §E.4: where my territory was attacked (decaying weight)
   danger?: number; // 33 §E.1: danger D ∈ [0, 1] from the last operational tick
@@ -433,6 +434,35 @@ export interface CommanderState {
   lastEmergencyTick?: number; // 33 §E.4: last emergency tower
   evac?: Partial<Record<number, number>>; // 33 §C.6: gold source id → tick its crew may return
   incomeHist?: { tick: number; mined: number }[]; // 33 §C: my own goldMined samples (measured income)
+}
+
+// ── 34 the Council ────────────────────────────────────────────────────────────
+export type Seat = "king" | "spymaster" | "treasurer" | "warden" | "quartermaster" | "scholar" | "marshal";
+export interface SpyReport {
+  tick: number;
+  enemies: Partial<Record<number, {
+    known: number; est: number; conf: number; ageS: number; // conf ∈ [0,1]: share of est in sight × recency of the look
+    at: Vec2 | null; seenTick: number; heading: Vec2 | null; atHome: boolean; // whereabouts of the army
+  }>>;
+  threats: { from: PlayerId; value: number; at: Vec2; etaS: number; target: "base" | "mine"; mineId?: number }[];
+}
+export interface TreasuryReport { tick: number; income: number; in60: number; runwayS: number; gold: number }
+export interface WardenReport { tick: number; home: { units: number; towers: number; total: number }; danger: number; desiredArmy: number }
+export interface QMReport { tick: number; value: number; desired: number; shortfall: number; spendGps: number }
+export interface ScholarReport { tick: number; next: { key: ResearchKey; why: string } | null }
+export interface FieldReport { tick: number; at: Vec2 | null; mission: string; value: number; etaHomeS: number; committed: boolean }
+export interface Reports {
+  spymaster: SpyReport; treasurer: TreasuryReport; warden: WardenReport;
+  quartermaster: QMReport; scholar: ScholarReport; marshal: FieldReport;
+}
+export interface Ruling { tick: number; seat: Seat; key: string; verdict: "fund" | "deny" | "save"; why: string }
+/** 34 §F — the council blackboard (cs.council). Host-only, never hashed. */
+export interface CouncilState {
+  session: number;
+  reports: Partial<Reports>; // this session's (filled in seat order)
+  prev: Partial<Reports>; // the latest earlier report of each seat (answers to seats that brief later)
+  rulings: Ruling[]; // ring, COUNCIL.RULINGS_KEEP
+  sightings: Partial<Record<number, { at: Vec2; tick: number }[]>>; // last two army fixes per enemy (heading)
 }
 
 /** 33 §B.1 — one enemy as this AI believes it to be (built only from its own perception). */

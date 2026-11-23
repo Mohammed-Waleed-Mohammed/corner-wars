@@ -7,6 +7,8 @@
 import { COMMANDER } from "../../config/constants";
 import { aiLog, type Ctx } from "./commander";
 import { sitesOf } from "./place";
+import { rule } from "./reports";
+import type { Seat } from "../../core/types";
 
 /** eco/survival may use the extra site slot; invest is capped while defending. */
 export type ReqCat = "eco" | "survival" | "military" | "defense" | "invest";
@@ -18,6 +20,8 @@ export interface Request {
   prio: number;
   site?: boolean; // places a construction site
   act: () => boolean; // issue the command(s); false = couldn't (no spot …) → costs nothing
+  seat?: Seat; // 34 §B the councillor that petitioned
+  reason?: string; // 34 §B one line: why (quoting what it relied on)
 }
 
 export class Budget {
@@ -52,6 +56,7 @@ export function arbitrate(ctx: Ctx, budget: Budget): void {
         gold -= r.cost;
         if (r.site) sites++;
         if (done.length < 4) done.push(r.key);
+        rule(ctx, r.seat ?? "king", r.key, "fund", r.reason ?? `prio ${r.prio.toFixed(0)}`);
       }
       continue;
     }
@@ -61,6 +66,7 @@ export function arbitrate(ctx: Ctx, budget: Budget): void {
   cs.saveFor = saving ? saving.cost : 0;
   cs.saveKey = saving?.key;
   if (saving) cs.intents.push(`saving for ${saving.key} (${saving.cost}g)`);
+  if (saving && saving.key !== prevKey) rule(ctx, saving.seat ?? "king", saving.key, "save", `${saving.cost}g, prio ${saving.prio.toFixed(0)}`);
   if (saving && saving.key !== prevKey) aiLog(cs, state.tick, "O", `save for ${saving.key} (${saving.cost}g, prio ${saving.prio.toFixed(0)})`);
   if (done.length) cs.intents.unshift(done.join(" · "));
 }

@@ -956,13 +956,25 @@ export const COMMANDER = {
     EVAC_TICKS: 600, // an evacuated mine is left alone this long
     RAID_MIN_ARMY: 1500, // Hard personalities raid once their army is worth this much
   },
+  // 34 the Council (§H dials)
+  COUNCIL: {
+    CONF_HALF_LIFE_S: 60, // a good look loses half its weight in this long
+    CONF_TO_STRIKE: 0.55, // the least confidence for a decisive launch
+    LOCATE_S: 45, // an army unseen this long is "not located"
+    ROUTE_BAND: 12, // tiles either side of the launch route that count as "on the route"
+    EVAC_ODDS: 1.2, // evacuate a mine when the Warden's odds there are below this
+    EVAC_LEAD_S: 8, // leave this many seconds before a raid's ETA
+    SHORT_FRAC: 0.2, // shortfall (share of desired) above which investments may not be saved for
+    RULINGS_KEEP: 40,
+    PLAN_MIN_GAP_S: 30,
+  },
   // §B personalities — parameter sets, not code (firstPush = Infinity: never initiates).
   PERSONALITIES: {
-    rusher: { workers: 6, safety: 1.0, firstPush: 600, attackRatio: 1.1, defenseBudget: 0.05, techBudget: 0.05, raidSquads: 1, citadelWeight: 0.6 },
-    boomer: { workers: 12, safety: 0.8, firstPush: 1500, attackRatio: 1.4, defenseBudget: 0.1, techBudget: 0.15, raidSquads: 1, citadelWeight: 0.8 },
-    turtle: { workers: 8, safety: 0.9, firstPush: Infinity, attackRatio: 1.6, defenseBudget: 0.3, techBudget: 0.15, raidSquads: 0, citadelWeight: 0.7 },
-    techer: { workers: 9, safety: 0.9, firstPush: 1200, attackRatio: 1.3, defenseBudget: 0.12, techBudget: 0.35, raidSquads: 1, citadelWeight: 1.0 },
-    opportunist: { workers: 8, safety: 0.9, firstPush: 900, attackRatio: 1.2, defenseBudget: 0.1, techBudget: 0.12, raidSquads: 2, citadelWeight: 1.3 },
+    rusher: { workers: 6, safety: 1.0, firstPush: 600, attackRatio: 1.1, defenseBudget: 0.05, techBudget: 0.05, raidSquads: 1, citadelWeight: 0.6, strikeOdds: 1.15, trustEst: 0.6, cunning: 0.2 },
+    boomer: { workers: 12, safety: 0.8, firstPush: 1500, attackRatio: 1.4, defenseBudget: 0.1, techBudget: 0.15, raidSquads: 1, citadelWeight: 0.8, strikeOdds: 1.35, trustEst: 0.9, cunning: 0.5 },
+    turtle: { workers: 8, safety: 0.9, firstPush: Infinity, attackRatio: 1.6, defenseBudget: 0.3, techBudget: 0.15, raidSquads: 0, citadelWeight: 0.7, strikeOdds: 1.6, trustEst: 1.0, cunning: 0.6 },
+    techer: { workers: 9, safety: 0.9, firstPush: 1200, attackRatio: 1.3, defenseBudget: 0.12, techBudget: 0.35, raidSquads: 1, citadelWeight: 1.0, strikeOdds: 1.3, trustEst: 0.9, cunning: 0.4 },
+    opportunist: { workers: 8, safety: 0.9, firstPush: 900, attackRatio: 1.2, defenseBudget: 0.1, techBudget: 0.12, raidSquads: 2, citadelWeight: 1.3, strikeOdds: 1.2, trustEst: 0.8, cunning: 0.9 },
   },
   // §N difficulty tiers (EASY = the old simple AI, untouched).
   TIERS: {
