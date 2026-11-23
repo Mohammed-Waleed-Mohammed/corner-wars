@@ -957,6 +957,14 @@ export const COMMANDER = {
     EVAC_TICKS: 600, // an evacuated mine is left alone this long
     RAID_MIN_ARMY: 1500, // Hard personalities raid once their army is worth this much
   },
+  // 34 §W.1 the field manual, applied by the captains
+  MANUAL: {
+    ENGAGE_SCAN: 12, // tiles: a unit with no foe this close gets no micro
+    BLIND_MARGIN: 1.5, // artillery steps away from a foe within its blind ring + this
+    ARTY_STEP: 4, // tiles artillery steps back
+    KITE_MARGIN: 1.2, // a kiter steps away when its foe is within the foe's range + this
+    KITE_STEP: 2.5, // tiles a kiter steps back
+  },
   // 34 the Council (§H dials)
   COUNCIL: {
     CONF_HALF_LIFE_S: 60, // a good look loses half its weight in this long

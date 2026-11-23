@@ -89,7 +89,8 @@ export function planAbility(state: GameState, pid: PlayerId, smart: boolean): { 
     }
     case "hammerfall":
     case "hymn": {
-      const c = bestCluster(foes, a.radius ?? 3, smart && a.id === "hymn");
+      // 34 §W.1: both land after a delay (1.5 s, 3 s) — only on a body that stands still
+      const c = bestCluster(foes, a.radius ?? 3, smart);
       return c && c.value >= (smart ? CLUSTER_SMART : CLUSTER_SIMPLE) ? c.at : null;
     }
     case "prism":

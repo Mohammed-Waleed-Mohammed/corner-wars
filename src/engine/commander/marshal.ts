@@ -13,7 +13,7 @@ import { aiLog, ensureSquad, type Ctx } from "./commander";
 import { nearestPassableTile } from "../pathfinding";
 import { staleness } from "../aiPerception";
 import { planAbility } from "../aiAbilities";
-import { baseThreatened, centerOf, cmd, dist, driveSquad, ensureFormation, gatePost, myFormation, pickFormation, retreat, squadOdds, squadUnits, valueOf, type Squad } from "./captain";
+import { baseThreatened, centerOf, cmd, runCaptains, dist, driveSquad, ensureFormation, gatePost, myFormation, pickFormation, retreat, squadOdds, squadUnits, valueOf, type Squad } from "./captain";
 import { runScout, runSentries } from "./spymaster";
 import { defenseAnchor, runHomeGuard } from "./warden";
 import { ask, strikeRead, veto } from "./reports";
@@ -32,6 +32,7 @@ export function runMarshal(ctx: Ctx): void {
   runSentries(ctx);
   runPowers(ctx);
   runAbility(ctx); // 27 §E commander ability
+  runCaptains(ctx); // 34 §W.1 the manual: artillery discipline, kiting, focus fire
 }
 
 /** §K v2 finishing blow: a hostile player's LAST yard, badly damaged, close to this squad. Losing it

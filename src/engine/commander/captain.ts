@@ -6,6 +6,8 @@ import { COMMANDER, UNIT_STATS } from "../../config/constants";
 import type { Building, FormationId, GameState, PlayerId, Unit, Vec2 } from "../../core/types";
 import { baseCenter, fightOdds, squadCenter } from "./assess";
 import { aiLog, type Ctx } from "./commander";
+import { blindRing, canKite, focusScore } from "./manual";
+import { nearestPassableTile } from "../pathfinding";
 
 export const cmd = (ctx: Ctx, type: string, payload: Record<string, unknown>): void =>
   ctx.submit({ type, playerId: ctx.pid, seq: 0, payload } as never);
@@ -133,6 +135,8 @@ export function retreat(ctx: Ctx, s: Squad, odds: number, value: number, why: st
   if (!to) return;
   const f = myFormation(state, pid, s);
   if (f && odds < COMMANDER.ROUT_ODDS) cmd(ctx, "BREAK_FORMATION", { formationInstanceId: f.id });
+  // 34 §W.1 measured (craft runs, 2026-11): a FALL_BACK withdrawal kept 0–38% of the squad where running
+  // kept 57–85%, against slower and equally fast pursuers alike — so a retreat runs.
   cmd(ctx, "MOVE", { unitIds: s.unitIds, x: to.x, y: to.y, spread: false });
   s.mission = "retreat";
   s.objective = to;
@@ -140,4 +144,63 @@ export function retreat(ctx: Ctx, s: Squad, odds: number, value: number, why: st
   s.valueAtRetreat = value;
   s.lastOrderTick = state.tick;
   aiLog(cs, state.tick, "T", `${s.role} FALL BACK — ${why} (odds ${odds.toFixed(2)}${odds < COMMANDER.ROUT_ODDS ? ", rout" : ""})`);
+}
+
+// ── 34 §W.1 the manual, applied by every captain each tactical tick ─────────────────────────────
+/** Artillery discipline (never inside its blind ring), kiting (only where the manual says a unit can),
+ *  and focus fire for loose units (formations already fire by 19 §H smart targeting). */
+export function runCaptains(ctx: Ctx): void {
+  const { state, pid, cs } = ctx;
+  if (cs.manualOff) return;
+  const foes: Unit[] = [];
+  for (const e of state.entities) {
+    if (e.kind !== "unit" || e.hp <= 0 || e.owner === pid || e.owner === "neutral") continue;
+    const u = e as Unit;
+    if (u.unitType !== "worker" && u.combatType !== undefined) foes.push(u);
+  }
+  if (foes.length === 0) return;
+  const focusNow = Math.floor(state.tick / COMMANDER.CADENCE.TACTICAL) % 2 === 0; // focus orders every other tick
+  for (const s of cs.squads) {
+    if (s.role === "scout" || s.role === "sentry") continue; // they run from fights (Spymaster)
+    if (s.mission === "retreat" || s.mission === "flee") continue; // running: a focus order would stop them
+    const byTarget = new Map<number, number[]>();
+    const kiters: { u: Unit; to: Vec2 }[] = [];
+    for (const u of squadUnits(state, s)) {
+      const st = UNIT_STATS[u.unitType];
+      if (u.unitType === "worker" || st.damage <= 0) continue;
+      let near: Unit | null = null, nd = Infinity;
+      for (const f of foes) { const d = dist(u, f); if (d < nd) { nd = d; near = f; } }
+      if (!near || nd > COMMANDER.MANUAL.ENGAGE_SCAN) continue;
+      const blind = blindRing(u.unitType);
+      if (blind > 0 && nd <= blind + COMMANDER.MANUAL.BLIND_MARGIN) { kiters.push({ u, to: stepAway(state, u, near, COMMANDER.MANUAL.ARTY_STEP) }); continue; }
+      if (u.formationId != null) continue;
+      if (canKite(u.unitType, near.unitType) && nd <= UNIT_STATS[near.unitType].range + COMMANDER.MANUAL.KITE_MARGIN) {
+        kiters.push({ u, to: stepAway(state, u, near, COMMANDER.MANUAL.KITE_STEP) });
+        continue;
+      }
+      if (!focusNow) continue;
+      const r = st.range + 0.5;
+      let best: Unit | null = null, bs = -Infinity;
+      for (const f of foes) {
+        if (dist(u, f) > r) continue;
+        const sc = focusScore(u.unitType, f.unitType, f.hp / f.maxHp);
+        if (sc > bs || (sc === bs && best && f.id < best.id)) { bs = sc; best = f; }
+      }
+      if (best && u.forcedTargetId !== best.id) {
+        const l = byTarget.get(best.id) ?? [];
+        l.push(u.id);
+        byTarget.set(best.id, l);
+      }
+    }
+    for (const k of kiters) cmd(ctx, "MOVE", { unitIds: [k.u.id], x: k.to.x, y: k.to.y, spread: false });
+    for (const [targetId, unitIds] of [...byTarget.entries()].sort((a, b) => a[0] - b[0])) {
+      cmd(ctx, "ATTACK_TARGET", { unitIds, targetId, keepHarvest: false });
+    }
+  }
+}
+
+/** A passable point `step` tiles straight away from `from`. */
+function stepAway(state: GameState, u: Unit, from: Vec2, step: number): Vec2 {
+  const d = dist(u, from) || 1;
+  return nearestPassableTile(state, u.x + ((u.x - from.x) / d) * step, u.y + ((u.y - from.y) / d) * step);
 }

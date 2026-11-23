@@ -428,6 +428,7 @@ export interface CommanderState {
   saveKey?: string; // 33 §D: which request that is (F5 overlay, logs)
   beliefs?: AIBeliefs; // 33 §B: what this AI believes about its enemies and the map
   council?: CouncilState; // 34: reports, rulings
+  manualOff?: boolean; // dev harness only: switch the captains' manual off (craft.* ablation)
   allInWhy?: "crippled" | "away" | "cap" | "plan"; // 34 §E.2: which window opened the ALL_IN (sets the launch odds)
   projects?: AIExpansion[]; // 33 §C.4: running expansion projects
   hits?: { x: number; y: number; w: number; tick: number }[]; // 33 §E.4: where my territory was attacked (decaying weight)
