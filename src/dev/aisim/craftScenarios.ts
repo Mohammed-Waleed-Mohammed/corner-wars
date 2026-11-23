@@ -59,7 +59,7 @@ export const CRAFT_SCENARIOS: Scenario[] = [
     id: "craft.artillery", title: "Artillery steps out of its blind ring instead of standing there useless",
     make: () => arena(41),
     run: () => {
-      const setup = (on: boolean): Bout => bout(41, on, [["artillery", 3], ["tank", 3]], [["rifleman", 20]], 14, 35, blindWatch);
+      const setup = (on: boolean): Bout => bout(41, on, [["artillery", 3], ["rocket", 2]], [["rifleman", 24]], 12, 35, blindWatch);
       const on = setup(true), off = setup(false);
       const arts = (b: Bout): number => alive(b.mine).filter((u) => u.unitType === "artillery").length;
       const frac = (b: Bout): number => b.exposed / Math.max(1, b.samples);
