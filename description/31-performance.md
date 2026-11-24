@@ -21,6 +21,10 @@ Sim tick in Node, 400 units fighting: 4.6 → 1.6–1.8 ms on average. The worst
 
 1. **Nav grid.** Passability is read from a grid: terrain plus live building footprints, with gates stored with their owner. It is rebuilt once per tick, and again if the entity count changes mid-tick. `navPassable`, `occupiedByBuilding` and `enemyGateAt` are O(1). Never scan `state.entities` to answer "can a unit stand here?" (`engine/pathfinding.ts`).
 2. **A\* reuses its buffers.** No per-search allocation; nodes are stamped per search instead of clearing arrays. Terrain cost per movement class is precomputed per map and biome.
+   - **Regions (36).** A search whose goal lies in another connected region (behind a wall, for that owner's gates) returns no route at once. Without this it floods everything it can reach before failing, up to the 16,000-node cap, for every unit that tries.
+   - Regions are 4-connected flood labels per gate owner. That is exactly A\*'s reach, since it never cuts a corner.
+   - Labels are rebuilt only when the grid's contents change. The grid is compared byte for byte, lazily, once per rasterisation.
+   - Measured on a 4-AI FFA with 345 wall tiles: computePath fell from 34% to 2% of the run, and a late game minute from 10–13 s to 3.5 s, level with the wall-less game before 36.
 3. **A\* budget: 24,000 node expansions per tick** (`NAV.expansionsPerTick`) across all unit movers.
    - A unit that needs a new route after the budget is spent keeps walking its current route if that route is still walkable; otherwise it waits a tick.
    - A mass order therefore spreads over a few ticks instead of freezing one frame.

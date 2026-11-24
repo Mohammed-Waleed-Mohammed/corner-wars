@@ -404,11 +404,36 @@ export interface AIBasePlan {
   gateCenters: Vec2[]; // one per gate; [0] = the MAIN gate (toward the nearest enemy)
   walls: Vec2[]; // wall tiles, nearest-the-main-gate first (the front closes first)
   openings: Vec2[]; // ring tiles that can't take a wall (forest, shallows, bridge, gold) — towers cover them
-  plannedDefenses: { type: BuildingType; x: number; y: number; core: boolean }[]; // core = every personality builds it
+  plannedDefenses: { type: BuildingType; x: number; y: number; core: boolean; gate?: boolean }[]; // core = every personality builds it; gate = 36 §C a gate's second tower, once ring 1 is commissioned
   dist: Int16Array | null; // walking distance from the yard (inside test for placement)
   reserved: number[]; // tile indices kept free of buildings: the lanes from each gate to the yard
   plannedTick: number;
   frozen: boolean; // ring + gates locked once the first wall or gate is placed
+  layers?: ArchLayer[]; // 36 §C the outer rings (layer 2, layer 3), planned when commissioned
+  distMax?: number; // how far `dist` was computed (outer rings need more)
+}
+
+/** 36 §C an outer wall ring of the base plan. */
+export interface ArchLayer {
+  radius: number;
+  perimeter: Vec2[];
+  gates: Vec2[];
+  gateCenters: Vec2[];
+  walls: Vec2[];
+  openings: Vec2[];
+  towers: { type: BuildingType; x: number; y: number }[];
+}
+
+/** 36 the Architect's own state (cs.arch). */
+export interface ArchState {
+  fort: number; // 0–3, never falls
+  why: string;
+  since: number; // tick of the last rise
+  ringSince?: number[]; // tick each ring was commissioned (ring 1 at index 0)
+  corridor?: Vec2[]; // §D outpost spots, main gate → Citadel (computed once)
+  noLayer?: number[]; // layers tried and found impossible
+  noSpotLog?: Partial<Record<string, number>>;
+  pending?: { tick: number; rects: { x: number; y: number; w: number; h: number; type: BuildingType }[] };
 }
 
 export interface AILogEntry { tick: number; layer: "S" | "O" | "T"; msg: string; }
@@ -456,10 +481,11 @@ export interface CommanderState {
   lastEmergencyTick?: number; // 33 §E.4: last emergency tower
   evac?: Partial<Record<number, number>>; // 33 §C.6: gold source id → tick its crew may return
   incomeHist?: { tick: number; mined: number }[]; // 33 §C: my own goldMined samples (measured income)
+  arch?: ArchState; // 36 the Architect
 }
 
 // ── 34 the Council ────────────────────────────────────────────────────────────
-export type Seat = "king" | "spymaster" | "treasurer" | "warden" | "quartermaster" | "scholar" | "marshal";
+export type Seat = "king" | "spymaster" | "treasurer" | "warden" | "architect" | "quartermaster" | "scholar" | "marshal";
 export interface SpyReport {
   tick: number;
   enemies: Partial<Record<number, {
@@ -470,11 +496,16 @@ export interface SpyReport {
 }
 export interface TreasuryReport { tick: number; income: number; in60: number; runwayS: number; gold: number }
 export interface WardenReport { tick: number; home: { units: number; towers: number; total: number }; danger: number; desiredArmy: number }
+export interface ArchitectReport {
+  tick: number; fort: number; why: string;
+  layers: { r: number; walls: number; built: number; gates: number }[];
+  outposts: number; blockedDoors: number;
+}
 export interface QMReport { tick: number; value: number; desired: number; shortfall: number; spendGps: number }
 export interface ScholarReport { tick: number; next: { key: ResearchKey; why: string } | null }
 export interface FieldReport { tick: number; at: Vec2 | null; mission: string; value: number; etaHomeS: number; committed: boolean }
 export interface Reports {
-  spymaster: SpyReport; treasurer: TreasuryReport; warden: WardenReport;
+  spymaster: SpyReport; treasurer: TreasuryReport; warden: WardenReport; architect: ArchitectReport;
   quartermaster: QMReport; scholar: ScholarReport; marshal: FieldReport;
 }
 export interface Ruling { tick: number; seat: Seat; key: string; verdict: "fund" | "deny" | "save"; why: string }

@@ -18,7 +18,7 @@ A structure that draws gold straight from the Resonance Grid (file 25), with no 
 | Power | −60 (a lot: plan a Power Plant for it) |
 | Income | **+4 gold / s** while finished; **+6** with Deep Resonance |
 | Low power | half rate |
-| Limit | 4 per player |
+| Limit | none (36 §F; was 4 per player). The AI buys a fifth and later only when its mines run dry or gold piles up |
 | Unlock | Lab research **Resonance Tapping** (Economy, tier III) |
 | Category | Economy (build card) |
 
@@ -97,7 +97,7 @@ Opened from the Lab card (**R**, "Research"). Esc, the ✕ or a click on the bac
   - or a Tap's price plus 100, until the next Tap is placed.
 
   Unit training, extra Barracks, other research, Supply Lines and wall/tower spending only use gold above that amount. The saved-for research skips the usual budget fraction. In the DEFEND, RECOVER and ALL_IN stances it spends everything. The reserve is set at the start of each operational pass, before anything else spends.
-- **Taps:** it builds Taps up to the limit. If its spare power can't cover another Tap (Taps still under construction count), it builds a Power Plant first.
+- **Taps:** it builds Taps up to `TAP_SOFT` (4), then more only when its mines run dry or gold floats (36 §F). If its spare power can't cover another Tap (Taps still under construction count), it builds a Power Plant first.
 - **Reinforced Structures:** Turtles take it early, everyone else once their economy is strong. Vehicles research waits for a War Factory.
 
 ## E. Acceptance

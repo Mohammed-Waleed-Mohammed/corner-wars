@@ -16,7 +16,7 @@ Contents: 1) Walls & gates · 2) Lab & upgrades/unlocks · 3) Defense buildings 
 - Placed within build radius, built by Workers (file 15-logic, system 3). Each has its own HP and can be attacked and destroyed like any building (normal damage, no counter multipliers).
 - **Walls** become impassable tiles while alive and free up when destroyed. Enemies must destroy them or route around; the AI pathfinder targets a blocking enemy wall when no path exists.
 - **Gates** auto-open when a **friendly** unit is within 1.5 tiles, auto-close ~1 s after it passes. (In future team mode, "friendly" includes allies; in the FFA this is your own units.) Enemies cannot pass a closed gate — they must destroy it.
-- **Performance cap:** 60 wall/gate segments per player.
+- **Performance cap:** none since `36-architect.md` §F (it was 60 wall/gate segments per player).
 
 Balance intent: walls *delay*, never *deny*. A 250-HP wall costs a Tank ~14 s to break — it funnels attackers into your defenses rather than hard-stopping them.
 

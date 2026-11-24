@@ -227,7 +227,7 @@ export const BUILDING_STATS: Record<BuildingType, BuildingStat> = {
   barracks: { hp: 700, gold: 200, buildTime: 20, power: -20, width: 2, height: 2, sight: 7, letter: "B" },
   warFactory: { hp: 800, gold: 350, buildTime: 28, power: -40, width: 3, height: 2, sight: 7, requires: "barracks", letter: "W" },
   lab: { hp: 700, gold: 500, buildTime: 30, power: -30, width: 2, height: 2, sight: 7, requires: "barracks", letter: "L" },
-  // 32 §A late-game gold: no mine, no workers — expensive, power-hungry, max 4.
+  // 32 §A late-game gold: no mine, no workers — expensive, power-hungry (no limit since 36 §F).
   resonanceTap: { hp: 650, gold: 1500, buildTime: 45, power: -60, width: 2, height: 2, sight: 7, unlock: "resonanceTapping", letter: "RT" },
   // Defenses (15-logic §3). turret = "Gun Turret" (general-purpose). All 1×1.
   turret: { hp: 600, gold: 200, buildTime: 15, power: -20, width: 1, height: 1, sight: 8, letter: "T" },
@@ -256,9 +256,8 @@ export const DEFENSE_STATS: Partial<Record<BuildingType, DefenseStat>> = {
   missileTower: { damage: 30, cooldown: 2.0, range: 9, weapon: "rocket", splashRadius: 1.5 },
 };
 
-// Gates (15-logic §1) + the per-player wall/gate performance cap.
+// Gates (15-logic §1). 36 §F: no per-player wall/gate cap any more.
 export const GATE = { openRadius: 1.5, closeDelay: 1.0 } as const; // friendly within 1.5 opens; closes 1s after
-export const STRUCTURE_CAP = { wallsPerPlayer: 60 } as const;
 
 // What each production building can build (06-buildings.md, 15-logic §4). ORDER = the fixed
 // Q/W/E/R hotkey slots (16 §1): Barracks Q/W/E = Rifleman/Grenadier/Rocket; War Factory
@@ -283,12 +282,9 @@ export const CONSTRUCTS: Partial<Record<BuildingType, BuildingType[]>> = {
 
 
 
-// Build-once limits per player (16 §5). Absent = unlimited (walls/gates use STRUCTURE_CAP).
-export const BUILD_MAX_COUNT: Partial<Record<BuildingType, number>> = {
-  constructionYard: 2,
-  lab: 1,
-  resonanceTap: 4, // 32 §A
-};
+// Build-count limits per player (16 §5). 36 §F: none — every building, wall and gate is unlimited.
+// The dial stays: a type listed here (e.g. `lab: 1`) is capped again.
+export const BUILD_MAX_COUNT: Partial<Record<BuildingType, number>> = {};
 
 // 32 §A the Resonance Tap's income: gold per second while finished; halved under low power; ×1.5 with
 // Deep Resonance. 4 Taps at 6 g/s = 24 g/s, about the take of 12 mining workers, with no mine at all.
@@ -485,6 +481,12 @@ export const POWER_INFO: Record<string, { label: string; icon: string; tooltip: 
 
 // ── Build placement & fog (§7, §11) ─────────────────────────────────────────
 export const BUILD_RADIUS = 6; // tiles — a new building must be within this of a friendly one
+// 36 §B city layout, shared by every AI (engine/layout.ts): streets, door aprons, the local flow check.
+export const LAYOUT = {
+  STREET: 1, // tiles kept clear round every building but walls and gates
+  APRON: 2, // rows under a unit producer kept clear (its door)
+  FLOW_PAD: 5, // the flow check floods the footprint plus this many tiles
+} as const;
 export const FOG_UPDATE_INTERVAL = 0.2; // s between fog recomputations (human only)
 
 // ── Terrain generation & navigation (§3, §12) ───────────────────────────────
@@ -786,6 +788,7 @@ export const COMMANDER = {
   // §G v4 base planning: a terrain-aware ring wall (engine/commander/basePlan.ts)
   WALL_R_MIN: 9, // smallest ring, in walking tiles from the yard
   WALL_R_MAX: 18, // largest ring considered
+  RING_WALLS_SOFT: 60, // 36 §F: a cost weight, not a limit: rings longer than this score worse
   BASE_AREA_MIN: 150, // buildable tiles the base needs inside its ring
   HOME_MINE_DIST: 12, // gold within this walk of the yard is the home mine — kept inside (+3 tiles)
   OPENING_COST: 6, // ring score per tile that can't take a wall (forest, shallows, bridge, gold)
@@ -904,6 +907,7 @@ export const COMMANDER = {
     RICH_MINE_LEAD: 1.0, // a contested (central) mine needs my army ≥ this × the nearest enemy's est
     TAP_START_S: 300, // Resonance Tapping from 5 min…
     TAP_MINES_LEFT_S: 300, // …or earlier when projected mine gold ÷ income < this
+    TAP_SOFT: 4, // 36 §F: Taps are unlimited; past this many, another only when the mines run dry or gold floats
     FLOAT_LIMIT: 1500, // gold above this with nothing to save for → more producers
     INCOME_WINDOW_TICKS: 1800, // my measured income: goldMined over the last 60 s
     MIL_SHARE: 0.6, // share of income an army is assumed to get (spend capacity, enemy growth)
@@ -1113,6 +1117,43 @@ export const COMMANDER = {
     ATTACK_MIN_VALUE: 400, // an incoming army worth this counts as an attack (aggression, routes)
     ATTACK_GAP_TICKS: 1800, // sightings closer than this are the same attack
  // the same veto is written to the AI log at most this often
+  },
+  // 36 the Architect (engine/commander/architect.ts)
+  ARCH: {
+    NO_WALL_S: 90, // no wall before this unless in danger
+    L1_S: 240, // layer 1 by this time at the latest (Turtle / Rusher below)
+    L1_TURTLE_S: 120,
+    L1_RUSHER_S: 360,
+    SIGHT_RANGE: 20, // an enemy army seen this far outside my wall, this recently, raises layer 1
+    SIGHT_S: 20,
+    L2_TURTLE_S: 420, // Turtle / fortress strategy: layer 2 from here
+    L2_S: 600, // others: from here, when hit, outmatched or floating gold
+    L2_HIT_W: 1.5,
+    L2_STRONGER: 1.15,
+    L3_S: 1080,
+    LAYER_DONE: 0.8, // a layer counts as built at this share of its walls and gates
+    GAP_MIN: 4, // an outer ring lies this many walking tiles beyond the previous one…
+    GAP_MAX: 9, // …at most this many
+    POCKET_MAX: 6, // free tiles an outer ring may leave cut off between the rings
+    EXTRA_GATES: 3, // gates an outer ring may add for ground between the rings no route gate reaches
+    WALL_BATCH: 6, // wall tiles asked for per layer per session
+    WALL_SITE_SHARE: 4, // wall / gate sites per construction slot
+    WALL_CREW_PER: 6, // at most one wall builder per this many workers (at least 2)
+    WALL_PRIO: [58, 50, 46], // layer 1, 2, 3 …
+    WALL_PRIO_D: [20, 15, 10], // … + this × danger
+    FORT_BONUS: 10, // the Turtle and the fortress strategy
+    WALL_RAMP_PER_MIN: 6, // a commissioned ring still unfinished gains this much priority per minute…
+    WALL_RAMP_MAX: 30, // …up to this, so a war's unit spending can't starve it for good
+    // …but never to SAVE_LEAK (85): a wall may be saved for, never spend into what is saved for another
+    // request (a Tap). Measured: capped at 72 instead, ring 1 of the Boomer and the Turtle stalled at 0%
+    // in 2 of 9 sweeps and the Turtle lost 2 of 3 to the Techer
+    WALL_PRIO_MAX: 83,
+    OUTER_TOWER_PRIO: 42,
+    OUTPOSTS_MAX: 4,
+    OUTPOST_PRIO: 44,
+    OUTPOST_STRAT_S: 600, // attrition / strangulation / fortress: corridor outposts from here
+    CANDIDATES: 40, // best-scored sites given the (costlier) flow check
+    NO_SPOT_LOG_TICKS: 900,
   },
   // §B personalities — parameter sets, not code (firstPush = Infinity: never initiates).
   PERSONALITIES: {

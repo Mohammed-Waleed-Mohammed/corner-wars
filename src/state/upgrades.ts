@@ -72,7 +72,11 @@ export function canEnqueueResearch(state: GameState, lab: Building, key: Researc
   const p = state.players[lab.owner];
   if (isResearched(p, key)) return false;
   const q = lab.researchQueue ?? [];
-  if (q.includes(key) || q.length >= RESEARCH_QUEUE_MAX) return false;
+  if (q.length >= RESEARCH_QUEUE_MAX) return false;
+  // 36 §F: Labs are unlimited, so a key queued in ANY of my Labs is taken (no paying twice).
+  for (const e of state.entities) {
+    if (e.kind === "building" && e.owner === lab.owner && e.buildingType === "lab" && e.researchQueue?.includes(key)) return false;
+  }
   const def = RESEARCH[key];
   if (def.requires && !isResearched(p, def.requires) && !q.includes(def.requires)) return false;
   if (!hasResearchBuilding(state, lab.owner, key)) return false;

@@ -16,11 +16,13 @@ import { PUPPET_SCENARIOS } from "./puppetScenarios";
 import { OPS_SCENARIOS } from "./opsScenarios";
 import { CAMP_SCENARIOS } from "./campScenarios";
 import { CAMP_INTEL_SCENARIOS } from "./campIntelScenarios";
+import { ARCH_SCENARIOS } from "./archScenarios";
+import { archMap } from "./archProbe";
 import { expMining } from "./exp";
 import { spectateCheck } from "./spectateCheck";
 
 // 33 §T + 34 §T — every scenario list the suite runs
-const SCENARIOS = [...BASE_SCENARIOS, ...COUNCIL_SCENARIOS, ...CRAFT_SCENARIOS, ...PUPPET_SCENARIOS, ...OPS_SCENARIOS, ...CAMP_SCENARIOS, ...CAMP_INTEL_SCENARIOS];
+const SCENARIOS = [...BASE_SCENARIOS, ...COUNCIL_SCENARIOS, ...CRAFT_SCENARIOS, ...PUPPET_SCENARIOS, ...OPS_SCENARIOS, ...CAMP_SCENARIOS, ...CAMP_INTEL_SCENARIOS, ...ARCH_SCENARIOS];
 const GROUPS = [...BASE_GROUPS, ...COUNCIL_GROUPS];
 
 
@@ -89,6 +91,8 @@ if (mode === "exp") {
     out(`\n=== ${map} seed ${seed} [${pers.join(",")}] (${((Date.now() - t0) / 1000).toFixed(0)} s wall)`);
     report(m);
   }
+} else if (mode === "archmap") {
+  for (const l of archMap((args[1] ?? "turtle,techer").split(",") as AIPersonality[], Number(args[2] ?? 2), Number(args[3] ?? 1) as PlayerId, Number(args[4] ?? 0))) out(l);
 } else if (mode === "spectate") {
   const r = spectateCheck(Number(args[1] ?? 10));
   for (const l of r.lines) out(l);

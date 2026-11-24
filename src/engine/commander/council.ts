@@ -16,10 +16,11 @@ import { briefMarshal, briefQuartermaster, briefScholar, briefSpymaster, briefTr
 import { minesRunwayS } from "./treasurer";
 import { updateProfiles } from "./profile";
 import { towerValue } from "./warden";
+import { architectRequests, briefArchitect } from "./architect";
 import type { Seat } from "../../core/types";
 
 export { counterMix } from "./quartermaster";
-export { findSpot } from "./place";
+export { siteFor } from "./architect";
 
 export function runSession(ctx: Ctx): void {
   const { state, cs, pid } = ctx;
@@ -27,7 +28,7 @@ export function runSession(ctx: Ctx): void {
   if (!cy) return;
   cs.intents = [];
 
-  // 34 §B Brief, in seat order: Spymaster → Treasurer → Warden → Quartermaster → (Scholar) → Marshal
+  // 34 §B Brief, in seat order: Spymaster → Treasurer → Warden → Architect (36) → Quartermaster → (Scholar) → Marshal
   openSession(ctx);
   updateBeliefs(ctx);
   updateProfiles(ctx); // 34 §W.3 how each enemy behaves
@@ -35,12 +36,13 @@ export function runSession(ctx: Ctx): void {
   briefTreasurer(ctx, minesRunwayS(ctx));
   assessDanger(ctx);
   briefWarden(ctx, towerValue(ctx));
+  planBase(ctx, cy);
+  briefArchitect(ctx); // 36: fortification level, outer rings
   briefQuartermaster(ctx);
   // worker orders FIRST so their HARVEST takes the lowest seq this tick; build assignments win after
   manageWorkers(ctx);
   crewSites(ctx);
   assignSquads(ctx);
-  planBase(ctx, cy);
 
   const D = cs.danger ?? 0;
   const budget = new Budget();
@@ -50,6 +52,7 @@ export function runSession(ctx: Ctx): void {
   economyRequests(ctx, budget, D); tag("treasurer", n); n = budget.reqs.length;
   militaryRequests(ctx, budget, D); tag("quartermaster", n); n = budget.reqs.length;
   defenseRequests(ctx, budget, D); tag("warden", n); n = budget.reqs.length;
+  architectRequests(ctx, budget, D); tag("architect", n); n = budget.reqs.length;
   techRequests(ctx, budget, D); tag("scholar", n);
   const research = budget.reqs.filter((r) => r.key.startsWith("research:")).sort((a, b) => b.prio - a.prio || (a.key < b.key ? -1 : 1))[0];
   briefScholar(ctx, research ? { key: research.key.slice(9) as never, why: research.reason ?? `prio ${research.prio.toFixed(0)}` } : null);

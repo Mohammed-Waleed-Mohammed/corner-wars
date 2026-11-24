@@ -62,14 +62,6 @@ function ownedBuilding(state: GameState, pid: PlayerId, id: number): Building | 
   return null;
 }
 
-function wallCount(state: GameState, pid: PlayerId): number {
-  let n = 0;
-  for (const e of state.entities) {
-    if (e.kind === "building" && e.owner === pid && (e.buildingType === "wall" || e.buildingType === "gate")) n++;
-  }
-  return n;
-}
-
 /** Clear the shared "new order" fields on a unit (drops stale path + auto-jobs + the guard and
  *  hold-ground orders). Hold fire is a stance, not an order: only ATTACK_MOVE / ATTACK_TARGET and
  *  HOLD_FIRE off lift it (34 §W.6). */
@@ -344,7 +336,7 @@ function placeBuilding(state: GameState, pid: PlayerId, type: BuildingType, x: n
 
 function placeWallLine(state: GameState, pid: PlayerId, fromX: number, fromY: number, toX: number, toY: number): void {
   const tiles = wallLineTiles(fromX, fromY, toX, toY);
-  const segs = planWallLine(state, pid, tiles, state.players[pid].gold, wallCount(state, pid));
+  const segs = planWallLine(state, pid, tiles, state.players[pid].gold);
   const cost = BUILDING_STATS.wall.gold;
   let first: Building | null = null;
   for (const seg of segs) {

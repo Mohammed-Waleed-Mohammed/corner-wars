@@ -3,6 +3,8 @@
 // chosen where that ring is SHORTEST — a few tiles across a choke between cliffs and water, a short
 // line on open ground — so the wall really closes the base instead of drawing straight lines in a field.
 //
+//   0. (36 §C) Only ring tiles facing the open map are walled: a corner the ring would close off against
+//      cliffs or the map edge is a dead end, so it joins the base rather than becoming a sealed pocket.
 //   1. Walking distance (4-connected BFS over walkable terrain) from the yard's footprint. Any path from
 //      inside (d < r) to outside (d > r) must step on a tile at d = r, and with no diagonal corner
 //      cutting a diagonal step can't slip past two ring tiles either — so walling the ring seals the base.
@@ -18,9 +20,10 @@
 //   5. Lanes: the walk from each gate to the yard (3 wide) is reserved; buildings go inside the ring,
 //      one tile clear of it, and never on a lane — the AI can't wall in its own army.
 // The ring and gates freeze once the first wall or gate is placed, so later re-plans never move them.
+// 36 §C: the Architect adds outer rings (planOuterLayer) beyond a frozen first one, as the match calls for them.
 
-import { COMMANDER, STRUCTURE_CAP, TERRAIN } from "../../config/constants";
-import type { AIBasePlan, Building, BuildingType, GameState, Vec2 } from "../../core/types";
+import { COMMANDER, TERRAIN } from "../../config/constants";
+import type { AIBasePlan, ArchLayer, Building, BuildingType, GameState, Vec2 } from "../../core/types";
 import { isBuildable } from "../../state/terrain";
 import { baseCenter, buildingsOf, composition, frontDistance, livingEnemies } from "./assess";
 import type { Ctx } from "./commander";
@@ -54,6 +57,11 @@ function bfs(state: GameState, seeds: number[], max: number): Int16Array {
     }
   }
   return d;
+}
+
+/** 36 §D walking distance from the tile nearest `at` over the whole map (terrain only). */
+export function walkFrom(state: GameState, at: Vec2): Int16Array {
+  return bfs(state, [nearestWalkable(state, at.x, at.y)], Infinity);
 }
 
 function nearestWalkable(state: GameState, x: number, y: number): number {
@@ -90,11 +98,42 @@ function ringAt(state: GameState, d: Int16Array, r: number): number[] {
   return out;
 }
 
+/** 36 §C the ring tiles that face the open map: those with a 4-neighbour beyond the ring that the far
+ *  side of the map reaches without crossing the ring. A ring tile that only faces a dead end (a corner
+ *  closed off by cliffs, water or the map edge) needs no wall — the corner becomes part of the base
+ *  instead of a pocket sealed outside it. The open map is what the Citadel and the enemy bases reach
+ *  (a far corner can be beyond the BFS limit and still a dead end); only if none of them is outside the
+ *  ring, every tile the BFS never reached seeds it. */
+function exitRing(ctx: Ctx, d: Int16Array, ring: number[], r: number): number[] {
+  const { state, pid } = ctx;
+  const W = state.mapWidth, H = state.mapHeight;
+  const out = new Uint8Array(W * H);
+  const q: number[] = [];
+  const open = (i: number): boolean => (d[i] < 0 || d[i] > r) && walkableTile(state, i);
+  const seeds: Vec2[] = [{ x: state.citadel.x, y: state.citadel.y }];
+  for (const e of livingEnemies(state, pid)) { const c = baseCenter(state, e); if (c) seeds.push(c); }
+  for (const s of seeds) { const c = nearestWalkable(state, s.x, s.y); if (!out[c] && open(c)) { out[c] = 1; q.push(c); } }
+  if (q.length === 0) for (let i = 0; i < d.length; i++) if (d[i] < 0 && open(i)) { out[i] = 1; q.push(i); }
+  for (let k = 0; k < q.length; k++) {
+    const i = q[k], x = i % W, y = (i / W) | 0;
+    for (const [dx, dy] of N4) {
+      const nx = x + dx, ny = y + dy;
+      if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+      const ni = ny * W + nx;
+      if (!out[ni] && open(ni)) { out[ni] = 1; q.push(ni); }
+    }
+  }
+  return ring.filter((i) => {
+    const x = i % W, y = (i / W) | 0;
+    return N4.some(([dx, dy]) => { const nx = x + dx, ny = y + dy; return nx >= 0 && ny >= 0 && nx < W && ny < H && out[ny * W + nx] === 1; });
+  });
+}
+
 /** Walk downhill on `d` from tile `from` to the yard (distance 0): the lane a gate's traffic uses. */
-function laneFrom(state: GameState, d: Int16Array, from: number, toward: Vec2): number[] {
+function laneFrom(state: GameState, d: Int16Array, from: number, toward: Vec2, stopAt = 0): number[] {
   const W = state.mapWidth, lane: number[] = [from];
   let cur = from;
-  for (let guard = 0; guard < 64 && d[cur] > 0; guard++) {
+  for (let guard = 0; guard < 64 && d[cur] > stopAt; guard++) {
     const x = cur % W, y = (cur / W) | 0;
     let best = -1, bestKey = Infinity;
     for (const [dx, dy] of N4) {
@@ -163,10 +202,10 @@ export function planBase(ctx: Ctx, cy: Building): void {
   }
 
   // The cheapest closing ring.
-  const cap = STRUCTURE_CAP.wallsPerPlayer - 2 * COMMANDER.GATES_MAX;
+  const cap = COMMANDER.RING_WALLS_SOFT - 2 * COMMANDER.GATES_MAX;
   let best: { r: number; ring: number[]; score: number } | null = null;
   for (let r = Math.min(rIn, R_MAX - 1); r <= R_MAX - 1; r++) {
-    const ring = ringAt(state, d, r);
+    const ring = exitRing(ctx, d, ringAt(state, d, r), r);
     if (ring.length === 0) continue;
     let open = 0;
     for (const i of ring) if (!wallable(state, i % W, (i / W) | 0)) open++;
@@ -176,7 +215,28 @@ export function planBase(ctx: Ctx, cy: Building): void {
   }
   if (!best) { cs.basePlan = emptyPlan(cy, anchor, state.tick); return; }
   const r = best.r;
-  const ringSet = new Set(best.ring);
+  const { gates, gateCenters, walls, openings, lanes } = ringPlan(ctx, d, best.ring, r, anchor, 0, null);
+
+  const plan: AIBasePlan = {
+    yardId: cy.id, anchor, radius: r, perimeter: best.ring.map((i) => ({ x: i % W, y: (i / W) | 0 })),
+    gates, gateCenters, walls, openings, plannedDefenses: [],
+    dist: d, reserved: [...lanes].filter((i) => i >= 0 && i < d.length), plannedTick: state.tick, frozen: false,
+    distMax: R_MAX + 1,
+  };
+  plan.plannedDefenses = defenseSpots(ctx, plan);
+  cs.basePlan = plan;
+}
+
+interface RingPlan { gates: Vec2[]; gateCenters: Vec2[]; walls: Vec2[]; openings: Vec2[]; lanes: Set<number> }
+
+/** Gates where my routes cross `ring` (at walking distance r): toward the nearest enemy (the MAIN gate),
+ *  the Citadel, the other enemies and outlying gold; the lanes from each gate inward to distance `stopAt`;
+ *  every other wallable ring tile a wall (nearest the main gate first), the rest openings. Tiles in `skip`
+ *  (under my own buildings) need neither. */
+function ringPlan(ctx: Ctx, d: Int16Array, ring: number[], r: number, anchor: Vec2, stopAt: number, skip: Set<number> | null): RingPlan {
+  const { state, pid } = ctx;
+  const W = state.mapWidth;
+  const ringSet = new Set(ring);
 
   // Gates where my routes cross the ring: nearest enemy (main), the Citadel, outlying gold.
   const enemies = livingEnemies(state, pid);
@@ -201,7 +261,7 @@ export function planBase(ctx: Ctx, cy: Building): void {
     if (gateCenters.length >= COMMANDER.GATES_MAX) break;
     const dd = bfs(state, [nearestWalkable(state, dst.x, dst.y)], Infinity);
     let g = -1, gk = Infinity;
-    for (const i of best.ring) {
+    for (const i of ring) {
       if (dd[i] < 0) continue;
       const k = d[i] + dd[i];
       if (k < gk) { gk = k; g = i; }
@@ -220,8 +280,8 @@ export function planBase(ctx: Ctx, cy: Building): void {
     for (const t of g2 >= 0 ? [g, g2] : [g]) {
       gateTiles.add(t);
       const tx = t % W, ty = (t / W) | 0;
-      if (wallable(state, tx, ty)) gates.push({ x: tx, y: ty });
-      for (const li of laneFrom(state, d, t, anchor)) {
+      if (wallable(state, tx, ty) && !skip?.has(t)) gates.push({ x: tx, y: ty });
+      for (const li of laneFrom(state, d, t, anchor, stopAt)) {
         const lx = li % W, ly = (li / W) | 0;
         for (const [dx, dy] of [[0, 0], ...N4]) lanes.add((ly + dy) * W + lx + dx); // 3 wide
       }
@@ -231,21 +291,14 @@ export function planBase(ctx: Ctx, cy: Building): void {
   // Walls: every wallable ring tile except the gates, nearest the main gate first (the front closes first).
   const main = gateCenters[0] ?? anchor;
   const walls: Vec2[] = [];
-  for (const i of best.ring) {
+  for (const i of ring) {
     const x = i % W, y = (i / W) | 0;
-    if (gateTiles.has(i)) continue;
+    if (gateTiles.has(i) || skip?.has(i)) continue;
     if (wallable(state, x, y)) walls.push({ x, y });
     else openings.push({ x, y });
   }
   walls.sort((a, b) => Math.hypot(a.x - main.x, a.y - main.y) - Math.hypot(b.x - main.x, b.y - main.y));
-
-  const plan: AIBasePlan = {
-    yardId: cy.id, anchor, radius: r, perimeter: best.ring.map((i) => ({ x: i % W, y: (i / W) | 0 })),
-    gates, gateCenters, walls, openings, plannedDefenses: [],
-    dist: d, reserved: [...lanes].filter((i) => i >= 0 && i < d.length), plannedTick: state.tick, frozen: false,
-  };
-  plan.plannedDefenses = defenseSpots(ctx, plan);
-  cs.basePlan = plan;
+  return { gates, gateCenters, walls, openings, lanes };
 }
 
 function emptyPlan(cy: Building, anchor: Vec2, tick: number): AIBasePlan {
@@ -272,7 +325,146 @@ function reservedSet(plan: AIBasePlan): Set<number> {
 export function onRingOrLane(plan: AIBasePlan, state: GameState, x: number, y: number): boolean {
   if (!plan.dist || plan.radius <= 0 || x < 0 || y < 0 || x >= state.mapWidth || y >= state.mapHeight) return false;
   const i = y * state.mapWidth + x;
-  return plan.dist[i] === plan.radius || reservedSet(plan).has(i);
+  const di = plan.dist[i];
+  return di === plan.radius || reservedSet(plan).has(i) || !!plan.layers?.some((l) => di === l.radius);
+}
+
+/** 36 §B: tiles of every planned ring that will be wall (not gates or openings) — the flow check treats
+ *  them as blocked before they are built. Cached per plan and layer count. */
+const wallCache = new WeakMap<AIBasePlan, { n: number; set: Set<number> }>();
+export function plannedWallSet(plan: AIBasePlan, W: number): Set<number> {
+  const n = plan.layers?.length ?? 0;
+  const c = wallCache.get(plan);
+  if (c && c.n === n) return c.set;
+  const set = new Set<number>();
+  for (const w of plan.walls) set.add(w.y * W + w.x);
+  for (const l of plan.layers ?? []) for (const w of l.walls) set.add(w.y * W + w.x);
+  wallCache.set(plan, { n, set });
+  return set;
+}
+
+/** Make sure `plan.dist` reaches walking distance `need` (outer rings lie beyond the first plan's
+ *  WALL_R_MAX). The BFS is over terrain only, so the values already there do not change. */
+function ensureDist(state: GameState, plan: AIBasePlan, need: number): Int16Array | null {
+  if (plan.dist && (plan.distMax ?? COMMANDER.WALL_R_MAX + 1) >= need) return plan.dist;
+  const cy = state.entities.find((e) => e.id === plan.yardId && e.kind === "building");
+  if (!cy || cy.kind !== "building") return null;
+  const W = state.mapWidth, seeds: number[] = [];
+  for (let y = cy.y; y < cy.y + cy.height; y++) for (let x = cy.x; x < cy.x + cy.width; x++) seeds.push(y * W + x);
+  plan.dist = bfs(state, seeds, need);
+  plan.distMax = need;
+  return plan.dist;
+}
+
+/** 36 §C plan the next outer ring beyond the last one (layer 2 beyond the first, layer 3 beyond that):
+ *  the cheapest ring in [previous + GAP_MIN, previous + GAP_MAX] that, walled, still lets a flood from
+ *  outside reach every gate of the previous ring and cuts off at most POCKET_MAX free tiles between the
+ *  two. Its gates sit on the same routes, its lanes run in to the previous ring, two towers stand behind
+ *  each gate. When no radius qualifies: why the best one failed (a string). Adds the layer to the plan. */
+export function planOuterLayer(ctx: Ctx, plan: AIBasePlan): ArchLayer | string {
+  const { state, pid } = ctx;
+  const A = COMMANDER.ARCH;
+  const layers = (plan.layers ??= []);
+  const prev = layers.length ? layers[layers.length - 1] : null;
+  const prevR = prev ? prev.radius : plan.radius;
+  const prevGates = prev ? prev.gates : plan.gates;
+  if (prevR <= 0 || prevGates.length === 0) return "the previous ring has no gate";
+  const need = prevR + A.GAP_MAX + 2;
+  const d = ensureDist(state, plan, need);
+  if (!d) return "no yard";
+  const W = state.mapWidth, H = state.mapHeight;
+  // blocked for the check: every building but my gates, and every planned wall tile so far
+  const blocked = new Uint8Array(W * H);
+  const mine = new Set<number>();
+  for (const e of state.entities) {
+    if (e.kind !== "building" || e.hp <= 0) continue;
+    const myGate = e.owner === pid && e.buildingType === "gate";
+    for (let ty = Math.max(0, e.y); ty < Math.min(H, e.y + e.height); ty++)
+      for (let tx = Math.max(0, e.x); tx < Math.min(W, e.x + e.width); tx++) {
+        if (!myGate) blocked[ty * W + tx] = 1;
+        if (e.owner === pid) mine.add(ty * W + tx);
+      }
+  }
+  for (const i of plannedWallSet(plan, W)) blocked[i] = 1;
+  const cands: { r: number; ring: number[]; score: number }[] = [];
+  for (let r = prevR + A.GAP_MIN; r <= Math.min(prevR + A.GAP_MAX, need - 2); r++) {
+    const ring = exitRing(ctx, d, ringAt(state, d, r), r);
+    if (ring.length === 0) continue;
+    let open = 0;
+    for (const i of ring) if (!mine.has(i) && !wallable(state, i % W, (i / W) | 0)) open++;
+    cands.push({ r, ring, score: ring.length + COMMANDER.OPENING_COST * open + 0.6 * r });
+  }
+  cands.sort((a, b) => a.score - b.score || a.r - b.r);
+  let fail = cands.length ? "" : "no ring beyond the first";
+  const note = (s: string): void => { if (!fail) fail = s; };
+  for (const c of cands) {
+    const rp = ringPlan(ctx, d, c.ring, c.r, plan.anchor, prevR, mine);
+    if (rp.gateCenters.length === 0) { note(`r=${c.r}: no route crosses it`); continue; }
+    // flood from just outside the new ring, its walls up; terrain can split the ground between the
+    // rings into pieces no route gate reaches — each such piece gets a gate of its own (up to EXTRA_GATES)
+    const wallT = new Set(rp.walls.map((w) => w.y * W + w.x));
+    const free = (i: number): boolean => d[i] >= 0 && d[i] <= c.r + 1 && !blocked[i] && !wallT.has(i) && walkableTile(state, i);
+    let seen = new Uint8Array(0);
+    let cut = 0, pocket = 0;
+    for (let extra = 0; ; extra++) {
+      seen = new Uint8Array(W * H);
+      const q: number[] = [];
+      for (let i = 0; i < d.length; i++) if (d[i] === c.r + 1 && free(i)) { seen[i] = 1; q.push(i); }
+      for (let k = 0; k < q.length; k++) {
+        const i = q[k], tx = i % W, ty = (i / W) | 0;
+        for (const [dx, dy] of N4) {
+          const nx = tx + dx, ny = ty + dy;
+          if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+          const ni = ny * W + nx;
+          if (!seen[ni] && free(ni)) { seen[ni] = 1; q.push(ni); }
+        }
+      }
+      cut = prevGates.filter((g) => !seen[g.y * W + g.x] && !blocked[g.y * W + g.x]).length;
+      const sealed: number[] = [];
+      for (let i = 0; i < d.length; i++) if (d[i] > prevR && d[i] < c.r && free(i) && !seen[i]) sealed.push(i);
+      pocket = sealed.length;
+      if ((cut === 0 && pocket <= A.POCKET_MAX) || extra >= A.EXTRA_GATES) break;
+      // the wall tile of the new ring touching the biggest sealed stretch first: open it as a gate
+      const sealedSet = new Set(sealed);
+      let pick = -1, pickN = 0;
+      for (const w of rp.walls) {
+        const wi = w.y * W + w.x;
+        let n = 0, outside = false;
+        for (const [dx, dy] of N4) {
+          const nx = w.x + dx, ny = w.y + dy;
+          if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+          const ni = ny * W + nx;
+          if (sealedSet.has(ni)) n++;
+          if (seen[ni]) outside = true;
+        }
+        if (outside && n > pickN) { pickN = n; pick = wi; }
+      }
+      if (pick < 0) break;
+      const px = pick % W, py = (pick / W) | 0;
+      wallT.delete(pick);
+      rp.walls = rp.walls.filter((w) => w.x !== px || w.y !== py);
+      rp.gates.push({ x: px, y: py });
+      rp.gateCenters.push({ x: px, y: py });
+    }
+    if (cut > 0) { note(`r=${c.r}: ${cut} inner gate tiles cut off`); continue; }
+    if (pocket > A.POCKET_MAX) { note(`r=${c.r}: ${pocket} tiles sealed between the rings`); continue; }
+    const layer: ArchLayer = {
+      radius: c.r, perimeter: c.ring.map((i) => ({ x: i % W, y: (i / W) | 0 })),
+      gates: rp.gates, gateCenters: rp.gateCenters, walls: rp.walls, openings: rp.openings, towers: [],
+    };
+    layers.push(layer);
+    plan.reserved = [...new Set([...plan.reserved, ...[...rp.lanes].filter((i) => i >= 0 && i < d.length)])];
+    reservedCache.delete(plan);
+    const taken: Vec2[] = [];
+    for (const g of layer.gateCenters) {
+      for (const type of ["turret", "pillbox"] as const) {
+        const at = insideSpot(plan, state, g, c.r - 3, c.r - 2, 5, taken, true);
+        if (at) { layer.towers.push({ type, x: at.x, y: at.y }); taken.push(at); }
+      }
+    }
+    return layer;
+  }
+  return fail;
 }
 
 /** §G v4.6 never wall myself in: would a structure at (x, y, w, h) cut any open ground inside the base
@@ -328,7 +520,7 @@ export function footprintInside(plan: AIBasePlan, state: GameState, x: number, y
 }
 
 /** Inside spot nearest `at` (within `maxR`), at walking distance [lo, hi] from the yard, off the lanes. */
-function insideSpot(plan: AIBasePlan, state: GameState, at: Vec2, lo: number, hi: number, maxR = 4, avoid: Vec2[] = []): Vec2 | null {
+function insideSpot(plan: AIBasePlan, state: GameState, at: Vec2, lo: number, hi: number, maxR = 4, avoid: Vec2[] = [], hill = true): Vec2 | null {
   const W = state.mapWidth;
   let best: Vec2 | null = null, bd = Infinity;
   const ax = Math.round(at.x), ay = Math.round(at.y);
@@ -338,7 +530,7 @@ function insideSpot(plan: AIBasePlan, state: GameState, at: Vec2, lo: number, hi
     const di = plan.dist![y * W + x];
     if (di < lo || di > hi || reservedSet(plan).has(y * W + x) || !isBuildable(state, x, y)) continue;
     if (avoid.some((a) => Math.abs(a.x - x) + Math.abs(a.y - y) < 3)) continue;
-    const dd = Math.hypot(dx, dy);
+    const dd = Math.hypot(dx, dy) - (hill && state.terrain[y][x] === "hill" ? 2 : 0); // 36 §C: high ground, +1 range
     if (dd < bd) { bd = dd; best = { x, y }; }
   }
   return best;
@@ -351,15 +543,17 @@ function defenseSpots(ctx: Ctx, plan: AIBasePlan): AIBasePlan["plannedDefenses"]
   const r = plan.radius;
   const out: AIBasePlan["plannedDefenses"] = [];
   const taken: Vec2[] = [];
-  const add = (type: BuildingType, at: Vec2 | null, core: boolean): void => {
+  const add = (type: BuildingType, at: Vec2 | null, core: boolean, gate = false): void => {
     if (!at) return;
-    out.push({ type, x: at.x, y: at.y, core });
+    out.push(gate ? { type, x: at.x, y: at.y, core, gate } : { type, x: at.x, y: at.y, core });
     taken.push(at);
   };
-  // gates: turret (+ pillbox at the main gate) 2–3 tiles inside, beside the lane
+  // gates, 2–3 tiles inside beside the lane: a turret and a pillbox at each. The main gate's pair is core
+  // (built from the start: the opening's only static defense); the other gates' pillboxes are 36 §C's
+  // second tower, built once ring 1 is commissioned
   plan.gateCenters.forEach((g, k) => {
     add("turret", insideSpot(plan, state, g, r - 3, r - 2, 4, taken), k === 0);
-    if (k === 0) add("pillbox", insideSpot(plan, state, g, r - 3, r - 2, 5, taken), true);
+    add("pillbox", insideSpot(plan, state, g, r - 3, r - 2, 5, taken), k === 0, k > 0);
   });
   // gaps that can't be walled: a pillbox behind each cluster
   const gaps: Vec2[] = [];

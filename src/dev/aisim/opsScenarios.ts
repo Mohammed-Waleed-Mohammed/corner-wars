@@ -89,6 +89,10 @@ function feintBout(ops: boolean): { atHome: number | null; baseDmg: number; lost
   const hp0 = hp();
   // the raiders arrive just before the launch, so the feint is the first raid they see
   const early = watchLog(m, 140, ["operation", "feint", "launch", "raid"]);
+  // the far mine is the feint's bait: an opening raid of mine may have emptied it (a faster opening got
+  // there before their answer and killed the miners), so it is manned again when the feint's raiders come
+  const miners = m.units(P1).filter((u) => u.unitType === "worker" && u.hp > 0 && dist(u, mineAt) <= 8).length;
+  if (miners < 4) m.spawn(P1, "worker", 4 - miners, mineAt, 0.8);
   mine.push(...m.spawn(P0, "scoutBuggy", 5, m.home(P0), 1));
   const v0 = valueOf(mine);
   // when my main army first reaches their base: how much of their army is there to meet it

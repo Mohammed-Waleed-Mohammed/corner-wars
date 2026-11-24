@@ -10,7 +10,8 @@ import { armyValue, buildingsOf, combatUnitsOf, mainYard, unitsOf } from "./asse
 import type { Budget, ReqCat } from "./budget";
 import type { Ctx } from "./commander";
 import { minesRunwayS } from "./treasurer";
-import { cmd, countAll, findSpot } from "./place";
+import { cmd, countAll } from "./place";
+import { siteFor } from "./architect";
 
 const E = COMMANDER.ECON;
 
@@ -23,7 +24,7 @@ export function techRequests(ctx: Ctx, budget: Budget, D: number): void {
   if (countAll(ctx, "lab") === 0 && hasBarracks) {
     budget.add({
       key: "lab", cat: "invest", cost: BUILDING_STATS.lab.gold, prio: 66 - 20 * D, site: true,
-      act: () => { const s = findSpot(ctx, cy, "lab"); if (!s) return false; cmd(ctx, "PLACE_BUILDING", { buildingType: "lab", x: s.x, y: s.y }); return true; },
+      act: () => { const s = siteFor(ctx, cy, "lab"); if (!s) return false; cmd(ctx, "PLACE_BUILDING", { buildingType: "lab", x: s.x, y: s.y }); return true; },
     });
   }
   const lab = buildingsOf(state, pid).find((b) => b.buildingType === "lab" && b.buildProgress >= 1);

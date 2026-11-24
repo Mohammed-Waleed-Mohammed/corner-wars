@@ -75,6 +75,8 @@ Contents: 1) Build facilitation · 2) Bug fixes (fog hover, win condition, AI & 
 
 ## 5. Build-once limits
 
+> **Removed by `36-architect.md` §F.** Every building, wall and gate is now unlimited; `BUILD_MAX_COUNT` is empty but stays a dial, and the "Maximum built" tooltip appears only for a type listed there again. The table below is the original design.
+
 Not every building can be built repeatedly. Each building type has a **max count per player**:
 
 | Building | Max per player | Rationale |
@@ -177,6 +179,6 @@ Suggested milestones, fixes first:
 ## Balancing notes
 
 - **Repair** (5 gold/s/Worker, ×2 cap at 4 Workers) is meant to beat rebuilding on cost and time but still drain gold, so holding a contested defense is a genuine economic decision. If repair feels too strong, raise gold-per-HP; if useless, lower it.
-- **Build-once limits** are pure dials in config — adjust Construction Yard (2) and Lab (1) freely if expansion play needs tuning.
+- **Build-once limits** are pure dials in config. Since 36 §F none are set.
 - **Drag-walls** can let players spend a lot of gold in one motion; the "commit only what you can afford" rule prevents negative gold, and the 60-segment cap (file 15) prevents perf abuse.
 - Confirm the **Citadel win removal (2b)** before building Milestone I — it's the one change that alters core game flow.

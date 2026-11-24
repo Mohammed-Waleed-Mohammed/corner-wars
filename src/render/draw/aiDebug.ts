@@ -22,13 +22,14 @@ export function drawAIOverlay(ctx: CanvasRenderingContext2D, state: GameState, c
       ctx.strokeStyle = col;
       ctx.setLineDash([3, 3]);
       ctx.lineWidth = 1;
-      for (const w of cs.basePlan.walls) {
+      const rings = [cs.basePlan, ...(cs.basePlan.layers ?? [])]; // 36 §C outer rings too
+      for (const ring of rings) for (const w of ring.walls) {
         const s = camera.tileToScreen(w.x, w.y);
         ctx.strokeRect(s.x, s.y, camera.zoom * 32, camera.zoom * 32);
       }
       ctx.setLineDash([]);
       ctx.strokeStyle = HUD.TRIM_GOLD;
-      for (const g of cs.basePlan.gates) {
+      for (const ring of rings) for (const g of ring.gates) {
         const s = camera.tileToScreen(g.x, g.y);
         ctx.strokeRect(s.x, s.y, camera.zoom * 32, camera.zoom * 32);
       }
@@ -90,6 +91,8 @@ export function drawAIOverlay(ctx: CanvasRenderingContext2D, state: GameState, c
       const f = c.reports.marshal ?? c.prev.marshal;
       lines.push(`plan ${ph}${c.plan?.pauseStart != null ? " (paused)" : ""} · Spymaster conf ${spy ? spy.conf.toFixed(2) : "—"}${spy && !spy.at ? " (army lost)" : ""}`);
       lines.push(`Warden home ${(w?.home.total ?? 0) | 0} · QM short ${(qm?.shortfall ?? 0) | 0} · Marshal ${f?.mission ?? "—"}${f && f.etaHomeS > 0 && Number.isFinite(f.etaHomeS) ? ` ${f.etaHomeS | 0}s out` : ""}`);
+      const ar = c.reports.architect ?? c.prev.architect; // 36 §E
+      if (ar) lines.push(`⌂ fort ${ar.fort} · walls ${ar.layers.map((l) => `${l.built}/${l.walls}`).join(" + ") || "—"} · outposts ${ar.outposts}${ar.blockedDoors ? ` · ${ar.blockedDoors} doors blocked` : ""}`);
       for (const r of c.rulings.filter((x) => x.verdict !== "fund").slice(-2)) lines.push(`⚖ ${r.seat} ${r.verdict} ${r.key}: ${r.why}`.slice(0, 64));
     }
     for (const it of cs.intents.slice(0, 3)) lines.push(`» ${it}`);

@@ -2,7 +2,7 @@
 // "Clear" = on the map and not overlapping another building, a gold source, or the
 // Citadel. Gold/tech affordability is checked separately by each caller.
 
-import { BUILD_RADIUS, BUILDING_STATS, CITADEL, STRUCTURE_CAP } from "../config/constants";
+import { BUILD_RADIUS, BUILDING_STATS, CITADEL } from "../config/constants";
 import type { GameState, Owner } from "../core/types";
 import { isBuildable } from "../state/terrain";
 
@@ -80,14 +80,13 @@ export function wallLineTiles(fromX: number, fromY: number, toX: number, toY: nu
 
 export interface WallSeg { x: number; y: number; valid: boolean }
 
-/** Plan a wall line: each tile is valid when it's clear, affordable within the running gold+cap
+/** Plan a wall line: each tile is valid when it's clear, affordable within the running gold
  *  budget, and within build radius — chaining outward, since each accepted segment anchors the
  *  next (matching how the commit incrementally places sites). Preview and commit call this with the
  *  SAME inputs so what you see is exactly what builds. */
-export function planWallLine(state: GameState, owner: Owner, tiles: { x: number; y: number }[], gold: number, wallGateCount: number): WallSeg[] {
+export function planWallLine(state: GameState, owner: Owner, tiles: { x: number; y: number }[], gold: number): WallSeg[] {
   const cost = BUILDING_STATS.wall.gold;
   let budget = gold;
-  let count = wallGateCount;
   const anchors: { x: number; y: number }[] = [];
   const out: WallSeg[] = [];
   for (const t of tiles) {
@@ -96,10 +95,9 @@ export function planWallLine(state: GameState, owner: Owner, tiles: { x: number;
       clear &&
       (withinBuildRadius(state, owner, t.x, t.y, 1, 1) ||
         anchors.some((a) => rectEdgeDist(t.x, t.y, 1, 1, a.x, a.y, 1, 1) <= BUILD_RADIUS));
-    const affordable = inRadius && budget >= cost && count < STRUCTURE_CAP.wallsPerPlayer;
+    const affordable = inRadius && budget >= cost;
     if (affordable) {
       budget -= cost;
-      count++;
       anchors.push({ x: t.x, y: t.y });
     }
     out.push({ x: t.x, y: t.y, valid: affordable });

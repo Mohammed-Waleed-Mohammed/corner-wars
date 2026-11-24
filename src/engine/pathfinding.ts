@@ -12,6 +12,12 @@
 // query is O(1) instead of a scan over every entity. Terrain costs per movement class are
 // precomputed per map. A* reuses its buffers across searches (stamped, never cleared) instead of
 // allocating ~270 KB per call. `pathStats.expansions` counts nodes expanded, for the per-tick budget.
+//
+// Regions (36 perf): a walled base splits the map, and a search for a goal on the far side of a
+// closed wall floods everything it can reach before it fails — up to the node cap, for every unit
+// that tries. The grid's connected regions per gate owner (4-connected, which is exactly A*'s
+// reach: it never cuts a corner) are labelled once per change of the grid, so such a search ends
+// at once with the same empty result.
 
 import { NAV, TERRAIN } from "../config/constants";
 import type { BiomeId, GameState, MoveClass, Owner, TerrainType, Vec2 } from "../core/types";
@@ -21,7 +27,14 @@ import { fastestFactor, speedFactor } from "../state/terrain";
 
 const BLOCK_TERRAIN = 1;
 const BLOCK_BUILDING = 2;
-interface NavGrid { tick: number; count: number; block: Uint8Array; gate: Int8Array }
+interface NavGrid {
+  tick: number; count: number; block: Uint8Array; gate: Int8Array;
+  /** Bumped only when block/gate content really changes (the grid is re-rasterised every tick);
+   *  checked lazily, when a search needs the regions, at most once per rasterisation. */
+  version: number; checked: number; prevBlock: Uint8Array; prevGate: Int8Array;
+  /** Region labels per owner code, valid for `labelsVersion` (-1 = impassable for that owner). */
+  labels: Map<number, Int32Array>; labelsVersion: number;
+}
 const grids = new WeakMap<GameState, NavGrid>();
 const terrainBlock = new WeakMap<TerrainType[][], Uint8Array>();
 
@@ -51,7 +64,10 @@ function navGrid(state: GameState): NavGrid {
   if (g && g.tick === state.tick && g.count === count) return g;
   const W = state.mapWidth, N = W * state.mapHeight;
   if (!g || g.block.length !== N) {
-    g = { tick: -1, count: -1, block: new Uint8Array(N), gate: new Int8Array(N) };
+    g = {
+      tick: -1, count: -1, block: new Uint8Array(N), gate: new Int8Array(N),
+      version: 0, checked: -1, prevBlock: new Uint8Array(N), prevGate: new Int8Array(N).fill(-2), labels: new Map(), labelsVersion: -1,
+    };
     grids.set(state, g);
   }
   g.block.set(staticBlock(state));
@@ -69,7 +85,60 @@ function navGrid(state: GameState): NavGrid {
   }
   g.tick = state.tick;
   g.count = count;
+  g.checked = -1;
   return g;
+}
+
+function sameBytes(a: Uint8Array | Int8Array, b: Uint8Array | Int8Array): boolean {
+  const n4 = a.length >> 2;
+  const a4 = new Uint32Array(a.buffer, a.byteOffset, n4), b4 = new Uint32Array(b.buffer, b.byteOffset, n4);
+  for (let i = 0; i < n4; i++) if (a4[i] !== b4[i]) return false;
+  for (let i = n4 << 2; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+}
+
+let fillStack = new Int32Array(0);
+/** The grid's connected regions for owner code `oc` (its own gates open, every other gate shut). */
+function regions(state: GameState, g: NavGrid, oc: number): Int32Array {
+  if (g.checked === -1) {
+    g.checked = 1;
+    if (!sameBytes(g.block, g.prevBlock) || !sameBytes(g.gate, g.prevGate)) {
+      g.version++;
+      g.prevBlock.set(g.block);
+      g.prevGate.set(g.gate);
+    }
+  }
+  if (g.labelsVersion !== g.version) { g.labels.clear(); g.labelsVersion = g.version; }
+  let lab = g.labels.get(oc);
+  if (lab) return lab;
+  const W = state.mapWidth, H = state.mapHeight, N = W * H;
+  const block = g.block, gate = g.gate;
+  lab = new Int32Array(N).fill(-1);
+  if (fillStack.length < N) fillStack = new Int32Array(N);
+  const st = fillStack;
+  let next = 0;
+  for (let s = 0; s < N; s++) {
+    if (lab[s] !== -1 || block[s] !== 0 || (gate[s] >= 0 && gate[s] !== oc)) continue;
+    const id = next++;
+    let top = 0;
+    st[top++] = s;
+    lab[s] = id;
+    while (top > 0) {
+      const i = st[--top];
+      const x = i % W, y = (i / W) | 0;
+      for (let d = 0; d < 4; d++) {
+        const nx = d === 0 ? x + 1 : d === 1 ? x - 1 : x;
+        const ny = d === 2 ? y + 1 : d === 3 ? y - 1 : y;
+        if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+        const ni = ny * W + nx;
+        if (lab[ni] !== -1 || block[ni] !== 0 || (gate[ni] >= 0 && gate[ni] !== oc)) continue;
+        lab[ni] = id;
+        st[top++] = ni;
+      }
+    }
+  }
+  g.labels.set(oc, lab);
+  return lab;
 }
 
 function inMap(state: GameState, x: number, y: number): boolean {
@@ -189,6 +258,13 @@ export function computePath(
     gx = near.x;
     gy = near.y;
     if (sx === gx && sy === gy) return [];
+  }
+
+  // a goal in another region (behind a wall closed to me): A* would flood my region and fail
+  const start0 = sy * W + sx;
+  if (passI(start0)) {
+    const lab = regions(state, grid, oc);
+    if (lab[start0] !== lab[gy * W + gx]) return [];
   }
 
   buffers(W * H);

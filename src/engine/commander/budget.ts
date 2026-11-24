@@ -20,6 +20,7 @@ export interface Request {
   cost: number;
   prio: number;
   site?: boolean; // places a construction site
+  siteWeight?: number; // 36 §C: share of a construction slot it takes (walls and gates: ¼ each); default 1
   act: () => boolean; // issue the command(s); false = couldn't (no spot …) → costs nothing
   seat?: Seat; // 34 §B the councillor that petitioned
   reason?: string; // 34 §B one line: why (quoting what it relied on)
@@ -28,6 +29,13 @@ export interface Request {
 export class Budget {
   reqs: Request[] = [];
   add(r: Request): void { if (r.cost >= 0 && Number.isFinite(r.prio)) this.reqs.push(r); }
+}
+
+/** 36 §C the construction slots in use: a wall or gate site counts 1 / WALL_SITE_SHARE. */
+export function siteLoad(ctx: Ctx): number {
+  let n = 0;
+  for (const s of sitesOf(ctx)) n += s.buildingType === "wall" || s.buildingType === "gate" ? 1 / COMMANDER.ARCH.WALL_SITE_SHARE : 1;
+  return n;
 }
 
 export function siteSlots(ctx: Ctx): number {
@@ -66,16 +74,16 @@ export function arbitrate(ctx: Ctx, budget: Budget): void {
   let gold = p.gold;
   let saving: Request | null = null;
   let reserve = 0;
-  let sites = sitesOf(ctx).length;
+  let sites = siteLoad(ctx);
   const slots = siteSlots(ctx);
   const done: string[] = [];
   for (const r of budget.reqs) {
-    if (r.site && sites >= slots + (r.cat === "eco" || r.cat === "survival" ? P.SITE_SLACK : 0)) continue;
+    if (r.site && sites + (r.siteWeight ?? 1) > slots + (r.cat === "eco" || r.cat === "survival" ? P.SITE_SLACK : 0) + 1e-9) continue;
     const avail = r.prio >= P.SAVE_LEAK ? gold : gold - reserve;
     if (r.cost <= avail) {
       if (r.act()) {
         gold -= r.cost;
-        if (r.site) sites++;
+        if (r.site) sites += r.siteWeight ?? 1;
         if (done.length < 4) done.push(r.key);
         rule(ctx, r.seat ?? "king", r.key, "fund", r.reason ?? `prio ${r.prio.toFixed(0)}`);
       }

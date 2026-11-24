@@ -5,7 +5,7 @@
 // can't reach yet), and the Resonance Grid in place by the time the gold is gone. Everything here
 // posts requests to the budget arbiter (§D); worker upkeep issues its orders directly (no gold).
 
-import { BUILD_MAX_COUNT, BUILDING_STATS, COMMANDER, DEFENSE_STATS, REPAIR } from "../../config/constants";
+import { BUILDING_STATS, COMMANDER, DEFENSE_STATS, REPAIR } from "../../config/constants";
 import type { AIExpansion, Building, BuildingType, GoldSource, MineBelief, Unit, Vec2 } from "../../core/types";
 import { isLowPower } from "../../state/gameState";
 import { unitCap } from "../../state/upgrades";
@@ -13,7 +13,8 @@ import { armyValue, baseCenter, buildingsOf, enemyValueNear, fightOdds, mainYard
 import type { Budget } from "./budget";
 import { aiLog, type Ctx } from "./commander";
 import { mineInDanger, strongestEnemies } from "./spymaster";
-import { centerOf, cmd, countAll, creepSpot, findSpot, insideMyBase, insuranceSpot, legalFor, refinerySpot, sitesOf } from "./place";
+import { centerOf, cmd, countAll, creepSpot, insideMyBase, insuranceSpot, legalFor, refinerySpot, sitesOf } from "./place";
+import { siteFor } from "./architect";
 import { baseThreatened } from "./captain";
 import { eyesHeat } from "./spymaster";
 
@@ -161,10 +162,16 @@ export function crewSites(ctx: Ctx): void {
   const workers = unitsOf(state, pid).filter((u) => u.unitType === "worker");
   const busy = new Set<number>();
   for (const w of workers) if (w.buildTargetId != null) busy.add(w.id);
+  // 36 §C a wall or gate takes one builder, and at most one worker in WALL_CREW_PER builds lines
+  const lineSite = (id: number | undefined): boolean => sites.some((s) => s.id === id && (s.buildingType === "wall" || s.buildingType === "gate"));
+  let lineCrew = workers.filter((w) => w.buildTargetId != null && lineSite(w.buildTargetId)).length;
+  const lineCrewMax = Math.max(2, Math.floor(workers.length / COMMANDER.ARCH.WALL_CREW_PER));
   for (const site of sites) {
     const crew = workers.filter((w) => w.buildTargetId === site.id).length;
     if (crew > 0) continue;
-    const n = site.buildingType === "refinery" ? 3 : site.buildingType === "constructionYard" ? COMMANDER.CAMPAIGN.INSURANCE_CREW : 2;
+    const line = site.buildingType === "wall" || site.buildingType === "gate";
+    if (line && lineCrew >= lineCrewMax) continue;
+    const n = line ? 1 : site.buildingType === "refinery" ? 3 : site.buildingType === "constructionYard" ? COMMANDER.CAMPAIGN.INSURANCE_CREW : 2;
     const free = workers
       .filter((w) => !busy.has(w.id) && (w.carryingGold ?? 0) === 0)
       .sort((a, b) => (a.x - site.x) ** 2 + (a.y - site.y) ** 2 - ((b.x - site.x) ** 2 + (b.y - site.y) ** 2) || a.id - b.id)
@@ -172,6 +179,7 @@ export function crewSites(ctx: Ctx): void {
     if (free.length === 0) return;
     cmd(ctx, "ASSIGN_BUILD", { buildingId: site.id, workerIds: free.map((w) => w.id) });
     for (const w of free) busy.add(w.id);
+    if (line) lineCrew += free.length;
   }
 }
 
@@ -210,13 +218,14 @@ export function economyRequests(ctx: Ctx, budget: Budget, D: number): void {
   const sitePower = sitesOf(ctx).reduce((a, s) => a + BUILDING_STATS[s.buildingType].power, 0);
   const projected = p.powerProduced - p.powerUsed + sitePower;
   const taps = countAll(ctx, "resonanceTap");
-  const tapNext = p.unlocks.resonanceTapping && taps < (BUILD_MAX_COUNT.resonanceTap ?? 0);
+  const tapNext = p.unlocks.resonanceTapping &&
+    (taps < E.TAP_SOFT || minesRunwayS(ctx) < E.TAP_MINES_LEFT_S || p.gold >= E.FLOAT_LIMIT); // 36 §F: no cap, a judgment
   const margin = COMMANDER.POWER_SURPLUS_MIN + (tapNext ? -BUILDING_STATS.resonanceTap.power : 0);
   const plantSites = sitesOf(ctx).filter((s) => s.buildingType === "powerPlant").length;
   if ((projected < margin || isLowPower(state, pid)) && (plantSites === 0 || projected < -40)) {
     budget.add({
       key: "power", cat: "eco", cost: BUILDING_STATS.powerPlant.gold, prio: projected < COMMANDER.POWER_SURPLUS_MIN ? 92 : 70, site: true,
-      act: () => place(ctx, "powerPlant", findSpot(ctx, cy, "powerPlant")),
+      act: () => place(ctx, "powerPlant", siteFor(ctx, cy, "powerPlant")),
     });
   }
 
@@ -227,7 +236,7 @@ export function economyRequests(ctx: Ctx, budget: Budget, D: number): void {
     if (powerOk) {
       budget.add({
         key: "tap", cat: "invest", cost: BUILDING_STATS.resonanceTap.gold, prio: late ? 78 : 52, site: true,
-        act: () => place(ctx, "resonanceTap", findSpot(ctx, cy, "resonanceTap")),
+        act: () => place(ctx, "resonanceTap", siteFor(ctx, cy, "resonanceTap")),
       });
     }
   }
@@ -369,7 +378,7 @@ function guardSpot(ctx: Ctx, mine: Vec2, refinery: Building): Vec2 | null {
     for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
       if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
       const x = Math.round(at.x) + dx, y = Math.round(at.y) + dy;
-      if (legalFor(ctx, x, y, 1, 1)) return { x, y };
+      if (legalFor(ctx, x, y, 1, 1, "turret")) return { x, y };
     }
   }
   return null;
@@ -410,7 +419,7 @@ function insuranceRequest(ctx: Ctx, budget: Budget): void {
   // the spot: re-scored every INSURANCE_SPOT_TICKS (every session in an emergency: the attack moves)
   const cached = ins.spot;
   const stale = !cached || cached.emergency !== emergency || emergency || t - cached.tick >= CA.INSURANCE_SPOT_TICKS ||
-    !legalFor(ctx, cached.at.x, cached.at.y, BUILDING_STATS.constructionYard.width, BUILDING_STATS.constructionYard.height);
+    !legalFor(ctx, cached.at.x, cached.at.y, BUILDING_STATS.constructionYard.width, BUILDING_STATS.constructionYard.height, "constructionYard");
   if (stale) {
     const at = insuranceSpot(ctx, cy, emergency ? tt!.at : null);
     ins.spot = at ? { at, tick: t, emergency } : null;

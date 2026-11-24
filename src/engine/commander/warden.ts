@@ -1,10 +1,10 @@
 // 34 §A the Warden (was 33 §E defense): how much danger am I in, how big an army do I need standing, where have I been hit,
-// which mines to evacuate, and which static defenses to build (the base plan's, adaptive counter
-// towers on the approaches that keep getting hit, and an emergency tower against an attack I can
+// which mines to evacuate, and which static defenses to build (36: the base plan's are the Architect's;
+// here adaptive counter towers on the approaches that keep getting hit, and an emergency tower against an attack I can
 // see coming but can't hold). Requests go to the budget arbiter; evacuation marks mines for the
 // worker upkeep.
 
-import { BUILDING_STATS, COMMANDER, DEFENSE_STATS, STRUCTURE_CAP, UNIT_STATS } from "../../config/constants";
+import { BUILDING_STATS, COMMANDER, DEFENSE_STATS, UNIT_STATS } from "../../config/constants";
 import type { BuildingType, ResearchKey, Vec2 } from "../../core/types";
 import { isLowPower } from "../../state/gameState";
 import { isResearched } from "../../state/upgrades";
@@ -12,11 +12,11 @@ import { armyValue, baseCenter, buildingsOf, compositionNear, defenseCover, figh
 import type { Budget } from "./budget";
 import { aiLog, type Ctx } from "./commander";
 import { strongestEnemies } from "./spymaster";
-import { centerOf, cmd, spotNear, legalFor } from "./place";
+import { centerOf, cmd, legalFor } from "./place";
+import { towerSpot } from "./architect";
 import { ask, homeRadius, veto } from "./reports";
 import { nearestPassableTile } from "../pathfinding";
 import { baseThreatened, ensureFormation, gatePost, squadUnits, type Squad } from "./captain";
-import { keepsBaseConnected } from "./basePlan";
 
 const D2 = COMMANDER.DEFENSE2;
 const clamp01 = (v: number): number => Math.max(0, Math.min(1, v));
@@ -127,18 +127,15 @@ function counterTower(ctx: Ctx, comp: Composition | null, count: number): Buildi
 }
 
 export function defenseRequests(ctx: Ctx, budget: Budget, D: number): void {
-  const { state, cs, p, pid, pers } = ctx;
+  const { state, cs, pid } = ctx;
   const plan = cs.basePlan;
   const t = state.tick;
   const myB = buildingsOf(state, pid);
-  const near = (type: BuildingType, x: number, y: number, r: number): boolean =>
-    myB.some((b) => b.buildingType === type && Math.abs(b.x - x) <= r && Math.abs(b.y - y) <= r);
-  const unlocked = (type: BuildingType): boolean => !BUILDING_STATS[type].unlock || isResearched(p, BUILDING_STATS[type].unlock as ResearchKey);
   const towerAt = (type: BuildingType, x: number, y: number, key: string, prio: number, cat: "defense" | "survival"): void => {
     budget.add({
       key, cat, cost: BUILDING_STATS[type].gold, prio, site: true,
       act: () => {
-        const spot = legalFor(ctx, x, y, 1, 1) && (!plan || keepsBaseConnected(plan, state, x, y, 1, 1)) ? { x, y } : spotNear(ctx, { x, y }, type, 4);
+        const spot = legalFor(ctx, x, y, 1, 1, type) ? { x, y } : towerSpot(ctx, { x, y }, type, 4);
         if (!spot) return false;
         cmd(ctx, "PLACE_BUILDING", { buildingType: type, x: spot.x, y: spot.y });
         cs.intents.push(`defense: ${type}`);
@@ -147,38 +144,7 @@ export function defenseRequests(ctx: Ctx, budget: Budget, D: number): void {
     });
   };
 
-  // 1. the base plan (22 §G v4): core towers, gates, the wall, extras
-  if (plan && plan.radius > 0) {
-    let coreN = 0;
-    for (const d of plan.plannedDefenses) {
-      if (near(d.type, d.x, d.y, 2) || !unlocked(d.type)) continue;
-      if (d.core) {
-        towerAt(d.type, d.x, d.y, `core:${d.type}@${d.x},${d.y}`, 50 + 30 * D - coreN * 2, "defense");
-        coreN++;
-      } else if (pers.defenseBudget >= COMMANDER.DEF_EXTRA_MIN_BUDGET || D > 0.4) {
-        towerAt(d.type, d.x, d.y, `extra:${d.type}@${d.x},${d.y}`, 30 + 20 * D + 50 * pers.defenseBudget, "defense");
-      }
-    }
-    const wallsOwned = myB.filter((b) => b.buildingType === "wall" || b.buildingType === "gate").length;
-    const turtle = cs.personality === "turtle";
-    if (wallsOwned < STRUCTURE_CAP.wallsPerPlayer) {
-      const gate = plan.gates.find((g) => !near("gate", g.x, g.y, 0) && legalFor(ctx, g.x, g.y, 1, 1));
-      if (gate) {
-        budget.add({
-          key: `gate@${gate.x},${gate.y}`, cat: "invest", cost: BUILDING_STATS.gate.gold, prio: turtle ? 57 : 37, site: true,
-          act: () => { cmd(ctx, "PLACE_BUILDING", { buildingType: "gate", x: gate.x, y: gate.y }); plan.frozen = true; return true; },
-        });
-      } else {
-        const tiles = plan.walls.filter((w) => legalFor(ctx, w.x, w.y, 1, 1)).slice(0, Math.min(COMMANDER.WALLS_PER_TICK, STRUCTURE_CAP.wallsPerPlayer - wallsOwned));
-        if (tiles.length) {
-          budget.add({
-            key: "walls", cat: "invest", cost: BUILDING_STATS.wall.gold * tiles.length, prio: turtle ? 55 : 35, site: true,
-            act: () => { for (const w of tiles) cmd(ctx, "PLACE_BUILDING", { buildingType: "wall", x: w.x, y: w.y }); plan.frozen = true; cs.intents.push(`walls +${tiles.length}`); return true; },
-          });
-        }
-      }
-    }
-  }
+  // 1. the base plan's walls, gates and towers are the Architect's (36 §A)
 
   // 2. adaptive counter towers on the most-hit approach
   const home = baseCenter(state, pid);
@@ -211,7 +177,7 @@ export function defenseRequests(ctx: Ctx, budget: Budget, D: number): void {
     budget.add({
       key: `emergency:${type}`, cat: "survival", cost: BUILDING_STATS[type].gold, prio: 88, site: true,
       act: () => {
-        const spot = spotNear(ctx, at, type, 5);
+        const spot = towerSpot(ctx, at, type, 5);
         if (!spot) return false;
         cmd(ctx, "PLACE_BUILDING", { buildingType: type, x: spot.x, y: spot.y });
         cs.lastEmergencyTick = t;

@@ -16,6 +16,7 @@ import { initIntel, perceive } from "./aiPerception";
 import type { AnyEntity, Building, GameState, Player, PlayerId, Unit } from "../core/types";
 import type { Command } from "../sim/commands";
 import { footprintClear, withinBuildRadius } from "./placement";
+import { keepsFlow, layoutClear } from "./layout";
 import { isLowPower } from "../state/gameState";
 
 export type Submit = (cmd: Command) => void;
@@ -245,12 +246,13 @@ function aiBuild(state: GameState, p: Player, type: Building["buildingType"], su
   const stat = BUILDING_STATS[type];
   if (p.gold < stat.gold) return;
   if (stat.requires && !findBuilding(state, p.id, stat.requires, true)) return;
-  const spot = findBuildSpot(state, p.id, stat.width, stat.height);
+  const spot = findBuildSpot(state, p.id, type, stat.width, stat.height);
   if (!spot) return;
   submit(placeBuilding(p.id, type, spot.x, spot.y));
 }
 
-function findBuildSpot(state: GameState, id: PlayerId, w: number, h: number): { x: number; y: number } | null {
+/** Ring search round the yard; 36 §B: every site keeps its streets and doors and seals no pocket. */
+function findBuildSpot(state: GameState, id: PlayerId, type: Building["buildingType"], w: number, h: number): { x: number; y: number } | null {
   const cy = findBuilding(state, id, "constructionYard", false);
   if (!cy) return null;
   const ox = Math.round(cy.x + cy.width / 2 - w / 2);
@@ -261,7 +263,9 @@ function findBuildSpot(state: GameState, id: PlayerId, w: number, h: number): { 
         if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue; // ring perimeter only
         if (
           footprintClear(state, ox + dx, oy + dy, w, h) &&
-          withinBuildRadius(state, id, ox + dx, oy + dy, w, h)
+          withinBuildRadius(state, id, ox + dx, oy + dy, w, h) &&
+          layoutClear(state, id, ox + dx, oy + dy, w, h, type) &&
+          keepsFlow(state, id, ox + dx, oy + dy, w, h, type)
         ) {
           return { x: ox + dx, y: oy + dy };
         }

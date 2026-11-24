@@ -985,15 +985,6 @@ export class InputController {
     return s;
   }
 
-  /** Count a player's wall + gate segments (incl. under construction) for the §1 cap. */
-  private wallCount(owner: number): number {
-    let n = 0;
-    for (const e of this.state.entities) {
-      if (e.kind === "building" && e.owner === owner && (e.buildingType === "wall" || e.buildingType === "gate")) n++;
-    }
-    return n;
-  }
-
   buildFromSelected(unitType: UnitType): boolean {
     const b = this.getSelectedBuilding();
     if (!b) return false;
@@ -1039,7 +1030,7 @@ export class InputController {
   private wallDragSegments(end: Vec2): WallSegment[] {
     if (!this.wallDragStart) return [];
     const tiles = wallLineTiles(this.wallDragStart.x, this.wallDragStart.y, end.x, end.y);
-    return planWallLine(this.state, this.local, tiles, this.state.players[this.local].gold, this.wallCount(this.local));
+    return planWallLine(this.state, this.local, tiles, this.state.players[this.local].gold);
   }
 
   /** Commit a wall drag by emitting one PLACE_WALL_LINE; executeCommand re-plans the SAME segments

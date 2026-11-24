@@ -10,7 +10,8 @@ import { isResearched, unitCap } from "../../state/upgrades";
 import { armyValue, buildingsOf, combatUnitsOf, compositionNear, fightersOf, mainYard, territoryThreat, unitsOf, type Composition } from "./assess";
 import type { Budget } from "./budget";
 import type { Ctx } from "./commander";
-import { cmd, countAll, findSpot } from "./place";
+import { cmd, countAll } from "./place";
+import { siteFor } from "./architect";
 
 const E = COMMANDER.ECON;
 
@@ -85,7 +86,7 @@ export function militaryRequests(ctx: Ctx, budget: Budget, D: number): void {
   const placeAt = (type: "barracks" | "warFactory", key: string, prio: number): void => {
     budget.add({
       key, cat: "military", cost: BUILDING_STATS[type].gold, prio, site: true,
-      act: () => { const s = findSpot(ctx, cy, type); if (!s) return false; cmd(ctx, "PLACE_BUILDING", { buildingType: type, x: s.x, y: s.y }); return true; },
+      act: () => { const s = siteFor(ctx, cy, type); if (!s) return false; cmd(ctx, "PLACE_BUILDING", { buildingType: type, x: s.x, y: s.y }); return true; },
     });
   };
   if (barracks === 0) placeAt("barracks", "barracks#1", 87);

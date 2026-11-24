@@ -7,6 +7,8 @@ requests, and nobody asks the part that knows. This file reorganises the Medium/
 aspect of winning, keep a report on it, answer the others' questions, and petition for what their
 aspect needs, each with a written reason. Part §M makes the King plan the whole match as a campaign (the situation estimate, grand strategies, the flow of the match, map control, logistics, windows, the centre of gravity, the information war, FFA politics, defense in depth, the comeback). Part §W gives the Marshal the art of war: a field manual of every unit, task forces with different jobs, a profile of how each enemy behaves, and operations (pincers, feints, baits and traps, ambushes, sieges, base trades) — and the sense not to fall for the enemy's.
 
+> **36:** an eighth seat, the **Architect** (`36-architect.md`), now owns building placement, the wall rings and the planned towers; the Warden keeps the danger read, adaptive and emergency towers.
+
 Everything in 33 that this file does not restate still holds (beliefs, the mine economy, the
 priced-request arbiter, danger, static defense, push discipline, the scenario suite). Everything in 22
 that 33 kept still holds (cadences, determinism, perception, formations, the base planner, Citadel

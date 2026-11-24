@@ -9,7 +9,6 @@ import {
   BUILDING_LABEL,
   BUILDING_STATS,
   PRODUCTION_QUEUE_MAX,
-  STRUCTURE_CAP,
   UNIT_DESC,
   UNIT_STATS,
   UNLOCK_LABEL,
@@ -34,14 +33,6 @@ function countOwned(state: GameState, owner: PlayerId, type: BuildingType): numb
   }
   return n;
 }
-export function wallGateCount(state: GameState, owner: PlayerId): number {
-  let n = 0;
-  for (const e of state.entities) {
-    if (e.kind === "building" && e.owner === owner && (e.buildingType === "wall" || e.buildingType === "gate")) n++;
-  }
-  return n;
-}
-
 /** Can `owner` place `type` right now? Reason follows §6 priority (tech > afford > power > limit). */
 export function buildAvailability(state: GameState, owner: PlayerId, type: BuildingType): Availability {
   const stat = BUILDING_STATS[type];
@@ -56,9 +47,6 @@ export function buildAvailability(state: GameState, owner: PlayerId, type: Build
   if (stat.power < 0 && isLowPower(state, owner)) return { ok: false, reason: "Insufficient power" };
   const max = BUILD_MAX_COUNT[type];
   if (max !== undefined && countOwned(state, owner, type) >= max) return { ok: false, reason: "Maximum built" };
-  if ((type === "wall" || type === "gate") && wallGateCount(state, owner) >= STRUCTURE_CAP.wallsPerPlayer) {
-    return { ok: false, reason: `Wall/gate limit (${STRUCTURE_CAP.wallsPerPlayer})` };
-  }
   return { ok: true, reason: `${stat.gold}g — ${BUILDING_DESC[type]}` };
 }
 
