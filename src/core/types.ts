@@ -364,7 +364,7 @@ export interface AIIntel {
 // ── 22 §P — the AI Commander's blackboard (engine-only, host-side) ────────────
 export type AIPersonality = "rusher" | "boomer" | "turtle" | "techer" | "opportunist";
 export type AIStance = "BUILD_UP" | "PRESSURE" | "ALL_IN" | "DEFEND" | "RECOVER";
-export type SquadRole = "main" | "homeGuard" | "raid" | "citadel" | "scout" | "sentry";
+export type SquadRole = "main" | "homeGuard" | "raid" | "citadel" | "scout" | "sentry" | "hunt";
 
 export interface AISquad {
   id: number;
@@ -387,12 +387,12 @@ export interface AISquad {
   stageLogTick?: number; // 33 dev: last time a held launch logged its reason
   chaseWatch?: { from: Vec2; enemy: PlayerId | null; max: number }; // 34 §W.3 measuring a pursuit of this squad
   leashLogTick?: number; // 34 §W.5 last leash log
-  tried?: { x: number; y: number; tick: number }[]; // 34 §M.8 scout: trips that ended without a look (chased off, or nothing in sight) — left alone a while
   standoff?: { since: number; step: number; stepAt: number; v0: number; f0: number; cycles: number; lastMission: string; facedAt?: number }; // 34 §W.8
   trickleLogTick?: number; // 34 §W.9 last "reinforcements wait" log
   shellTick?: number; // 34 §W.9 last answer to shelling
   lastSpot?: Vec2; // 34 §W.4 raid rotation: where this raid last struck
   fleeUntil?: Partial<Record<number, number>>; // 33 §B.2 sentries: unit id → tick it may return to its post
+  borrowed?: Partial<Record<number, SquadRole>>; // 34 §M.4 hunt: unit id → the squad it was taken from (given back after)
 }
 
 export interface AIBasePlan {
@@ -444,6 +444,10 @@ export interface CommanderState {
   standoffOff?: boolean; // dev harness only: the standoff ladder alone off (standoff.* ablation)
   campOff?: boolean; // dev harness only: the campaign layer off — estimate, strategies, windows, FFA politics (camp.* ablation)
   manualOff?: boolean; // dev harness only: switch the captains' manual off (craft.* ablation)
+  intelOff?: boolean; // dev harness only: counter-intelligence (the hunt) off (camp.counterintel ablation)
+  insuranceOff?: boolean; // dev harness only: the insurance yard off (camp.insurance ablation)
+  counterIntel?: CounterIntel; // 34 §M.4: what the enemy knows about me (the Spymaster)
+  insurance?: InsuranceYard; // 34 §M.7: the second Construction Yard (the Treasurer)
   allInWhy?: "crippled" | "away" | "cap" | "plan" | "counter" | "thirdparty"; // 34 §E.2: which window opened the ALL_IN (sets the launch odds)
   projects?: AIExpansion[]; // 33 §C.4: running expansion projects
   hits?: { x: number; y: number; w: number; tick: number }[]; // 33 §E.4: where my territory was attacked (decaying weight)
@@ -488,6 +492,33 @@ export interface EnemyProfile {
   homeGuard: number[]; // share of their army seen at home while the rest was away
   lastGuardTick?: number;
   raidWatch?: { at: Vec2; start: number; value: number; done: boolean } | null;
+}
+
+/** 34 §M.4 — what one enemy knows about me, as far as I can tell: the last tick one of their units I
+ *  could see had my yard / the bulk of my army inside its sight (-1 = never seen doing so). */
+export interface EnemyExposure { baseTick: number; armyTick: number }
+/** An enemy scout or sentry in or near my territory: a hunt target. */
+export interface EnemyEye {
+  id: number; owner: PlayerId; at: Vec2; tick: number; type: UnitType; value: number;
+  since?: number; // the tick it was first seen about my base, without a break since
+}
+/** 34 §M.4 — the Spymaster's counter-intelligence picture. */
+export interface CounterIntel {
+  tick: number; // the last exposure update (each session)
+  eyesTick: number; // the last eye scan (each session, and each tactical tick while hunting)
+  by: Partial<Record<number, EnemyExposure>>; // enemy pid → what they last saw of me
+  eyes: EnemyEye[]; // enemy eyes in sight now (or within HUNT_MEMORY_TICKS), nearest my army first
+  heat: Record<string, { n: number; tick: number }>; // "cx,cy" cell → decayed count of enemy units seen there
+  logTick: number; // last "they see my army" log
+  lastEyeTick: number; // last tick any eye was seen (the Quartermaster's "eyes about")
+  lastEyeFrom: PlayerId | null; // whose eye that was (the hunt's picket faces them)
+  attackTick?: number; // last tick an enemy had more than HUNT_MAX_GROUP inside my territory (an attack: no hunt)
+}
+/** 34 §M.7 — the insurance yard: the spot chosen for it, and where, when and why it was placed. */
+export interface InsuranceYard {
+  placed?: { tick: number; at: Vec2; why: string; emergency: boolean };
+  spot?: { at: Vec2; tick: number; emergency: boolean } | null; // the last spot scored (re-scored every INSURANCE_SPOT_TICKS)
+  noSpotLogTick?: number;
 }
 
 /** 34 §F — the council blackboard (cs.council). Host-only, never hashed. */

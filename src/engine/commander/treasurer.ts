@@ -9,11 +9,13 @@ import { BUILD_MAX_COUNT, BUILDING_STATS, COMMANDER, DEFENSE_STATS, REPAIR } fro
 import type { AIExpansion, Building, BuildingType, GoldSource, MineBelief, Unit, Vec2 } from "../../core/types";
 import { isLowPower } from "../../state/gameState";
 import { unitCap } from "../../state/upgrades";
-import { armyValue, baseCenter, buildingsOf, enemyValueNear, fightOdds, mainYard, unitsOf } from "./assess";
+import { armyValue, baseCenter, buildingsOf, enemyValueNear, fightOdds, mainYard, territoryThreat, unitsOf } from "./assess";
 import type { Budget } from "./budget";
 import { aiLog, type Ctx } from "./commander";
 import { mineInDanger, strongestEnemies } from "./spymaster";
-import { centerOf, cmd, countAll, creepSpot, findSpot, insideMyBase, legalFor, refinerySpot, sitesOf } from "./place";
+import { centerOf, cmd, countAll, creepSpot, findSpot, insideMyBase, insuranceSpot, legalFor, refinerySpot, sitesOf } from "./place";
+import { baseThreatened } from "./captain";
+import { eyesHeat } from "./spymaster";
 
 const E = COMMANDER.ECON;
 const dist = (a: Vec2, b: Vec2): number => Math.hypot(a.x - b.x, a.y - b.y);
@@ -162,7 +164,7 @@ export function crewSites(ctx: Ctx): void {
   for (const site of sites) {
     const crew = workers.filter((w) => w.buildTargetId === site.id).length;
     if (crew > 0) continue;
-    const n = site.buildingType === "refinery" ? 3 : 2;
+    const n = site.buildingType === "refinery" ? 3 : site.buildingType === "constructionYard" ? COMMANDER.CAMPAIGN.INSURANCE_CREW : 2;
     const free = workers
       .filter((w) => !busy.has(w.id) && (w.carryingGold ?? 0) === 0)
       .sort((a, b) => (a.x - site.x) ** 2 + (a.y - site.y) ** 2 - ((b.x - site.x) ** 2 + (b.y - site.y) ** 2) || a.id - b.id)
@@ -229,6 +231,9 @@ export function economyRequests(ctx: Ctx, budget: Budget, D: number): void {
       });
     }
   }
+
+  // 34 §M.7 the insurance yard
+  insuranceRequest(ctx, budget);
 }
 
 function place(ctx: Ctx, type: BuildingType, spot: Vec2 | null): boolean {
@@ -368,4 +373,71 @@ function guardSpot(ctx: Ctx, mine: Vec2, refinery: Building): Vec2 | null {
     }
   }
   return null;
+}
+
+// ── 34 §M.7 the centre of gravity: the insurance yard ─────────────────────────────────────────────
+/** The yard is the only thing that eliminates, and two are allowed: a second Construction Yard away
+ *  from the main base, in the corner of my territory their eyes have seen least, makes me unkillable by
+ *  one raid. Bought from surplus (never saved for) once the middle game begins and the gold allows it;
+ *  and at once — ahead of everything, saved for — when the main base is under an attack it is losing
+ *  while the war goes badly (army behind the strongest enemy's estimate, or the yard already hurt). */
+function insuranceRequest(ctx: Ctx, budget: Budget): void {
+  const { state, cs, p, pid } = ctx;
+  if (cs.insuranceOff) return;
+  const CA = COMMANDER.CAMPAIGN;
+  const yards = buildingsOf(state, pid).filter((b) => b.buildingType === "constructionYard");
+  if (yards.length !== 1 || yards[0].buildProgress < 1) return; // the second is placed (sites count toward the 2)
+  const cy = yards[0];
+  const home = centerOf(cy);
+  const t = state.tick;
+  const ins = (cs.insurance ??= {});
+  const cost = BUILDING_STATS.constructionYard.gold;
+
+  // the main base under a winning attack, and the war going badly
+  const tt = territoryThreat(state, pid);
+  const inBase = !!tt && baseThreatened(ctx, tt.at, home);
+  const holds = tt ? fightOdds(state, pid, tt.at, COMMANDER.LOCAL_ODDS_RADIUS, undefined, true) : 99;
+  const yardHp = cy.hp / cy.maxHp;
+  const hurt = yardHp < CA.INSURANCE_YARD_HP && enemyValueNear(state, pid, home, COMMANDER.THREAT_RADIUS) > 0;
+  const winning = inBase && ((tt!.value >= CA.INSURANCE_THREAT_MIN && holds < CA.INSURANCE_HOLD_ODDS) || hurt);
+  const top = strongestEnemies(cs.beliefs!)[0];
+  const myArmy = armyValue(state, pid);
+  const behind = !!top && myArmy < CA.INSURANCE_BEHIND * top.est;
+  const emergency = winning && (behind || hurt);
+  const mid = state.time >= CA.INSURANCE_MID_S;
+  if (!emergency && !mid) return;
+
+  // the spot: re-scored every INSURANCE_SPOT_TICKS (every session in an emergency: the attack moves)
+  const cached = ins.spot;
+  const stale = !cached || cached.emergency !== emergency || emergency || t - cached.tick >= CA.INSURANCE_SPOT_TICKS ||
+    !legalFor(ctx, cached.at.x, cached.at.y, BUILDING_STATS.constructionYard.width, BUILDING_STATS.constructionYard.height);
+  if (stale) {
+    const at = insuranceSpot(ctx, cy, emergency ? tt!.at : null);
+    ins.spot = at ? { at, tick: t, emergency } : null;
+  }
+  const spot = ins.spot?.at;
+  const why = emergency
+    ? `the main base is losing: ${tt!.value | 0} attacking at (${tt!.at.x | 0},${tt!.at.y | 0}), home holds at ${holds.toFixed(2)}, yard ${Math.round(100 * yardHp)}%, army ${myArmy | 0} vs P${top?.pid ?? "?"} est ${top ? top.est | 0 : 0}`
+    : `the middle game (${p.gold | 0}g banked)`;
+  if (!spot) {
+    if (t - (ins.noSpotLogTick ?? -1e9) >= 900) {
+      ins.noSpotLogTick = t;
+      aiLog(cs, t, "O", `[Treasurer] insurance yard wanted (${why}) — no legal spot ${emergency ? CA.INSURANCE_EMERGENCY_DIST : CA.INSURANCE_MIN_DIST}+ tiles from the main yard`);
+    }
+    return;
+  }
+  const c = { x: spot.x + BUILDING_STATS.constructionYard.width / 2, y: spot.y + BUILDING_STATS.constructionYard.height / 2 };
+  const d = Math.hypot(c.x - home.x, c.y - home.y);
+  budget.add({
+    key: "insurance", cat: emergency ? "survival" : "invest", cost, site: true,
+    prio: emergency ? CA.INSURANCE_EMERGENCY_PRIO : CA.INSURANCE_PRIO,
+    reason: `insurance yard: ${why}`,
+    act: () => {
+      cmd(ctx, "PLACE_BUILDING", { buildingType: "constructionYard", x: spot.x, y: spot.y });
+      ins.placed = { tick: t, at: { x: spot.x, y: spot.y }, why, emergency };
+      cs.intents.push("insurance yard");
+      aiLog(cs, t, "O", `[Treasurer] insurance yard → (${spot.x},${spot.y}), ${d.toFixed(0)} tiles from the main yard, enemy eyes there ${eyesHeat(ctx, c).toFixed(1)} — ${why}`);
+      return true;
+    },
+  });
 }

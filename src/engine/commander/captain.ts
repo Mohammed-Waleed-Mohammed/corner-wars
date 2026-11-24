@@ -163,7 +163,7 @@ export function runCaptains(ctx: Ctx): void {
   if (foes.length === 0) return;
   const focusNow = Math.floor(state.tick / COMMANDER.CADENCE.TACTICAL) % 2 === 0; // focus orders every other tick
   for (const s of cs.squads) {
-    if (s.role === "scout" || s.role === "sentry") continue; // they run from fights (Spymaster)
+    if (s.role === "scout" || s.role === "sentry" || s.role === "hunt") continue; // they run from fights, or chase their quarry (Spymaster)
     if (s.mission === "retreat" || s.mission === "flee") continue; // running: a focus order would stop them
     battleCraft(ctx, s, foes); // 34 §W.9 wounded rotation, the answer to shelling
     const byTarget = new Map<number, number[]>();

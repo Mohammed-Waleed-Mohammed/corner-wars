@@ -98,7 +98,15 @@ export function runPlan(ctx: Ctx, myArmy: number): void {
   const main = cs.squads.find((s) => s.role === "main");
   const pushing = !!main && PUSHING.includes(main.mission);
   let phase = plan[st.phase];
-  if (phase.strike && pushing && cs.stance === "ALL_IN") st.launched ??= t;
+  if (phase.strike && pushing && cs.stance === "ALL_IN" && st.launched == null) {
+    st.launched = t;
+    // another window (or the stance table) launched the push before the plan's own nerve was met: the
+    // timing strike is that push — say so, or the plan would look as if it never struck
+    if (!st.strikeLogged && cs.targetPlayer != null) {
+      st.strikeLogged = true;
+      aiLog(cs, t, "S", `[King] timing strike on P${cs.targetPlayer}: launched by the ${cs.allInWhy ?? "stance"} window, army ${myArmy | 0}/${phase.strike.value}`);
+    }
+  }
 
   // exits
   const why = st.phase < plan.length - 1 && t - st.since >= COMMANDER.COUNCIL.PLAN_MIN_GAP_S * 30 ? exitMet(ctx, phase.exit, st, pushing) : null;

@@ -6,6 +6,7 @@ import { BUILD_RADIUS, BUILDING_STATS, COMMANDER } from "../../config/constants"
 import type { AIBasePlan, Building, BuildingType, GameState, Vec2 } from "../../core/types";
 import { footprintClear, rectEdgeDist, withinBuildRadius } from "../placement";
 import { baseCenter, buildingsOf, frontDistance, livingEnemies } from "./assess";
+import { eyesHeat } from "./spymaster";
 import type { Ctx } from "./commander";
 import { footprintInside, keepsBaseConnected, onRingOrLane } from "./basePlan";
 
@@ -156,4 +157,48 @@ export function insideMyBase(ctx: Ctx, at: Vec2, slack = 0): boolean {
   }
   const home = baseCenter(st, ctx.pid);
   return !!home && Math.hypot(home.x - at.x, home.y - at.y) <= COMMANDER.BASE_DEFEND_RADIUS + slack;
+}
+
+/** 34 §M.7 the insurance yard's spot: a legal yard footprint (with a tile of air round it, so it never
+ *  seals a path) in my territory, at least INSURANCE_MIN_DIST from the main yard and outside its wall —
+ *  in the corner the enemy's eyes have seen least (the Spymaster's heat map), far from their bases. In an
+ *  emergency (`threat` = where the main base is being hit) a spot inside the wall's far side, down to
+ *  INSURANCE_EMERGENCY_DIST out, is accepted when nothing farther is legal, and none within
+ *  INSURANCE_THREAT_CLEAR of the attack. Null when there is none. */
+export function insuranceSpot(ctx: Ctx, cy: Building, threat: Vec2 | null): Vec2 | null {
+  const { state, pid, cs } = ctx;
+  const CA = COMMANDER.CAMPAIGN;
+  const st = BUILDING_STATS.constructionYard;
+  const home = centerOf(cy);
+  const minD = threat ? CA.INSURANCE_EMERGENCY_DIST : CA.INSURANCE_MIN_DIST;
+  const foes = livingEnemies(state, pid)
+    .map((e) => cs.beliefs?.enemies[e]?.home ?? baseCenter(state, e))
+    .filter((h): h is Vec2 => !!h);
+  const W = state.mapWidth;
+  const tried = new Set<number>();
+  let best: Vec2 | null = null, bs = -Infinity;
+  for (const b of buildingsOf(state, pid)) {
+    if (b.buildingType === "wall" || b.buildingType === "gate") continue;
+    const R = BUILD_RADIUS + Math.max(b.width, b.height);
+    if (Math.hypot(centerOf(b).x - home.x, centerOf(b).y - home.y) + R + 2 < minD) continue; // can't reach out that far
+    for (let y = b.y - R; y <= b.y + b.height + R; y++) {
+      for (let x = b.x - R; x <= b.x + b.width + R; x++) {
+        if (x < 1 || y < 1 || x + st.width >= W - 1 || y + st.height >= state.mapHeight - 1) continue;
+        const k = y * W + x;
+        if (tried.has(k)) continue;
+        tried.add(k);
+        const c = { x: x + st.width / 2, y: y + st.height / 2 };
+        const d = Math.hypot(c.x - home.x, c.y - home.y);
+        if (d < minD || (threat && Math.hypot(c.x - threat.x, c.y - threat.y) < CA.INSURANCE_THREAT_CLEAR)) continue;
+        const inside = insideMyBase(ctx, c, 0);
+        if (inside && !threat) continue; // away from the main base: beyond its wall
+        if (!legalFor(ctx, x, y, st.width, st.height) || !footprintClear(state, x - 1, y - 1, st.width + 2, st.height + 2)) continue;
+        const dFoe = foes.length ? Math.min(...foes.map((f) => Math.hypot(c.x - f.x, c.y - f.y))) : 60;
+        const score = Math.min(d, 30) + 0.5 * Math.min(dFoe, 60) - 8 * eyesHeat(ctx, c) - (inside ? 12 : 0) +
+          (threat ? 0.5 * Math.min(Math.hypot(c.x - threat.x, c.y - threat.y), 40) : 0);
+        if (score > bs) { bs = score; best = { x, y }; }
+      }
+    }
+  }
+  return best;
 }

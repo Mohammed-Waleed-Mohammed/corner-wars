@@ -13,10 +13,11 @@ import { CRAFT_SCENARIOS } from "./craftScenarios";
 import { PUPPET_SCENARIOS } from "./puppetScenarios";
 import { OPS_SCENARIOS } from "./opsScenarios";
 import { CAMP_SCENARIOS } from "./campScenarios";
+import { CAMP_INTEL_SCENARIOS } from "./campIntelScenarios";
 import { expMining } from "./exp";
 
 // 33 §T + 34 §T — every scenario list the suite runs
-const SCENARIOS = [...BASE_SCENARIOS, ...COUNCIL_SCENARIOS, ...CRAFT_SCENARIOS, ...PUPPET_SCENARIOS, ...OPS_SCENARIOS, ...CAMP_SCENARIOS];
+const SCENARIOS = [...BASE_SCENARIOS, ...COUNCIL_SCENARIOS, ...CRAFT_SCENARIOS, ...PUPPET_SCENARIOS, ...OPS_SCENARIOS, ...CAMP_SCENARIOS, ...CAMP_INTEL_SCENARIOS];
 const GROUPS = [...BASE_GROUPS, ...COUNCIL_GROUPS];
 
 

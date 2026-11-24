@@ -5,15 +5,19 @@
 // fresh look (scout, sentry, any unit) corrects the guess.
 
 import { COMMANDER, UNIT_STATS } from "../../config/constants";
-import type { AIBeliefs, Building, EnemyBelief, MineBelief, PlayerId, Unit, Vec2 } from "../../core/types";
+import type { AIBeliefs, Building, CounterIntel, EnemyBelief, EnemyEye, MineBelief, PlayerId, SquadRole, Unit, Vec2 } from "../../core/types";
 import { staleness } from "../aiPerception";
-import { baseCenter, buildingsOf, claimedSources, contactPoint, defenseCover, defenseScore, livingEnemies } from "./assess";
+import { baseCenter, buildingsOf, claimedSources, contactPoint, defenseCover, defenseScore, fightersOf, livingEnemies, mainYard, squadCenter } from "./assess";
 import { aiLog, ensureSquad, type Ctx } from "./commander";
 import { nearestPassableTile } from "../pathfinding";
-import { cmd, squadOdds, squadUnits } from "./captain";
+import { cmd, myFormation, squadOdds, squadUnits, valueOf, type Squad } from "./captain";
+import { sightOf } from "../../state/terrain";
+import { jobsFor } from "./manual";
+import { PUSHING } from "./reports";
 
 const I = COMMANDER.INTEL;
 const dist = (a: Vec2, b: Vec2): number => Math.hypot(a.x - b.x, a.y - b.y);
+
 const centerOf = (b: Building): Vec2 => ({ x: b.x + b.width / 2, y: b.y + b.height / 2 });
 const value = (u: Unit): number => (u.hp / u.maxHp) * UNIT_STATS[u.unitType].gold;
 const isFighter = (u: Unit): boolean => u.hp > 0 && u.unitType !== "worker" && u.combatType !== undefined;
@@ -204,6 +208,7 @@ export function updateBeliefs(ctx: Ctx): AIBeliefs {
   }
   b.mines = mines;
   b.tick = t;
+  trackExposure(ctx); // 34 §M.4 what they know about me
   return b;
 }
 
@@ -240,18 +245,8 @@ export function runScout(ctx: Ctx): void {
   const interval = Math.round(COMMANDER.SCOUT_INTERVAL_TICKS * tier.cadenceMult);
 
   const contact = contactPoint(state, pid, s.unitIds);
-  // 34 §M.8 the dash: a guard in front of a base would chase a scout off before it ever sees the base —
-  // a healthy scout this close to the point it came to see goes in for the look first, then runs
-  const dash = s.mission === "scouting" && !!s.objective && dist(u, s.objective) <= COMMANDER.SCOUT_DASH_DIST &&
-    u.hp >= u.maxHp * COMMANDER.SCOUT_DASH_HP && staleness(state, intel, s.objective.x, s.objective.y) > 0;
-  if (contact && !dash && squadOdds(state, pid, [u], contact) < COMMANDER.SCOUT_FLEE_ODDS) {
+  if (contact && squadOdds(state, pid, [u], contact) < COMMANDER.SCOUT_FLEE_ODDS) {
     if (s.mission !== "flee" && home) {
-      // 34 §M.8 a trip I was chased off: that point stays unseen, so it would win every next pick and
-      // the scout would run into the same guard forever — leave it for a while, look elsewhere
-      if (s.mission === "scouting" && s.objective) {
-        s.tried = (s.tried ?? []).filter((c) => state.tick - c.tick < COMMANDER.SCOUT_TRIED_TICKS);
-        s.tried.push({ x: s.objective.x, y: s.objective.y, tick: state.tick });
-      }
       cmd(ctx, "MOVE", { unitIds: s.unitIds, x: home.x, y: home.y, spread: false });
       s.mission = "flee";
       s.objective = home;
@@ -264,14 +259,14 @@ export function runScout(ctx: Ctx): void {
   if (req && staleness(state, intel, req.x, req.y) < COMMANDER.SCOUT_STALE_TICKS / 4) cs.scoutRequest = undefined; // looked
   let urgent = cs.scoutRequest && state.tick - cs.scoutRequest.tick < 2 * COMMANDER.ATTACK_INTEL_WAIT_TICKS
     ? cs.scoutRequest : undefined;
-  // 34 §M.3/§M.9 every enemy gets a first look: an FFA King who has never seen a seat can't tell a
-  // runaway leader from a weakling. A never-seen home goes before a repeat look for the push (the push
-  // target itself was seen, or it is the never-seen home)
-  if (s.mission !== "flee" && s.mission !== "scouting") {
-    const chased = (s.tried ?? []).filter((c) => state.tick - c.tick < COMMANDER.SCOUT_TRIED_TICKS);
-    const unseen = livingEnemies(state, pid)
+  // 34 §M.9 in an FFA every enemy gets a first look: a King who has never seen a seat can't tell a
+  // runaway leader from a weakling. A never-seen home goes before a repeat look for the push (unless the
+  // push target itself was never seen). In a duel the one enemy is the scout's first pick anyway.
+  const foes = livingEnemies(state, pid);
+  if (foes.length >= 2 && s.mission !== "flee" && s.mission !== "scouting") {
+    const unseen = foes
       .map((e) => cs.beliefs?.enemies[e]?.home ?? baseCenter(state, e))
-      .filter((h): h is Vec2 => !!h && !Number.isFinite(staleness(state, intel, h.x, h.y)) && !chased.some((c) => dist(c, h) <= COMMANDER.INTEL.PEEK_DIST + 6))
+      .filter((h): h is Vec2 => !!h && !Number.isFinite(staleness(state, intel, h.x, h.y)))
       .sort((a, b) => dist(u, a) - dist(u, b));
     if (unseen.length && (!urgent || Number.isFinite(staleness(state, intel, urgent.x, urgent.y)))) {
       const h = unseen[0];
@@ -292,10 +287,6 @@ export function runScout(ctx: Ctx): void {
   if (s.mission === "scouting" && s.objective) {
     if (dist(u, s.objective) > COMMANDER.SCOUT_ARRIVE && u.moveTarget) return; // still on the way
     s.mission = "idle"; // arrived (or the move ended) — the look is taken, pick the next point
-    // (a trip that saw nothing new — the point is out of sight from where I could stand — is set aside
-    // like a chased-off one, or the same unseeable point would win every next pick)
-    s.tried = (s.tried ?? []).filter((c) => state.tick - c.tick < COMMANDER.SCOUT_TRIED_TICKS);
-    s.tried.push({ x: s.objective.x, y: s.objective.y, tick: state.tick });
   }
   if (state.tick < s.timer) return;
 
@@ -316,12 +307,9 @@ export function runScout(ctx: Ctx): void {
   pois.push({ at: { x: state.citadel.x, y: state.citadel.y }, imp: 1, owner: null });
 
   let best: { at: Vec2; imp: number; owner: PlayerId | null } | null = null, bs = -Infinity;
-  const chased = (s.tried ?? []).filter((c) => state.tick - c.tick < COMMANDER.SCOUT_TRIED_TICKS);
   for (const poi of pois) {
     const age = staleness(state, intel, poi.at.x, poi.at.y);
     if (age < COMMANDER.SCOUT_STALE_TICKS) continue;
-    // (the peek point of a POI lies up to PEEK_DIST short of it: compare against that reach)
-    if (chased.some((c) => dist(c, poi.at) <= COMMANDER.INTEL.PEEK_DIST + 6)) continue;
     const score = (Number.isFinite(age) ? Math.min(age, 20000) : 20000) * poi.imp - dist(u, poi.at) * 10;
     if (score > bs) { bs = score; best = poi; }
   }
@@ -399,4 +387,322 @@ export function runSentries(ctx: Ctx): void {
     if (dist(u, post) > 3 && !u.moveTarget) cmd(ctx, "MOVE", { unitIds: [u.id], x: post.x, y: post.y, spread: false });
   });
   sq.mission = "watch";
+}
+
+// ── 34 §M.4 counter-intelligence: what the enemy knows about me, and the hunt for their eyes ──────────
+// An enemy that can't see my army can't time its attacks or dodge my traps. I can only judge what they
+// see from what I see of their units: one of them with my yard (or most of my army) inside its sight
+// radius has looked. Their scouts and sentries in my territory are hunted by a small task force.
+
+const CA = COMMANDER.CAMPAIGN;
+const heatKey = (cx: number, cy: number): string => `${cx},${cy}`;
+const heatW = (h: { n: number; tick: number }, t: number): number => h.n * 0.5 ** ((t - h.tick) / (CA.HEAT_HALF_LIFE_S * 30));
+/** Distance from a point to a building's footprint (sight reaches a building at its nearest tile). */
+const toRect = (p: Vec2, b: Building): number =>
+  Math.hypot(p.x - Math.max(b.x, Math.min(b.x + b.width, p.x)), p.y - Math.max(b.y, Math.min(b.y + b.height, p.y)));
+/** The main base's structures: counter-intelligence guards the base (an outpost out by the map's
+ *  centre sees their scouts pass all match; chasing them there leaves the base without its fast units). */
+const structures = (ctx: Ctx): Building[] => {
+  const home = baseCenter(ctx.state, ctx.pid);
+  return buildingsOf(ctx.state, ctx.pid).filter((x) => x.buildingType !== "wall" && x.buildingType !== "gate" &&
+    !!home && dist(centerOf(x), home) <= COMMANDER.BASE_DEFEND_RADIUS);
+};
+
+/** Per enemy: when one of their units I could see last had my yard / the bulk of my army in its sight;
+ *  their eyes on me (scanEyes); and a decaying map of where those eyes have stood. */
+function trackExposure(ctx: Ctx): void {
+  const { state, cs, pid } = ctx;
+  const t = state.tick;
+  const ci = counterIntelOf(ctx);
+  if (ci.tick === t) return;
+  ci.tick = t;
+  const yard = mainYard(state, pid);
+  const army = fightersOf(state, pid);
+  const armyV = army.reduce((a, u) => a + value(u), 0);
+  const foes = enemyUnits(ctx);
+  const seen = new Map<number, Set<number>>(); // enemy → ids of my fighters inside their sight
+  for (const e of foes) {
+    const owner = e.owner as PlayerId;
+    const r = sightOf(state, e);
+    const ex = (ci.by[owner] ??= { baseTick: -1, armyTick: -1 });
+    if (yard && toRect(e, yard) <= r) ex.baseTick = t;
+    const ids = seen.get(owner) ?? new Set<number>();
+    seen.set(owner, ids);
+    for (const u of army) if (dist(u, e) <= r) ids.add(u.id);
+  }
+  for (const [owner, ids] of seen) {
+    let v = 0;
+    for (const u of army) if (ids.has(u.id)) v += value(u);
+    if (armyV > 0 && v >= CA.SEEN_ARMY_FRAC * armyV) ci.by[owner]!.armyTick = t;
+  }
+  const eyes = scanEyes(ctx, foes);
+  for (const e of eyes) {
+    if (e.tick !== t) continue;
+    const k = heatKey(Math.floor(e.at.x / CA.HEAT_CELL), Math.floor(e.at.y / CA.HEAT_CELL));
+    const h = ci.heat[k];
+    ci.heat[k] = { n: (h ? heatW(h, t) : 0) + 1, tick: t };
+  }
+
+  const looked = Object.keys(ci.by).map(Number).filter((o) => ci.by[o]!.armyTick === t);
+  if (looked.length && t - ci.logTick >= CA.EXPOSED_LOG_TICKS) {
+    ci.logTick = t;
+    const o = looked[0], x = ci.by[o]!;
+    const theirs = eyes.filter((e) => e.owner === o && e.tick === t);
+    const base = x.baseTick === t ? "now" : x.baseTick < 0 ? "never" : `${Math.round((t - x.baseTick) / 30)} s ago`;
+    aiLog(cs, t, "O", `[Spymaster] P${o} has eyes on my army${theirs.length ? ` (${theirs.length} ${theirs[0].type} at (${theirs[0].at.x | 0},${theirs[0].at.y | 0}))` : ""}; my base last seen ${base}${theirs.length && ctx.tier.raids && !cs.intelOff ? " → hunt" : ""}`);
+  }
+}
+
+function counterIntelOf(ctx: Ctx): CounterIntel {
+  return (ctx.cs.counterIntel ??= { tick: -1, eyesTick: -1, by: {}, eyes: [], heat: {}, logTick: -1e9, lastEyeTick: -1e9, lastEyeFrom: null });
+}
+const enemyUnits = (ctx: Ctx): Unit[] =>
+  ctx.state.entities.filter((e): e is Unit => e.kind === "unit" && e.hp > 0 && e.owner !== ctx.pid && e.owner !== "neutral");
+
+/** Their eyes on me, refreshed at most once a tick (the session and the hunt both ask): fighters in
+ *  sight in my territory or by my main army that are not an attacking force (their company is worth
+ *  ≤ HUNT_MAX_GROUP), plus, for a little while, the last spot of one that slipped out of sight (one
+ *  still in sight but out of my territory is no longer an eye). Nearest my yard first. */
+function scanEyes(ctx: Ctx, foes: Unit[] = enemyUnits(ctx)): EnemyEye[] {
+  const { state, cs, pid } = ctx;
+  const t = state.tick;
+  const ci = counterIntelOf(ctx);
+  if (ci.eyesTick === t) return ci.eyes;
+  ci.eyesTick = t;
+  const mine = structures(ctx);
+  const main = cs.squads.find((q) => q.role === "main");
+  const mainAt = main ? squadCenter(state, main.unitIds) : null;
+  // the army's company counts only while the army is at home: a push staging mid-map meets their
+  // scouts as the Marshal's business, and hunters sent after them there leave the push short
+  const armyHome = !!mainAt && mine.some((m) => toRect(mainAt, m) <= CA.HUNT_TERRITORY);
+  // an enemy with more than HUNT_MAX_GROUP of fighters inside my territory is attacking, not looking:
+  // its units there are the Warden's (each one's own company can be small: an army spreads out)
+  const inMine = (e: Unit): boolean => mine.some((m) => toRect(e, m) <= CA.HUNT_TERRITORY);
+  const invading = new Map<PlayerId, number>();
+  for (const e of foes) if (isFighter(e) && inMine(e)) invading.set(e.owner as PlayerId, (invading.get(e.owner as PlayerId) ?? 0) + value(e));
+  const attackers = new Set([...invading].filter(([, v]) => v > CA.HUNT_MAX_GROUP).map(([o]) => o));
+  if (attackers.size) ci.attackTick = t;
+  const eyes: EnemyEye[] = [];
+  for (const e of foes) {
+    if (!isFighter(e) || attackers.has(e.owner as PlayerId)) continue;
+    const inTerritory = inMine(e);
+    if (!inTerritory && !(armyHome && dist(e, mainAt!) <= CA.HUNT_ARMY_R)) continue;
+    let company = 0;
+    for (const f of foes) if (isFighter(f) && dist(f, e) <= CA.HUNT_GROUP_R) company += value(f);
+    if (company > CA.HUNT_MAX_GROUP) continue; // a raid or an army: the Warden's and the Marshal's
+    // since when it has been about (seen, or remembered, without a break): a scout passing through is
+    // gone in seconds, a sentry or a shadow on my army stays
+    const prev = ci.eyes.find((o) => o.id === e.id);
+    eyes.push({ id: e.id, owner: e.owner as PlayerId, at: { x: e.x, y: e.y }, tick: t, type: e.unitType, value: value(e), since: prev?.since ?? t });
+  }
+  const inSight = new Set(foes.map((e) => e.id));
+  for (const old of ci.eyes) if (!inSight.has(old.id) && !attackers.has(old.owner) && t - old.tick <= CA.HUNT_MEMORY_TICKS) eyes.push(old);
+  const home = baseCenter(state, pid);
+  eyes.sort((a, c) => (home ? dist(a.at, home) - dist(c.at, home) : 0) || a.id - c.id);
+  ci.eyes = eyes;
+  const fresh = eyes.find((e) => e.tick === t);
+  if (fresh) { ci.lastEyeTick = t; ci.lastEyeFrom = fresh.owner; }
+  return eyes;
+}
+
+/** What the hunt screens: the bulk of my army at home — the densest knot (by value, within
+ *  HUNT_GROUP_R) of my fighters in my territory other than the hunters; the yard when there is none. */
+function screenedAt(ctx: Ctx, home: Vec2): Vec2 {
+  const { state, cs, pid } = ctx;
+  const hunt = new Set(cs.squads.find((q) => q.role === "hunt")?.unitIds ?? []);
+  const mine = structures(ctx);
+  const us = fightersOf(state, pid).filter((u) => !hunt.has(u.id) && mine.some((m) => toRect(u, m) <= CA.HUNT_TERRITORY));
+  let best: Unit | null = null, bestV = -1;
+  for (const u of us) {
+    let v = 0;
+    for (const w of us) if (dist(u, w) <= CA.HUNT_GROUP_R) v += value(w);
+    if (v > bestV) { bestV = v; best = u; }
+  }
+  if (!best) return home;
+  let x = 0, y = 0, n = 0;
+  for (const w of us) if (dist(best, w) <= CA.HUNT_GROUP_R) { const v = value(w); x += w.x * v; y += w.y * v; n += v; }
+  return n > 0 ? { x: x / n, y: y / n } : { x: best.x, y: best.y };
+}
+
+/** The screen point toward `toward`: HUNT_SCREEN_R out from what the hunt screens, so an eye coming
+ *  from there is met (or backs off) before it is close enough to see the army. */
+function screenPoint(ctx: Ctx, at: Vec2, toward: Vec2): Vec2 {
+  const d = dist(at, toward) || 1;
+  const k = Math.min(CA.HUNT_SCREEN_R, d);
+  return nearestPassableTile(ctx.state, at.x + ((toward.x - at.x) / d) * k, at.y + ((toward.y - at.y) / d) * k);
+}
+
+/** Where the hunt waits between quarries: on the screen toward the enemy whose eyes came last, so
+ *  the next scout is turned back before it can see the army. */
+function picketPost(ctx: Ctx, home: Vec2): Vec2 {
+  const { state, cs } = ctx;
+  const from = cs.counterIntel?.lastEyeFrom;
+  const them = from != null ? cs.beliefs?.enemies[from]?.home ?? baseCenter(state, from) : null;
+  const at = screenedAt(ctx, home);
+  return them ? screenPoint(ctx, at, them) : at;
+}
+
+/** 34 §M.4: what `enemy` last saw of me, as far as I can tell (seconds ago; Infinity = never). */
+export function exposureOf(ctx: Ctx, enemy: PlayerId): { baseAgeS: number; armyAgeS: number } {
+  const x = ctx.cs.counterIntel?.by[enemy];
+  const age = (tk: number | undefined): number => (tk == null || tk < 0 ? Infinity : (ctx.state.tick - tk) / 30);
+  return { baseAgeS: age(x?.baseTick), armyAgeS: age(x?.armyTick) };
+}
+
+/** 34 §M.4: how scouted a point is — the decayed count of enemy eyes seen in its cell (and, at half
+ *  weight, the cells around it). The insurance yard (§M.7) goes where this is lowest. */
+export function eyesHeat(ctx: Ctx, at: Vec2): number {
+  const ci = ctx.cs.counterIntel;
+  if (!ci) return 0;
+  const cx = Math.floor(at.x / CA.HEAT_CELL), cy = Math.floor(at.y / CA.HEAT_CELL);
+  let n = 0;
+  for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+    const h = ci.heat[heatKey(cx + dx, cy + dy)];
+    if (h) n += heatW(h, ctx.state.tick) * (dx === 0 && dy === 0 ? 1 : 0.5);
+  }
+  return n;
+}
+
+/** 34 §M.4 / §W.2 the hunt task force: a few fast units (the manual's "hunt" job — buggies first, then
+ *  riflemen) kill or drive off the enemy's scouts and sentries in my territory. They are borrowed only
+ *  from units at home with nothing better to do (the main army when it isn't pushing, an idle raid),
+ *  never while the base is defending; between quarries they stand picket at the gate the eyes come
+ *  through, and are given back once no eyes have been about for HUNT_EYES_RECENT_TICKS. */
+export function runHunt(ctx: Ctx): void {
+  const { state, cs, pid, tier } = ctx;
+  if (!tier.raids || cs.intelOff) return; // Hard only, like the sentries
+  const ci = cs.counterIntel;
+  const home = baseCenter(state, pid);
+  if (!ci || !home) return;
+  const t = state.tick;
+  let s = cs.squads.find((q) => q.role === "hunt");
+  const live = new Map<number, Unit>();
+  for (const e of state.entities) if (e.kind === "unit" && e.hp > 0 && e.owner !== pid && e.owner !== "neutral") live.set(e.id, e);
+  const mine = structures(ctx);
+  const inReach = (p: Vec2): boolean => mine.some((m) => toRect(p, m) <= CA.HUNT_TERRITORY + CA.HUNT_LEASH);
+  // the quarry: eyes that keep watch — about my base for HUNT_LINGER_TICKS (a sentry, a shadow on my
+  // army). A scout passing through is not hunted: it is gone before the hunters arrive, and chasing it
+  // costs the base its fast units
+  const quarry = scanEyes(ctx)
+    .filter((e) => t - e.tick <= CA.HUNT_MEMORY_TICKS && t - (e.since ?? t) >= CA.HUNT_LINGER_TICKS)
+    .map((e) => ({ e, at: (live.get(e.id) ?? e.at) as Vec2, live: live.has(e.id) }))
+    .filter((q) => inReach(q.at));
+  // an attack in my territory (scanEyes) is defended by everyone: the hunt gives its units back
+  const defending = cs.stance === "DEFEND" || t - (ci.attackTick ?? -1e9) <= CA.HUNT_MEMORY_TICKS;
+  const striking = cs.stance === "ALL_IN"; // every unit goes: the hunt gives its own back
+  if (quarry.length === 0 || defending || striking) {
+    if (!s) return;
+    if (defending || striking || t - ci.lastEyeTick > CA.HUNT_EYES_RECENT_TICKS) {
+      endHunt(ctx, s, defending ? "the base is defending" : striking ? "the army strikes" : "no eyes about");
+      return;
+    }
+    // between quarries the hunt stands picket at the door their eyes come through
+    const to = picketPost(ctx, home);
+    if (s.mission !== "picket" || !s.objective || dist(s.objective, to) > 3) {
+      cmd(ctx, "GUARD", { unitIds: s.unitIds, x: to.x, y: to.y });
+      s.mission = "picket";
+      s.objective = to;
+    }
+    return;
+  }
+
+  // recruit up to strength against the quarry nearest my yard and its company
+  const first = quarry[0];
+  const company = quarry.filter((q) => dist(q.at, first.at) <= CA.HUNT_GROUP_R).reduce((a, q) => a + q.e.value, 0);
+  const want = CA.HUNT_ODDS * company;
+  const have = s ? squadUnits(state, s) : [];
+  const fastOnly = have.filter((u) => u.unitType === "scoutBuggy").length >= CA.HUNT_MIN; // then no slow hunters
+  if ((valueOf(have) < want || have.length < CA.HUNT_MIN) && have.length < CA.HUNT_MAX) {
+    // borrowed only from units with nothing better to do: the main army while the King builds up (in
+    // PRESSURE it is gathering for a push). Never the raid or the sentries: their buggies are their own
+    const pools: Squad[] = cs.squads.filter((q) => q.role === "main" && cs.stance === "BUILD_UP" && !PUSHING.includes(q.mission));
+    // a hunter must keep up with its quarry: a rifleman sent after a buggy only walks away from home
+    const cands: { u: Unit; from: Squad }[] = [];
+    for (const q of pools) for (const u of squadUnits(state, q)) {
+      if (jobsFor(u.unitType).includes("hunt") && (!fastOnly || u.unitType === "scoutBuggy") && dist(u, first.at) <= CA.HUNT_RECRUIT_R) cands.push({ u, from: q });
+    }
+    cands.sort((a, b) => b.u.speed - a.u.speed || dist(a.u, first.at) - dist(b.u, first.at) || a.u.id - b.u.id);
+    const take: { u: Unit; from: Squad }[] = [];
+    let v = valueOf(have);
+    for (const c of cands) {
+      if (have.length + take.length >= CA.HUNT_MAX || (v >= want && have.length + take.length >= CA.HUNT_MIN)) break;
+      take.push(c);
+      v += value(c.u);
+    }
+    // a hunt too weak to win is not sent: the quarry would only lead it away
+    if (take.length && (have.length + take.length >= CA.HUNT_MIN || v >= want)) {
+      s ??= ensureSquad(cs, "hunt");
+      const borrowed = (s.borrowed ??= {});
+      for (const c of take) {
+        c.from.unitIds = c.from.unitIds.filter((id) => id !== c.u.id);
+        s.unitIds.push(c.u.id);
+        borrowed[c.u.id] = c.from.role;
+      }
+      aiLog(cs, t, "T", `[Marshal] hunt: ${take.map((c) => c.u.unitType).join(", ")} → P${first.e.owner}'s ${first.e.type} at (${first.at.x | 0},${first.at.y | 0}) (eyes worth ${company | 0})`);
+    }
+  }
+  if (!s || s.unitIds.length === 0) return;
+  // the buggies relieve the slower hunters: once enough of them hunt, a borrowed rifleman goes back
+  let units = squadUnits(state, s);
+  if (units.filter((u) => u.unitType === "scoutBuggy").length >= CA.HUNT_MIN) {
+    const back = units.filter((u) => u.unitType !== "scoutBuggy");
+    if (back.length) { giveBack(ctx, s, back.map((u) => u.id)); units = squadUnits(state, s); }
+  }
+  // loose units chase; a formed one is first pulled out of its old formation (FORM_UP into a shape of
+  // its own), then that shape is broken
+  const f = myFormation(state, pid, s);
+  if (f) {
+    const ours = new Set(s.unitIds);
+    if (f.unitIds.every((id) => ours.has(id))) cmd(ctx, "BREAK_FORMATION", { formationInstanceId: f.id });
+    else cmd(ctx, "FORM_UP", { unitIds: units.filter((u) => u.formationId != null).map((u) => u.id), formationId: "column" });
+    return;
+  }
+  const c = squadCenter(state, s.unitIds) ?? home;
+  const army = screenedAt(ctx, home);
+  // the eye nearest the army is the one about to see it
+  const q = quarry.reduce((a, b) => (dist(b.at, army) < dist(a.at, army) ? b : a));
+  const far = dist(q.at, army) > CA.HUNT_SCREEN_R + CA.HUNT_SCREEN_SLACK;
+  if (q.live && far) {
+    // still out of sight of the army: stand on the screen between them (attack-moving, so the hunters
+    // engage it if it comes on) rather than chase a fast scout around the map
+    const to = screenPoint(ctx, army, q.at);
+    if (s.mission !== "screen" || !s.objective || dist(s.objective, to) > 2) {
+      cmd(ctx, "ATTACK_MOVE", { unitIds: s.unitIds, x: to.x, y: to.y, spread: false });
+      s.mission = "screen";
+      s.objective = to;
+      s.lastOrderTick = t;
+    }
+    return;
+  }
+  if (q.live) {
+    const slack = units.filter((u) => u.forcedTargetId !== q.e.id);
+    if (slack.length) cmd(ctx, "ATTACK_TARGET", { unitIds: slack.map((u) => u.id), targetId: q.e.id, keepHarvest: false });
+  } else if (dist(c, q.at) <= 3) {
+    ci.eyes = ci.eyes.filter((e) => e.id !== q.e.id); // looked where it was last seen: gone
+  } else if (s.mission !== "hunt" || !s.objective || dist(s.objective, q.at) > 2) {
+    cmd(ctx, "ATTACK_MOVE", { unitIds: s.unitIds, x: q.at.x, y: q.at.y, spread: false });
+  }
+  s.mission = "hunt";
+  s.objective = { x: q.at.x, y: q.at.y };
+  s.lastOrderTick = t;
+}
+
+/** Hunters go back to the squad each was borrowed from (or main). */
+function giveBack(ctx: Ctx, s: Squad, ids: number[]): void {
+  const { cs } = ctx;
+  for (const id of ids) {
+    const role: SquadRole = s.borrowed?.[id] ?? "main";
+    (cs.squads.find((q) => q.role === role) ?? ensureSquad(cs, "main")).unitIds.push(id);
+    if (s.borrowed) delete s.borrowed[id];
+  }
+  const gone = new Set(ids);
+  s.unitIds = s.unitIds.filter((id) => !gone.has(id));
+}
+
+/** Disband the hunt. */
+function endHunt(ctx: Ctx, s: Squad, why: string): void {
+  const n = s.unitIds.length;
+  giveBack(ctx, s, [...s.unitIds]);
+  aiLog(ctx.cs, ctx.state.tick, "T", `[Marshal] hunt over (${why}): ${n} back`);
+  ctx.cs.squads = ctx.cs.squads.filter((q) => q !== s);
 }

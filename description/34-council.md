@@ -839,6 +839,114 @@ Personalities gain `strikeOdds`, `trustEst`, `cunning` and `plan` (§C.1–2).
     control and counter-intelligence, logistics, the insurance yard, FFA politics, the comeback, and
     the after-action review.
 
+### As built — steps 7 to 12 (what the code does, and where it differs from the text above)
+
+**Step 7, the captains apply the manual** (`captain.ts` `runCaptains`, `manual.ts`):
+- Artillery steps out of its blind ring (`MANUAL.ARTY_STEP`).
+- Loose units kite when `canKite` says their range and speed allow it.
+- Focus fire follows `focusScore` (medics and value first), as one grouped ATTACK_TARGET every other tactical tick.
+- Squads that are retreating or fleeing get no micro. The home guard never focus-fires, because it chased baits.
+- Hammerfall is cast only on a stationary group.
+
+**FALL_BACK is not used for retreats.** In `craft.fallback` it kept less than a plain MOVE retreat: the facing formation walks at its slowest member's pace and is caught. The retreat stays a MOVE, with the open-road detour of step 10. `craft.fallback` is therefore not in the suite. Scenarios: `craft.artillery`, `craft.kite`, `craft.focus`.
+
+**Step 8, the profile** (`profile.ts`, updated by the council each session): each enemy's response time, chase distance, attack-route heat grid, and the `overreacts` / `turtles` reads; scenario `read.profile`. The squads keep their fixed roles (main, homeGuard, raid, citadel, scout, sentry), and operations form their groups from them: the feint's raid, and the siege's guns and screen.
+
+**Step 9, operations** (`operations.ts`):
+- **Built:** direct, feint and siege, plus the leash as counter-craft.
+- **Not built yet:** pincer, trap, ambush, pin, trade and the Citadel operation. Raid rotation lives in `runRaid` (`OPS.RAID_ROTATE`).
+- **Choosing:** the candidates are scored by the enemy's profile and the character's cunning, ties break on the seeded rng, and `OP_COOLDOWN_S` applies.
+- **Feint:**
+  - The raid goes to a worker spot at least `FEINT_MIN_DIST` from their home while the main army stages.
+  - It strikes when the raid is answered (`watchFeint`, every tactical tick), or after `FEINT_WAIT_S`.
+  - It is skipped against an enemy known not to over-react.
+- **Siege:**
+  - Needs ≥ 2 artillery and ≥ 2 towers that the guns out-range near the objective.
+  - A direct push converts to a siege once it sees those towers ahead.
+  - The screen holds at tower range + `SIEGE_SCREEN_MARGIN` while the guns shell from their own range.
+  - It ends when the towers are gone, the guns are lost, or after `SIEGE_MAX_S`.
+- **The leash:** units on defensive missions that chased more than `CHASE_MAX` past my territory are called back. A regrouping main army is not leashed, because a beaten push walking home is not a chase.
+- **Scenarios:** `op.siege`, `op.feint`, `counter.leash`. `counter.leash` passes trivially: neither run chases the bait.
+
+**Step 10, battle craft** (`battle.ts`; the hold, hold-fire and guard orders are in the sim, see §W.6–7):
+- **No trickling:** stragglers wait unless they are a real group or the road is clear (`mayReinforce`).
+- **An open retreat** steps round a blocker on the road home (`retreatVia`, `BATTLE.DETOUR`).
+- **Wounded rotation:** loose units below `WOUNDED_FRAC` step back to the medics.
+- **Answering shelling:** units shelled by artillery they can't reach charge it, if `fightOdds` allows.
+- **Scenarios:** `battle.shelled`, `battle.retreatOpen`.
+
+**Step 11, standoffs** (`standoff.ts`, the ladder: hold, better ground, artillery, go around, commit at `FIGHT_ODDS`, else disengage):
+- A standoff starts only out of reach (`STANDOFF.MIN_GAP`), never while a beaten push walks home.
+- Odds clearly mine (`COMMIT_MARGIN`) skip straight to commit.
+- The dance count survives bloody pushes and a disengage. It lapses after `DANCE_FORGET_S` without facing anyone.
+- `cs.standoffOff` is the ablation. `standoff.position` and `standoff.artillery` are not separate scenarios.
+- **Finding** (`standoff.dance`, a line 2× my army across the road): the dance is noticed and the ladder adds no push or loss (3 vs 3 pushes, same value lost). Under these rules a long face-off rarely forms: the launch route veto already stages the army at home, and regroup hysteresis makes the next push a clear win.
+
+**Step 12, the campaign** (`estimate.ts`, `aar.ts`; the insurance yard and counter-intelligence are below):
+- **The estimate:** worth, income, army, trade, tech, map and time.
+  - Worth leaves out the bank on both sides, since theirs can't be seen.
+  - Their income is the Spymaster's count from a recent look at their base. Otherwise it is what their army's growth over the last minute must have cost, held as a floor that fades over `INCOME_MEMORY_S`.
+  - The income and army ratios are smoothed over `SMOOTH_S`.
+- **Strategies:** chosen with hysteresis (`SWITCH_HOLD_S`, `SWITCH_MIN_S`), and only after `OPENING_S` (the plan is the opening book). They move:
+  - the PRESSURE bar (`PRESS_MUL`: fortress and comeback never press);
+  - the launch odds and the plan's strike nerve (`NEED_MUL`);
+  - the petition leans (`LEAN`);
+  - the push's economic victims (strangulation);
+  - the raid's rest (strangulation and comeback).
+- **Windows:**
+  - The counter-punch (`COUNTERPUNCH_S`) and the third party's chance (`THIRDPARTY_S`) are ALL_IN windows. They launch at `FIGHT_ODDS` without the look-first wait and outrank the plan phase's postures.
+  - My spike and their spike coming lower the PRESSURE bar for `SPIKE_S`.
+- **FFA politics:**
+  - Two enemies seen fighting each other: stay out, then strike the weakened winner or the exposed loser.
+  - A runaway leader (`LEADER_RATIO`) becomes the target, unless the army is mid-push on another.
+- **The after-action review** follows every squad's fight. An enemy unit gone from memory was seen dying. A record (≥ `AAR_MIN_VALUE`) carries the ground, the operation, the forces, their odds, and whether the result matched them. It is logged as `[AAR] …`, so `npm run aisim -- match … "AAR"` prints it.
+- **The timing strike and the windows:** when another window (or the stance table) launches the push during the plan's strike phase, that push is the timing strike, and the plan logs it as such (`[King] timing strike on P…: launched by the … window`).
+- **First looks** (FFA only, `spymaster.ts` `runScout`): with two or more enemies, every enemy home gets a first look (`FIRST_LOOK_DIST`) before repeat looks for the push. In a duel the one enemy is the scout's first pick anyway.
+- **Scouting changes tried and taken out:**
+  - Setting aside a spot the scout was chased off from (or saw nothing at) did stop it walking into the same guard forever. It also left the enemy base unlooked for a minute and a half, so the push and the feint ran on stale intel (`op.feint`, `prio.threat`, `battle.retreatOpen` failed).
+  - The dash through a guard went with it.
+  - The scout therefore still repeats a trip into a guard, as it did before step 12.
+- **Counter-intelligence** (§M.4; `spymaster.ts` `trackExposure`, `runHunt`):
+  - **What they know about me.** Each session the Spymaster judges what each enemy has seen from their units it can see. A unit with my yard, or ≥ `SEEN_ARMY_FRAC` of my army's value, inside its sight radius has looked (`exposureOf`).
+  - **Eyes.**
+    - Their fighters count as eyes in my main base's ground (`HUNT_TERRITORY` of a structure within `BASE_DEFEND_RADIUS` of home), or by my main army while it is at home.
+    - Their company must be worth ≤ `HUNT_MAX_GROUP`.
+    - An enemy with more than that inside my base is attacking: its units are the Warden's, and the hunt disbands.
+    - A decaying heat map (`HEAT_CELL`, `HEAT_HALF_LIFE_S`) records where the eyes have stood (`eyesHeat`).
+  - **The hunt** (Hard only, like the sentries):
+    - The quarry is an eye that keeps watch: about my base for `HUNT_LINGER_TICKS` (a sentry, a shadow on the army). A scout passing through is not hunted.
+    - It is a task force of 2 to 4 units worth ≥ `HUNT_ODDS` × the quarry, buggies first. They are borrowed only from the main army while the King builds up, never from the raid or the sentries.
+    - It screens the army `HUNT_SCREEN_R` out toward an eye still out of its sight, kills the eye when it comes on, and stands picket between quarries toward the last eye's owner.
+    - It gives its units back when the King goes ALL_IN, when the base defends, and after `HUNT_EYES_RECENT_TICKS` without eyes.
+  - **Why the hunt is this narrow.** The first version hunted every eye in any territory (outposts included), took the raid's buggies and had the Quartermaster build more. It cost the AI in real games:
+    - Hard vs Medium won 4 of 9 seeds, against 6 of 9 with the hunt off.
+    - In Hard Boomer vs Hard Rusher, the Boomer kept its workers in 2 of 9 seeds against 6 of 9, and the Rusher won 6 of 9 against none.
+    - Its buggies chased scouts round the map centre and fought an attacking army piecemeal.
+    - Narrowed, the same nine duels match the hunt-off numbers (6 of 9, no Rusher win).
+  - Logs: `[Spymaster] P… has eyes on my army …` and `[Marshal] hunt: …`. Ablation: `cs.intelOff`.
+- **The insurance yard** (§M.7; `treasurer.ts` `insuranceRequest`, `place.ts` `insuranceSpot`):
+  - From `INSURANCE_MID_S` the Treasurer saves for a second yard, as an invest at `INSURANCE_PRIO`.
+  - It goes ahead of everything (`INSURANCE_EMERGENCY_PRIO`) when the main base is under an attack it is losing (≥ `INSURANCE_THREAT_MIN` with home odds below `INSURANCE_HOLD_ODDS`, or the yard below `INSURANCE_YARD_HP`) while the war goes badly.
+  - The spot is ≥ `INSURANCE_MIN_DIST` from the main yard and outside its wall, where the eyes' heat is least and far from their bases. In an emergency it may be as close as `INSURANCE_EMERGENCY_DIST` and must be clear of the attack.
+  - Ablation: `cs.insuranceOff`.
+- **Not built yet from §M:** the vision network, forward positions and contested ground (§M.4); the reinforcement path (§M.5); the information war's deceptions (§M.8); the layered defense (§M.10). The comeback is a grand strategy only.
+- **Scenario status** (`camp.*`):
+  - `camp.counterpunch`, `camp.thirdparty` and `camp.comeback` pass. Their baselines (campaign off) pass too: the older rows already strike a crippled enemy and pick on brawlers, so the windows make it explicit and logged rather than new.
+  - `camp.counterintel` fails: the watchers' view of my army is ≥ 60 s old 25% of the match (the bar is 50%), against 11% without the hunt. The Boomer in it now takes its army out to attack (ALL_IN at 185 s and 255 s), the shadow follows the army out of the base, and the narrowed hunt does not follow it there. The broad first version passed it (52–77%) at the cost described above.
+  - `camp.insurance` passes: the second yard goes up 30 tiles out at 381 s, before the main yard falls at 442 s. It goes up as the middle-game invest, not as the emergency. The blow in that scenario is 3.4× my army, so it takes the second yard as well, 9 s later, and the seat is out at 451 s against 442 s without the insurance. The yard saves a seat from one raid, not from an army that owns the map. The Treasurer raises it on every tier that runs the council, Medium included.
+  - `camp.estimate` and `camp.leader` fail, and their pass conditions are kept as specified. The King's estimate is only as good as the Spymaster's look:
+    - An economy behind a guarded base is a guess (`ECON_GUESS`) until a look lands, and an army's growth can't tell a richer enemy from one that spends more of its income on war.
+    - On Four Corners the diagonal seat is never seen within 10 minutes.
+  - The next work is §M.4's vision network: eyes kept on every seat.
+- **The FFA gate:** `ffa.*` decide within 50 minutes in 1 of 3 seeds, as at step 11. A separate measurement on seeds 304–309 gave 1/6 decided before this work and 2/6 after, so FFA results in this window are mostly chance; the gate is reported, not tuned to.
+- **The Boomer-vs-Rusher gate** (`war.bvr.*`, the Boomer keeps its workers) is 2 of 3 (seed 3 loses 38). Over seeds 1–9:
+  - 8 of 9 at step 11;
+  - 8 of 9 now with the campaign and the hunt off;
+  - 6 of 9 now with the hunt off;
+  - 6 of 9 as built.
+
+  The cost is the campaign. Its strategies and spike windows send the Boomer out (PRESSURE, then ALL_IN, around 8 minutes), and the Rusher raids its workers while the army is away. With the campaign off the Boomer sits in BUILD_UP from 5 minutes to the end. The open question is how far a strategy that says "time is on my side" should press against a raider.
+
 ---
 
 ## §T New scenarios (added to `npm run aisim -- scen`)

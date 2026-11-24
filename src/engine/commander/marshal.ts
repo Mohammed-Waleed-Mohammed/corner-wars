@@ -14,7 +14,7 @@ import { nearestPassableTile } from "../pathfinding";
 import { staleness } from "../aiPerception";
 import { planAbility } from "../aiAbilities";
 import { baseThreatened, centerOf, cmd, runCaptains, dist, driveSquad, ensureFormation, gatePost, myFormation, pickFormation, retreat, squadOdds, squadUnits, valueOf, type Squad } from "./captain";
-import { runScout, runSentries } from "./spymaster";
+import { runHunt, runScout, runSentries } from "./spymaster";
 import { defenseAnchor, runHomeGuard } from "./warden";
 import { ask, homeRadius, strikeRead, veto } from "./reports";
 import { opReady, runLeash, siegeHolds, watchFeint } from "./operations";
@@ -34,6 +34,7 @@ export function runMarshal(ctx: Ctx): void {
   runCitadel(ctx);
   runScout(ctx);
   runSentries(ctx);
+  runHunt(ctx); // 34 §M.4 counter-intelligence: the hunt task force
   runPowers(ctx);
   runAbility(ctx); // 27 §E commander ability
   runCaptains(ctx); // 34 §W.1 the manual: artillery discipline, kiting, focus fire

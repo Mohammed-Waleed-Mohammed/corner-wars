@@ -869,9 +869,6 @@ export const COMMANDER = {
   SCOUT_STALE_TICKS: 1800, // a point is worth a look once unseen for this long (60 s)
   SCOUT_ARRIVE: 4, // tiles — close enough to count as "looked"
   SCOUT_FLEE_ODDS: 2.0, // the scout runs from anything but a trivially won fight
-  SCOUT_TRIED_TICKS: 2700, // 34 §M.8 a point a scouting trip failed to see is left alone this long (90 s)
-  SCOUT_DASH_DIST: 10, // 34 §M.8 a scout this close to its look point dashes in through a guard…
-  SCOUT_DASH_HP: 0.5, // …while it has at least this share of its hp
   // §K v3 look before you leap: a push objective unseen for longer than this is scouted first…
   ATTACK_INTEL_TICKS: 1350,
   ATTACK_INTEL_WAIT_TICKS: 900, // …waiting up to this long for the look; after that it launches anyway,
@@ -1024,6 +1021,37 @@ export const COMMANDER = {
     AAR_GAP_S: 6, // a fight is over after this long without contact
     AAR_R: 9, // enemy fighters this close to a squad's units are in its fight
     AAR_KEEP: 40, // records kept
+    // 34 §M counter-intelligence (§M.4) and the insurance yard (§M.7)
+    HUNT_TERRITORY: 14, // enemy units this close to one of my structures are in my territory…
+    HUNT_ARMY_R: 12, // …or this close to my main army: eyes worth hunting
+    HUNT_GROUP_R: 8, // an eye's company: enemy fighters this close to it
+    HUNT_MAX_GROUP: 450, // a company worth more than this is a raid or an army (the Warden's, the Marshal's), not eyes
+    HUNT_ODDS: 1.5, // hunters bring at least this × the quarry's value…
+    HUNT_MIN: 2, // …and at least this many units…
+    HUNT_MAX: 4, // …and at most this many
+    HUNT_LINGER_TICKS: 300, // an eye about my base this long keeps watch (the hunt's quarry); a scout passing through is not hunted
+    HUNT_RECRUIT_R: 30, // hunters are taken only from units of mine this close to the quarry
+    HUNT_LEASH: 10, // a hunter turns back this far outside my territory (HUNT_TERRITORY of a structure)
+    HUNT_MEMORY_TICKS: 150, // an eye that slips out of sight is looked for at its last spot this long
+    HUNT_SCREEN_R: 9, // the hunt screens the army this far out toward an eye still out of its sight (and pickets there between quarries)…
+    HUNT_SCREEN_SLACK: 3, // …and chases the eye only once it is within the screen + this
+    HUNT_EYES_RECENT_TICKS: 1800, // …until none has been seen for this long (then it disbands)
+    SEEN_ARMY_FRAC: 0.25, // an enemy saw my army when this share of its value stood inside their units' sight
+    HEAT_CELL: 8, // tiles per cell of the "where their eyes have been" map
+    HEAT_HALF_LIFE_S: 180, // a sighting there weighs half after this long
+    EXPOSED_LOG_TICKS: 900, // "they see my army" is logged at most this often
+    INSURANCE_MID_S: 360, // the middle game (34 §M.3): from here the Treasurer saves for a second yard…
+    INSURANCE_PRIO: 62, // …at this priority (≥ SAVE_PRIO: saved for; an "invest", so not while defending or short)
+    INSURANCE_EMERGENCY_PRIO: 96, // under a winning attack it goes ahead of everything, and is saved for
+    INSURANCE_THREAT_MIN: 400, // an attack inside my main base this big…
+    INSURANCE_HOLD_ODDS: 1.0, // …that what is home holds below these odds is winning…
+    INSURANCE_YARD_HP: 0.6, // …as is any attack once the main yard is below this hp share
+    INSURANCE_BEHIND: 1.0, // the war goes badly: my army below this × the strongest enemy's estimate
+    INSURANCE_MIN_DIST: 16, // tiles from the main yard: away from the main base
+    INSURANCE_EMERGENCY_DIST: 10, // in an emergency, the least distance accepted when nothing farther is legal
+    INSURANCE_THREAT_CLEAR: 14, // the yard is placed at least this far from the attack
+    INSURANCE_SPOT_TICKS: 900, // the chosen spot is re-scored this often
+    INSURANCE_CREW: 3, // workers sent to raise it
   },
   // 34 §W.8 standoffs and dances
   STANDOFF: {
