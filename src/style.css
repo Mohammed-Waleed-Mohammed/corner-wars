@@ -1296,6 +1296,7 @@ canvas {
 .post-result { font-size: 34px; font-weight: 800; letter-spacing: 2px; }
 .post-result.win { color: var(--ui-accent); }
 .post-result.lose { color: var(--hp-low); }
+.post-result.neutral { color: var(--ui-text); }
 .post-sub { color: var(--ui-dim); font-size: 13px; margin: 4px 0 16px; }
 .post-table { width: 100%; border-collapse: collapse; font-size: 13px; margin-bottom: 16px; }
 .post-table th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em;

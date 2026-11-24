@@ -32,6 +32,7 @@ Each file is the **single source of truth** for its own system and numbers. The 
 | `32-late-economy-and-research.md` | Late-game gold without mines (the Resonance Tap), the research tree re-planned as six branches × four tiers, the Research board UI, and how the AI uses both |
 | `33-ai-v2.md` | AI v2: beliefs and scouting under fog, the mine-aware economy, the priced-request budget arbiter, danger-driven defense, war posture — and the headless scenario suite (`npm run aisim`) every AI change must pass |
 | `34-council.md` | The Council: the Medium/Hard AI as a King (character, grand plan, posture, rulings) and six councillors (Spymaster, Treasurer, Warden, Quartermaster, Scholar, Marshal) who brief, consult each other and petition with reasons; the vetoes that fix the 33 duel losses; the whole match as a campaign (situation estimate, grand strategies, map control, logistics, windows, insurance yard, FFA politics, comeback); the art of war (field manual, task forces, enemy profiles, operations such as feints, traps and ambushes, counter-craft, guard leash, standoff resolution, battle craft); the migration plan and its scenarios |
+| `35-spectator.md` | Spectator mode: an all-AI match you set up and only watch — any side's view or the whole map, a scoreboard of what each AI is doing, speed control, and every AI's Council log live (`npm run aisim -- spectate` checks it leaves the sim untouched) |
 
 ## Conventions used everywhere
 

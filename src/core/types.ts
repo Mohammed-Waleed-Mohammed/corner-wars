@@ -727,6 +727,9 @@ export interface GameState {
   viewPlayer: PlayerId; // the local player's perspective (fog owner + HUD/render focus); 0 in SP,
   // the client's assigned slot in MP. LOCAL-only + cosmetic — NOT hashed by the checksum, so it may
   // legitimately differ across peers without breaking determinism.
+  // 35 spectator mode: every player's fog kept side by side (explored memory intact), so the viewer
+  // can switch POV at once; pov null = the whole map, no fog. LOCAL-only + cosmetic, never hashed.
+  observer?: { pov: PlayerId | null; grids: FogState[][][] };
   mapWidth: number; // 48
   mapHeight: number; // 48
   winner: PlayerId | null;

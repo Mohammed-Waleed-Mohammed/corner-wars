@@ -8,8 +8,8 @@ import type { GameState, Unit } from "../../core/types";
 import type { Camera } from "../camera";
 import { PLANS } from "../../engine/commander/plan";
 
-export function drawAIOverlay(ctx: CanvasRenderingContext2D, state: GameState, camera: Camera): void {
-  let panelY = 52;
+export function drawAIOverlay(ctx: CanvasRenderingContext2D, state: GameState, camera: Camera, inset?: { top: number; right: number }): void {
+  let panelY = inset?.top ?? 52;
   for (const p of state.players) {
     const cs = p.ai?.commander;
     if (!cs || p.eliminated) continue;
@@ -73,7 +73,7 @@ export function drawAIOverlay(ctx: CanvasRenderingContext2D, state: GameState, c
     const lines: string[] = [];
     const myArmy = armyOf(state, p.id);
     const tArmy = cs.targetPlayer != null ? armyOf(state, cs.targetPlayer) : 0;
-    lines.push(`P${p.id} ${cs.personality.toUpperCase()} · ${cs.stance} → ${cs.targetPlayer != null ? "P" + cs.targetPlayer : "—"}`);
+    lines.push(`P${p.id + 1} ${cs.personality.toUpperCase()} · ${cs.stance} → ${cs.targetPlayer != null ? `P${cs.targetPlayer + 1}` : "—"}`); // players count from 1, as on screen
     lines.push(`army ${myArmy | 0} vs ${tArmy | 0} · gold ${p.gold | 0}`);
     // 33: what it believes and wants (belief of the target, danger, desired army, income, saving)
     const tb = cs.targetPlayer != null ? cs.beliefs?.enemies[cs.targetPlayer] : undefined;
@@ -96,7 +96,7 @@ export function drawAIOverlay(ctx: CanvasRenderingContext2D, state: GameState, c
     for (const s of cs.squads) lines.push(`[${s.role}] ${s.unitIds.length}u ${s.formation ?? "-"} ${s.mission}`);
 
     const w = 300, lh = 13, h = lines.length * lh + 12;
-    const x = camera.viewportW - w - 12;
+    const x = camera.viewportW - w - 12 - (inset?.right ?? 0);
     ctx.save();
     ctx.fillStyle = "rgba(10,12,15,0.85)";
     ctx.fillRect(x, panelY, w, h);
@@ -105,6 +105,8 @@ export function drawAIOverlay(ctx: CanvasRenderingContext2D, state: GameState, c
     ctx.strokeRect(x + 0.5, panelY + 0.5, w - 1, h - 1);
     ctx.fillStyle = HUD.TEXT;
     ctx.font = "700 10px Rajdhani, monospace";
+    ctx.textAlign = "left"; // earlier draws can leave right/centre alignment behind
+    ctx.textBaseline = "alphabetic";
     lines.forEach((l, i) => {
       ctx.fillStyle = i === 0 ? col : HUD.TEXT;
       ctx.fillText(l, x + 8, panelY + 14 + i * lh);

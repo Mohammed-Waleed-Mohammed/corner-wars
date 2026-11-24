@@ -4,6 +4,8 @@
 //   match <map> <minutes> <seed> <pers,pers,…>  one all-AI match with a per-minute report
 //   survey [minutes] a few all-AI matches across maps/personalities — the macro health report
 //   det              determinism: the same match twice, identical checksums every 30 s
+//   spectate [min]   35: the spectator's all-AI match — observer fog, POV switching and the log feed
+//                    change nothing in the sim (checksums match a plain run) and every seat is heard
 
 import type { AIPersonality, PlayerId } from "../../core/types";
 import { incomeBetween, Match, type Seat } from "./harness";
@@ -15,6 +17,7 @@ import { OPS_SCENARIOS } from "./opsScenarios";
 import { CAMP_SCENARIOS } from "./campScenarios";
 import { CAMP_INTEL_SCENARIOS } from "./campIntelScenarios";
 import { expMining } from "./exp";
+import { spectateCheck } from "./spectateCheck";
 
 // 33 §T + 34 §T — every scenario list the suite runs
 const SCENARIOS = [...BASE_SCENARIOS, ...COUNCIL_SCENARIOS, ...CRAFT_SCENARIOS, ...PUPPET_SCENARIOS, ...OPS_SCENARIOS, ...CAMP_SCENARIOS, ...CAMP_INTEL_SCENARIOS];
@@ -86,6 +89,11 @@ if (mode === "exp") {
     out(`\n=== ${map} seed ${seed} [${pers.join(",")}] (${((Date.now() - t0) / 1000).toFixed(0)} s wall)`);
     report(m);
   }
+} else if (mode === "spectate") {
+  const r = spectateCheck(Number(args[1] ?? 10));
+  for (const l of r.lines) out(l);
+  out(r.ok ? "spectate: PASS" : "spectate: FAIL");
+  if (!r.ok) process.exit(1);
 } else if (mode === "det") {
   const run = (): number[] => {
     const m = allAi("four_corners", ["rusher", "boomer", "turtle", "opportunist"], 7);

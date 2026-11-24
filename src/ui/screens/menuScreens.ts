@@ -13,6 +13,7 @@ import { isMissionUnlocked, loadProgress } from "../campaign/progress";
 import { codexScreen } from "../codex/codexScreen";
 import { MenuBattle } from "./menuBattle";
 import { skirmishSetupScreen, type SkirmishStart } from "./skirmishSetup";
+import { spectateSetupScreen, type SpectateSetup } from "./spectateSetup";
 import type { Screen, ScreenNav } from "./screenManager";
 
 /** App-level actions the menu triggers (leaf handoffs to game/editor/lobby live in main.ts). */
@@ -20,6 +21,7 @@ export interface MenuServices {
   version: string;
   playerName: () => string;
   bootSkirmish: (start: SkirmishStart) => void; // start an SP match with the frozen setup config
+  bootSpectate: (setup: SpectateSetup) => void; // 35: an all-AI match you only watch
   editMap: (map: GameMap) => void; // open a custom map in the editor
   hostMultiplayer: () => void;
   joinMultiplayer: () => void;
@@ -79,6 +81,7 @@ export function mainMenuScreen(services: MenuServices): Screen {
         cards.append(
           playCard("⚔", "Skirmish", "Play against the AI on any map.", () => nav.push(skirmishSetupScreen(services))),
           playCard("🌐", "Multiplayer", "Host or join an online game.", () => nav.push(mpHomeScreen(services))),
+          playCard("👁", "Spectate", "Set up an all-AI match and watch it from any side.", () => nav.push(spectateSetupScreen(services))),
         );
         actions.append(cards, button({ label: "Back", kind: "ghost", className: "menu-btn-sm", onClick: renderStack }));
       };

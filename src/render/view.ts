@@ -64,4 +64,5 @@ export interface RenderView {
   // 20 §I: hovering a formation card ghosts its layout at the army's position (world slot points + facing).
   formationPreview: { points: Vec2[]; anchor: Vec2; facing: number } | null;
   aiDebug: boolean; // 22 §O: the F5 AI Commander overlay (local, read-only)
+  aiPanels?: { top: number; right: number }; // 35: screen px the spectator's panels take (F5 panels start below/left of them)
 }

@@ -8,10 +8,9 @@
 
 import { COLORS, HUD, RENDER, ownerColor } from "../../config/constants";
 import { BIOMES, biomeMapColors } from "../../content/biomes";
-import { fogAt } from "../../engine/fog";
+import { concealedFromView, fogAt } from "../../engine/fog";
 import { fogTileCanvas } from "./worldLayers";
 import { isLowPower } from "../../state/gameState";
-import { concealedFrom } from "../../state/terrain";
 import type { GameState } from "../../core/types";
 import type { Camera } from "../camera";
 
@@ -160,7 +159,7 @@ export function drawMinimap(ctx: CanvasRenderingContext2D, state: GameState, cam
       ctx.fillRect(px(e.x), py(e.y), Math.max(2, e.width * sx), Math.max(2, e.height * sy));
     } else {
       if (e.owner !== state.viewPlayer && fog(e.x, e.y) !== "visible") continue;
-      if (concealedFrom(state, state.viewPlayer, e)) continue; // 24 §B forest concealment
+      if (concealedFromView(state, e)) continue; // 24 §B forest concealment
       ctx.fillStyle = ownerColor(e.owner);
       ctx.fillRect(px(e.x) - 1, py(e.y) - 1, 2.5, 2.5);
     }

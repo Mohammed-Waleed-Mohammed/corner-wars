@@ -148,7 +148,7 @@ export function skirmishSetupScreen(services: MenuServices): Screen {
 }
 
 /** A labelled segmented control (options like gold / speed). */
-function segmented<T>(label: string, choices: readonly T[], value: T, onPick: (v: T) => void, fmt: (v: T) => string): HTMLElement {
+export function segmented<T>(label: string, choices: readonly T[], value: T, onPick: (v: T) => void, fmt: (v: T) => string): HTMLElement {
   const wrap = el("div", "setup-opt");
   wrap.append(el("div", "setup-opt-label", label));
   const seg = el("div", "setup-seg");

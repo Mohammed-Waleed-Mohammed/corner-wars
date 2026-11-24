@@ -39,19 +39,24 @@ export interface PostMatchHandlers {
   onRematch?: () => void; // absent → button greyed with the reason
   rematchReason?: string;
   onExit: () => void;
+  nameFor?: (pid: PlayerId) => string; // 35: the spectator's seat names (else from the roster)
 }
 
-/** The post-match results screen: winner, duration, and the per-player stats table (20 §J). */
-export function showPostMatch(parent: HTMLElement, state: GameState, localPlayerId: PlayerId, slots: SlotInfo[] | undefined, h: PostMatchHandlers): HTMLElement {
+/** The post-match results screen: winner, duration, and the per-player stats table (20 §J).
+ *  `localPlayerId` null = a spectator (35): no victory/defeat, just the result. */
+export function showPostMatch(parent: HTMLElement, state: GameState, localPlayerId: PlayerId | null, slots: SlotInfo[] | undefined, h: PostMatchHandlers): HTMLElement {
+  const nameOf = (pid: PlayerId): string => h.nameFor?.(pid) ?? rosterName(pid, slots);
   const overlay = el("div", "post-overlay");
   const card = el("div", "post-card hud-console hud-chamfer");
   const inner = el("div", "hud-console-inner hud-chamfer modal-inner");
   card.append(inner);
 
   const won = state.winner === localPlayerId;
-  const title = el("div", `post-result ${won ? "win" : "lose"}`, won ? "VICTORY" : "DEFEAT");
+  const title = localPlayerId === null
+    ? el("div", "post-result neutral", "MATCH OVER")
+    : el("div", `post-result ${won ? "win" : "lose"}`, won ? "VICTORY" : "DEFEAT");
   inner.append(title);
-  const winnerName = state.winner !== null ? nameOf(state.winner as PlayerId, slots) : "—";
+  const winnerName = state.winner !== null ? nameOf(state.winner as PlayerId) : "—";
   const mins = Math.floor(state.time / 60), secs = Math.floor(state.time % 60);
   inner.append(el("div", "post-sub", `${winnerName} wins · ${mins}:${String(secs).padStart(2, "0")}`));
 
@@ -67,7 +72,7 @@ export function showPostMatch(parent: HTMLElement, state: GameState, localPlayer
     const nameCell = el("td", "post-name");
     const dot = el("span", "post-dot");
     dot.style.background = colorOf(p.id as PlayerId, slots);
-    nameCell.append(dot, el("span", "", nameOf(p.id as PlayerId, slots) + (p.id === localPlayerId ? " (you)" : "")));
+    nameCell.append(dot, el("span", "", nameOf(p.id as PlayerId) + (p.id === localPlayerId ? " (you)" : "")));
     tr.append(nameCell);
     const s = p.stats;
     for (const v of [s.produced, s.lost, Math.round(s.goldMined), s.buildingsRazed, `${Math.round(s.citadelSeconds)}s`]) {
@@ -87,7 +92,7 @@ export function showPostMatch(parent: HTMLElement, state: GameState, localPlayer
   return overlay;
 }
 
-function nameOf(pid: PlayerId, slots?: SlotInfo[]): string {
+function rosterName(pid: PlayerId, slots?: SlotInfo[]): string {
   const s = slots?.find((x) => x.playerId === pid);
   if (s && s.kind === "human") return s.name || `Player ${pid + 1}`;
   if (s && s.kind === "ai") return `Computer ${pid + 1}`;

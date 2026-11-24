@@ -21,9 +21,8 @@ import { drawBuildArea } from "./draw/fog";
 import { drawAIOverlay } from "./draw/aiDebug";
 import { drawMinimap } from "./draw/minimap";
 import { drawWeather } from "./weather";
-import { fogAt } from "../engine/fog";
+import { concealedFromView, fogAt } from "../engine/fog";
 import { isLowPower } from "../state/gameState";
-import { concealedFrom } from "../state/terrain";
 
 export function renderGame(
   ctx: CanvasRenderingContext2D,
@@ -70,7 +69,7 @@ export function renderGame(
     const ry = (e.prevY ?? e.y) + (e.y - (e.prevY ?? e.y)) * alpha;
     if (!camera.isTileVisible(rx, ry)) continue;
     if (e.owner !== state.viewPlayer && fogAt(state, Math.floor(rx), Math.floor(ry)) !== "visible") continue;
-    if (concealedFrom(state, state.viewPlayer, e)) continue; // 24 §B: hidden in a forest beyond spotting range
+    if (concealedFromView(state, e)) continue; // 24 §B: hidden in a forest beyond spotting range
     drawUnit(ctx, camera, e, view.selectedIds.has(e.id), rx, ry);
   }
 
@@ -115,7 +114,7 @@ export function renderGame(
   if (view.dragBox) drawDragBox(ctx, view.dragBox.start, view.dragBox.end);
 
   // Minimap last, anchored to the screen corner.
-  if (view.aiDebug) drawAIOverlay(ctx, state, camera); // 22 §O (F5, local read-only)
+  if (view.aiDebug) drawAIOverlay(ctx, state, camera, view.aiPanels); // 22 §O (F5, local read-only)
 
   // 21 §J: the minimap lives in the bottom console's TACTICAL well (its own canvas); without one
   // (headless/tests) it simply isn't drawn.

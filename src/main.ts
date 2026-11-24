@@ -42,6 +42,7 @@ import { renderIcon } from "./ui/iconRenderer";
 import { playUiSound, setUiSoundPlayer } from "./ui/uiSound";
 import { showPauseOverlay, showPostMatch } from "./ui/screens/matchOverlays";
 import { openSettings } from "./ui/settings/settingsPanel";
+import { bootSpectate } from "./ui/spectator/spectatorMatch";
 
 const SP_DEFAULT_MAP = MAP_BY_ID.get("four_corners") ?? OFFICIAL_MAPS[OFFICIAL_MAPS.length - 1];
 
@@ -510,6 +511,7 @@ const menuServices: MenuServices = {
     const commanders = s.commanders.map((c, i) => (s.slots[i]?.kind === "closed" ? null : resolveCommander(c, seed, i)));
     bootMatch({ map: s.map, localPlayerId: 0, slots: s.slots, startingGold: s.startingGold, gameSpeed: s.gameSpeed, difficulties: s.difficulties, seed, commanders, biome: s.biome ?? undefined });
   },
+  bootSpectate: (setup) => bootSpectate(app, setup, { onExit: goToMenu }), // 35: all-AI, watched
   startMission: (missionId, difficulty) => {
     const def = MISSION_BY_ID.get(missionId);
     const map = def ? MAP_BY_ID.get(def.mapId) : undefined;
