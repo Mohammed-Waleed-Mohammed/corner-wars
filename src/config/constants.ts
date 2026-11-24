@@ -1139,6 +1139,7 @@ export const CAMERA = {
   zoomStep: 0.12,
   dragThreshold: 6, // px of movement before a left-drag becomes a selection box
   edgeBand: 14, // px from a viewport edge that triggers edge-scroll (when enabled in Settings)
+  overscroll: 0.5, // 02-map: share of the viewport the view may run past each map edge (0.5 = an edge can reach the screen centre)
 } as const;
 
 // User settings (18 §H) — local, no accounts; persisted in localStorage. Defaults live here so every

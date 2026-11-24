@@ -1,4 +1,4 @@
-// Camera: a world<->screen transform that scrolls and zooms, clamped to the map.
+// Camera: a world<->screen transform that scrolls and zooms, clamped to the map plus an overscroll margin.
 // `x,y` are the world-pixel coordinates shown at the top-left of the viewport.
 // Game logic stays in tiles; helpers convert at the boundary (02-map.md).
 
@@ -12,6 +12,8 @@ export class Camera {
   zoom = 1;
   viewportW = 0; // CSS px
   viewportH = 0;
+  /** Share of the viewport the view may run past each map edge (02-map); 0 keeps it on the map. */
+  overscroll: number = CAMERA.overscroll;
   // World extent in pixels — set per-match from the loaded map (18 §M2: maps vary in size).
   private worldW = WORLD.width;
   private worldH = WORLD.height;
@@ -81,18 +83,18 @@ export class Camera {
     this.clampToBounds();
   }
 
+  /** 02-map: the view may run past each map edge by CAMERA.overscroll of the viewport (0.5 = any edge
+   *  or corner can be brought to the screen centre, clear of the HUD panels at the screen's sides). */
   private clampToBounds(): void {
-    const viewW = this.viewportW / this.zoom;
-    const viewH = this.viewportH / this.zoom;
-    // If the world is smaller than the viewport on an axis, center it (negative
-    // origin pushes the map inward); otherwise clamp so we can't scroll past an edge.
-    this.x =
-      this.worldW <= viewW
-        ? (this.worldW - viewW) / 2
-        : clamp(this.x, 0, this.worldW - viewW);
-    this.y =
-      this.worldH <= viewH
-        ? (this.worldH - viewH) / 2
-        : clamp(this.y, 0, this.worldH - viewH);
+    this.x = clampAxis(this.x, this.worldW, this.viewportW / this.zoom, this.overscroll);
+    this.y = clampAxis(this.y, this.worldH, this.viewportH / this.zoom, this.overscroll);
   }
+}
+
+/** Clamp one axis of the camera origin; if no position is allowed (no overscroll and the world is
+ *  smaller than the view), centre the world instead. */
+function clampAxis(pos: number, world: number, view: number, overscroll: number): number {
+  const over = view * overscroll;
+  const lo = -over, hi = world - view + over;
+  return lo <= hi ? clamp(pos, lo, hi) : (world - view) / 2;
 }

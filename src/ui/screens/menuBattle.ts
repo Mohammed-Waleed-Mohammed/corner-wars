@@ -54,7 +54,7 @@ export class MenuBattle {
   private canvas: HTMLCanvasElement;
   private veil: HTMLElement;
   private state: GameState;
-  private camera = new Camera();
+  private camera = Object.assign(new Camera(), { overscroll: 0 }); // the cinematic drift stays on the map (no void at the edges)
   private loop: GameLoop;
   private resizeFn: () => void;
   private driftT = 0;

@@ -11,7 +11,7 @@
 
 - The world is larger than the screen; the camera scrolls.
 - **Pan:** WASD / arrow keys, and click-drag on the map.
-- **Clamp:** the camera can't scroll past the map edges.
+- **Clamp:** the view may run past each map edge by half the viewport (`CAMERA.overscroll` = 0.5), so any edge or corner can be scrolled to the centre of the screen, clear of the HUD panels. Beyond the map is the plain void colour.
 - **Zoom (nice-to-have):** mouse wheel, clamped to sensible min/max.
 
 ## Terrain & fog
