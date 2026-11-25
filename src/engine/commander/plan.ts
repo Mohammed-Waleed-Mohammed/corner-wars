@@ -13,6 +13,7 @@ import { aiLog, type Ctx } from "./commander";
 import { isResearched } from "../../state/upgrades";
 import { councilOf, PUSHING, strikeRead } from "./reports";
 import { needMul, strategyLean } from "./estimate";
+import { moodLean } from "./feelings";
 
 export type PhaseExit =
   | { kind: "workers"; n: number } | { kind: "refineries"; n: number } | { kind: "army"; value: number }
@@ -76,7 +77,7 @@ export function planOf(ctx: Ctx): { phase: PlanPhase; index: number; plan: PlanP
 /** The priority lean of the current phase for a petition category (0 outside a plan / Medium). */
 export function leanFor(ctx: Ctx, cat: ReqCat): number {
   if (!ctx.tier.fullAdaptation) return 0;
-  return (planOf(ctx).phase.lean[cat] ?? 0) + strategyLean(ctx, cat); // 34 §M.2 the strategy leans too
+  return (planOf(ctx).phase.lean[cat] ?? 0) + strategyLean(ctx, cat) + moodLean(ctx, cat); // 34 §M.2 the strategy leans too; 37 and the King's mood
 }
 
 /** Strategic tick, after the stance table (34 §C.2): advance the plan, apply its postures, launch its

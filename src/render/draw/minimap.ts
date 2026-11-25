@@ -9,6 +9,7 @@
 import { COLORS, HUD, RENDER, ownerColor } from "../../config/constants";
 import { BIOMES, biomeMapColors } from "../../content/biomes";
 import { concealedFromView, fogAt } from "../../engine/fog";
+import { allySees, alwaysSeen } from "../../engine/diplomacy";
 import { fogTileCanvas } from "./worldLayers";
 import { isLowPower } from "../../state/gameState";
 import type { GameState } from "../../core/types";
@@ -158,10 +159,16 @@ export function drawMinimap(ctx: CanvasRenderingContext2D, state: GameState, cam
       ctx.fillStyle = ownerColor(e.owner);
       ctx.fillRect(px(e.x), py(e.y), Math.max(2, e.width * sx), Math.max(2, e.height * sy));
     } else {
-      if (e.owner !== state.viewPlayer && fog(e.x, e.y) !== "visible") continue;
-      if (concealedFromView(state, e)) continue; // 24 §B forest concealment
+      const seen = alwaysSeen(e) || (!state.observer && allySees(state, state.viewPlayer, e)); // 38
+      if (!seen && e.owner !== state.viewPlayer && fog(e.x, e.y) !== "visible") continue;
+      if (!seen && concealedFromView(state, e)) continue; // 24 §B forest concealment
       ctx.fillStyle = ownerColor(e.owner);
-      ctx.fillRect(px(e.x) - 1, py(e.y) - 1, 2.5, 2.5);
+      if (e.unitType === "treatyCart") { // 38 the cart stands out: a larger square ringed in white
+        ctx.fillRect(px(e.x) - 2.5, py(e.y) - 2.5, 5, 5);
+        ctx.strokeStyle = "#f4f1e6";
+        ctx.lineWidth = 1;
+        ctx.strokeRect(px(e.x) - 3, py(e.y) - 3, 6, 6);
+      } else ctx.fillRect(px(e.x) - 1, py(e.y) - 1, 2.5, 2.5);
     }
   }
 

@@ -31,6 +31,7 @@ import { entityHash, unitHash } from "./spatial";
 import { isLowPower } from "../state/gameState";
 import { updateResearch } from "../state/upgrades";
 import { updateResonanceTaps } from "./resonance";
+import { setDiplomacyFrame, updateDiplomacy } from "./diplomacy";
 
 export function updateGame(state: GameState, dt: number): void {
   state.soundEvents = []; // host drained last frame's; collect this frame's
@@ -60,6 +61,9 @@ export function updateGame(state: GameState, dt: number): void {
   updateRepair(state, dt); // Workers repair damaged friendly buildings (spends gold)
   updateResearch(state, dt); // Lab research; applies per-player upgrades on completion
   updateResonanceTaps(state, dt); // 32 §A late-game gold from Resonance Taps
+
+  updateDiplomacy(state); // 38 deals: offers, Peacemakers, carts, treaties (may spawn / remove envoys)
+  setDiplomacyFrame(state); // 38 who spares whom, for this tick's target scans
 
   // Broad-phase index for this step's targeting + Citadel capture (rebuilt once).
   entityHash.rebuild(state);
@@ -102,6 +106,11 @@ export function updateGame(state: GameState, dt: number): void {
 }
 
 function dispatchUnit(state: GameState, u: Unit, dt: number): void {
+  // 38 a Peacemaker or a treaty cart only walks where the deal sends it
+  if (u.unitType === "peacemaker" || u.unitType === "treatyCart") {
+    updateUnitMovement(state, u, dt);
+    return;
+  }
   // 34 §W.6 hold fire: an enemy within the trigger distance opens fire for the unit's whole group
   // (before anything else, so the unit can already fight this tick).
   if (u.holdFire != null) checkHoldFireTrigger(state, u);

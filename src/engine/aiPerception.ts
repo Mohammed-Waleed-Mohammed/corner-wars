@@ -22,6 +22,7 @@
 import { AI_INTEL } from "../config/constants";
 import type { AIIntel, AnyEntity, Building, Formation, GameState, GoldSource, Player, PlayerId, Unit } from "../core/types";
 import { concealedFrom, sightOf } from "../state/terrain";
+import { allySees, alwaysSeen } from "./diplomacy";
 
 export function initIntel(state: GameState, pid: PlayerId): AIIntel {
   const n = state.mapWidth * state.mapHeight;
@@ -64,6 +65,14 @@ export function perceive(state: GameState, pid: PlayerId, intel: AIIntel): GameS
   }
   const visibleAt = (x: number, y: number): boolean => intel.visible[tileAt(x, y)] === 1;
 
+  // 38: a treaty partner's units are not my enemy, nobody's Peacemaker is a target, and the cart coming
+  // to me is mine to wait for — all out of the AI's sight (it reads state.diplomacy for the deal itself)
+  const mates = new Set<number>();
+  const myCarts = new Set<number>();
+  for (const t of state.diplomacy?.treaties ?? []) { if (t.a === pid) mates.add(t.b); if (t.b === pid) mates.add(t.a); }
+  for (const x of state.diplomacy?.deals ?? []) if (x.to === pid && x.cartId != null) myCarts.add(x.cartId);
+  const ignored = (e: Unit): boolean => e.unitType === "peacemaker" || mates.has(e.owner as number) || myCarts.has(e.id);
+
   const entities: AnyEntity[] = [];
   const nowVisible = new Set<number>();
   const nowVisibleB = new Set<number>();
@@ -72,8 +81,10 @@ export function perceive(state: GameState, pid: PlayerId, intel: AIIntel): GameS
     if (e.owner === pid || e.owner === "neutral") { entities.push(e); continue; }
     if (e.kind === "unit") {
       alive.add(e.id);
-      // 24 §B forest concealment: in sight AND not hidden in a forest beyond spotting range.
-      if (e.hp > 0 && visibleAt(e.x, e.y) && !concealedFrom(state, pid, e)) {
+      if (ignored(e)) continue;
+      // 24 §B forest concealment: in sight AND not hidden in a forest beyond spotting range (38: a
+      // treaty cart is seen by everyone; a partner shows me the units of the player we are allied against)
+      if (e.hp > 0 && ((visibleAt(e.x, e.y) && !concealedFrom(state, pid, e)) || alwaysSeen(e) || allySees(state, pid, e))) {
         entities.push(e);
         nowVisible.add(e.id);
         intel.units.set(e.id, { u: { ...e }, tick: state.tick });
@@ -97,6 +108,7 @@ export function perceive(state: GameState, pid: PlayerId, intel: AIIntel): GameS
   const remembered: Unit[] = [];
   for (const [id, m] of intel.units) {
     if (nowVisible.has(id)) continue;
+    if (mates.has(m.u.owner as number)) continue; // 38 a partner's army is no threat while the treaty holds
     // In sight at the last look and gone from the world now → it died in front of us.
     if (intel.wasVisible.has(id) && !alive.has(id)) { intel.units.delete(id); continue; }
     if (state.tick - m.tick > AI_INTEL.UNIT_MEMORY_TICKS) { intel.units.delete(id); continue; }

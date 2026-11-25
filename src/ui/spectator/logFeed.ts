@@ -24,6 +24,7 @@ export class LogFeed {
   private lastMode: (string | undefined)[] = [];
   private out: boolean[];
   private wonLogged = false;
+  private dipSeq = 0; // 38 the last deal event fed
   private readonly cap: number;
 
   constructor(state: GameState, cap = 4000) {
@@ -51,6 +52,12 @@ export class LogFeed {
         this.out[p.id] = true;
         fresh.push(this.line(state.tick, p.id, "E", "eliminated — the last of the base has fallen"));
       }
+    }
+    // 38 the deals: every event, as a match event under the seat that started it
+    for (const e of state.diplomacy?.log ?? []) {
+      if (e.seq <= this.dipSeq) continue;
+      this.dipSeq = e.seq;
+      fresh.push(this.line(e.tick, e.from ?? null, "E", onScreenNumbers(e.text)));
     }
     if (state.winner !== null && !this.wonLogged) {
       this.wonLogged = true;

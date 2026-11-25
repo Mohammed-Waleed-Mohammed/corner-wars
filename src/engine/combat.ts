@@ -35,12 +35,19 @@ import { FORMATION_DEFS } from "../sim/formations";
 import { updateUnitMovement } from "./movement";
 import { navigateTo } from "./navigation";
 import { entityHash } from "./spatial";
+import { noteEnvoyDeath, noteStrike, spared } from "./diplomacy";
 
 const FRENZY_DMG_MULT = 1 + (CITADEL_POWERS.frenzy.damageBonus ?? 0);
 const FRENZY_SPEED_MULT = 1 + (CITADEL_POWERS.frenzy.speedBonus ?? 0);
 
 export function isEnemy(owner: Owner, e: AnyEntity): boolean {
   return e.owner !== "neutral" && e.owner !== owner;
+}
+
+/** 38 an enemy this owner's units and towers may pick on their own: not a Peacemaker, not a treaty
+ *  partner, not the treaty cart coming to me (a direct attack order still can — see resolveTarget). */
+export function isFoe(owner: Owner, e: AnyEntity): boolean {
+  return isEnemy(owner, e) && !spared(owner, e);
 }
 
 /** Center point of an entity (footprint center for buildings, position for units). */
@@ -79,7 +86,7 @@ export function dealDamage(state: GameState, target: AnyEntity, dmg: number, att
   target.hp -= dmg;
   // 34 §W.6: a hit on any member of a hold-fire group gives the ambush away — the whole group opens fire.
   if (target.kind === "unit" && target.holdFire != null && dmg > 0) openFire(state, target.holdFire);
-  if (attacker !== undefined && attacker !== "neutral") target.lastHitBy = attacker;
+  if (attacker !== undefined && attacker !== "neutral") { target.lastHitBy = attacker; if (dmg > 0) noteStrike(state, attacker, target.owner); } // 38 a blow at a partner breaks the treaty
   target.hitFlashTimer = EFFECTS.hitFlashTime;
   const c = entityCenter(target);
   spawnEffect(state, "hit", c.x, c.y, EFFECTS.hitLife);
@@ -161,7 +168,7 @@ export function pickFormationTarget(u: Unit, slot: Vec2, reach: number): AnyEnti
   let counter: AnyEntity | null = null, counterD = Infinity;
   let near: AnyEntity | null = null, nearD = Infinity;
   for (const e of formScratch) {
-    if (e.hp <= 0 || !isEnemy(u.owner, e) || isWallLike(e)) continue;
+    if (e.hp <= 0 || !isFoe(u.owner, e) || isWallLike(e)) continue;
     const d = distTo(e, slot.x, slot.y);
     if (d > reach) continue;
     if (typeMultFor(u.combatType, e) > 1 && d < counterD) { counterD = d; counter = e; }
@@ -263,7 +270,7 @@ export function checkHoldFireTrigger(state: GameState, u: Unit): void {
   entityHash.queryInto(u.x, u.y, HOLD_FIRE_TRIGGER + 1, triggerScratch);
   for (let i = 0; i < triggerScratch.length; i++) {
     const e = triggerScratch[i];
-    if (e.kind !== "unit" || e.hp <= 0 || !isEnemy(u.owner, e)) continue;
+    if (e.kind !== "unit" || e.hp <= 0 || !isFoe(u.owner, e)) continue;
     if (Math.hypot(e.x - u.x, e.y - u.y) <= HOLD_FIRE_TRIGGER) {
       openFire(state, u.holdFire);
       return;
@@ -435,7 +442,7 @@ function nearestInGuardZone(owner: Owner, gp: Vec2): AnyEntity | null {
   let bestD = Infinity;
   for (let i = 0; i < zoneScratch.length; i++) {
     const e = zoneScratch[i];
-    if (e.hp <= 0 || !isEnemy(owner, e) || isWallLike(e) || !inGuardZone(e, gp)) continue;
+    if (e.hp <= 0 || !isFoe(owner, e) || isWallLike(e) || !inGuardZone(e, gp)) continue;
     const d = distTo(e, gp.x, gp.y);
     if (d < bestD) {
       bestD = d;
@@ -449,7 +456,7 @@ function nearestInGuardZone(owner: Owner, gp: Vec2): AnyEntity | null {
 function keptGuardTarget(state: GameState, u: Unit, gp: Vec2, minR: number, range: number): AnyEntity | null {
   if (u.target == null) return null;
   const t = findEntityById(state, u.target);
-  if (!t || t.hp <= 0 || !isEnemy(u.owner, t) || isWallLike(t)) return null;
+  if (!t || t.hp <= 0 || !isFoe(u.owner, t) || isWallLike(t)) return null;
   const d = distTo(t, u.x, u.y);
   return (d <= range && d >= minR) || inGuardZone(t, gp) ? t : null;
 }
@@ -574,6 +581,7 @@ export function removeDead(state: GameState): void {
       if (e.kind === "building") buildingDied = true;
       // 20 §J match stats: units lost; enemy buildings razed credited to the last damager.
       if (e.kind === "unit" && e.owner !== "neutral") state.players[e.owner].stats.lost++;
+      if (e.kind === "unit" && (e.unitType === "peacemaker" || e.unitType === "treatyCart")) noteEnvoyDeath(state, e); // 38 who killed it
       if (e.kind === "building" && e.lastHitBy !== undefined && e.lastHitBy !== e.owner) {
         state.players[e.lastHitBy].stats.buildingsRazed++;
       }
@@ -640,7 +648,7 @@ function blockingWall(u: Unit): AnyEntity | null {
   let bestD = Infinity;
   for (let i = 0; i < wallScratch.length; i++) {
     const e = wallScratch[i];
-    if (e.hp <= 0 || !isEnemy(u.owner, e) || !isWallLike(e)) continue;
+    if (e.hp <= 0 || !isFoe(u.owner, e) || !isWallLike(e)) continue;
     const d = distToEntity(u, e);
     if (d <= WALL_BREAK_RADIUS && d < bestD) {
       bestD = d;
@@ -658,7 +666,7 @@ function nearestEnemy(owner: Owner, from: Vec2, range: number): AnyEntity | null
   let bestD = Infinity;
   for (let i = 0; i < nearScratch.length; i++) {
     const e = nearScratch[i];
-    if (e.hp <= 0 || !isEnemy(owner, e) || isWallLike(e)) continue; // §2c: never auto-target walls/gates
+    if (e.hp <= 0 || !isFoe(owner, e) || isWallLike(e)) continue; // §2c: never auto-target walls/gates
     const d = distTo(e, from.x, from.y);
     if (d <= range && d < bestD) {
       bestD = d;
@@ -677,7 +685,7 @@ function nearestEnemyInBand(owner: Owner, from: Vec2, minR: number, maxR: number
   let bestD = Infinity;
   for (let i = 0; i < bandScratch.length; i++) {
     const e = bandScratch[i];
-    if (e.hp <= 0 || !isEnemy(owner, e) || isWallLike(e)) continue;
+    if (e.hp <= 0 || !isFoe(owner, e) || isWallLike(e)) continue;
     const d = distTo(e, from.x, from.y);
     if (d <= maxR && d >= minR && d < bestD) {
       bestD = d;
@@ -691,7 +699,7 @@ function nearestEnemyInBand(owner: Owner, from: Vec2, minR: number, maxR: number
 function keptInBand(state: GameState, u: Unit, minR: number, maxR: number): AnyEntity | null {
   if (u.target == null) return null;
   const t = findEntityById(state, u.target);
-  if (!t || t.hp <= 0 || !isEnemy(u.owner, t) || isWallLike(t)) return null;
+  if (!t || t.hp <= 0 || !isFoe(u.owner, t) || isWallLike(t)) return null;
   const d = distTo(t, u.x, u.y);
   return d <= maxR && d >= minR ? t : null;
 }
@@ -716,6 +724,6 @@ function rescanTick(state: GameState, u: Unit): boolean {
 function keptTarget(state: GameState, u: Unit, x: number, y: number, reach: number): AnyEntity | null {
   if (u.target == null) return null;
   const t = findEntityById(state, u.target);
-  if (!t || t.hp <= 0 || !isEnemy(u.owner, t) || isWallLike(t)) return null;
+  if (!t || t.hp <= 0 || !isFoe(u.owner, t) || isWallLike(t)) return null;
   return distTo(t, x, y) <= reach ? t : null;
 }

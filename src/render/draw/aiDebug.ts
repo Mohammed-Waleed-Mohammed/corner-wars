@@ -7,6 +7,7 @@ import { HUD, UNIT_STATS, ownerColor } from "../../config/constants";
 import type { GameState, Unit } from "../../core/types";
 import type { Camera } from "../camera";
 import { PLANS } from "../../engine/commander/plan";
+import { moodLine } from "../../engine/commander/feelings";
 
 export function drawAIOverlay(ctx: CanvasRenderingContext2D, state: GameState, camera: Camera, inset?: { top: number; right: number }): void {
   let panelY = inset?.top ?? 52;
@@ -76,6 +77,8 @@ export function drawAIOverlay(ctx: CanvasRenderingContext2D, state: GameState, c
     const tArmy = cs.targetPlayer != null ? armyOf(state, cs.targetPlayer) : 0;
     lines.push(`P${p.id + 1} ${cs.personality.toUpperCase()} · ${cs.stance} → ${cs.targetPlayer != null ? `P${cs.targetPlayer + 1}` : "—"}`); // players count from 1, as on screen
     lines.push(`army ${myArmy | 0} vs ${tArmy | 0} · gold ${p.gold | 0}`);
+    const moodNow = moodLine(cs, state.tick, 1, 3); // 37 the King's feelings
+    if (moodNow) lines.push(`♥ ${moodNow}`);
     // 33: what it believes and wants (belief of the target, danger, desired army, income, saving)
     const tb = cs.targetPlayer != null ? cs.beliefs?.enemies[cs.targetPlayer] : undefined;
     lines.push(`belief ${tb ? `${tb.known | 0}/${tb.est | 0}` : "—"} · danger ${(cs.danger ?? 0).toFixed(2)} · want ${(cs.desiredArmy ?? 0) | 0}`);

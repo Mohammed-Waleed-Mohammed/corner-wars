@@ -13,6 +13,7 @@ import type { AIBasePlan, ArchLayer, Building, BuildingType, ResearchKey, Vec2 }
 import { isResearched } from "../../state/upgrades";
 import { blockedDoors, isProducer, layoutClear } from "../layout";
 import { armyValue, baseCenter, buildingsOf, frontDistance, livingEnemies } from "./assess";
+import { mood } from "./feelings";
 import type { Budget } from "./budget";
 import { aiLog, type Ctx } from "./commander";
 import { archOf, centerOf, cheapLegal, cmd, legalFor, pendingSites } from "./place";
@@ -152,7 +153,9 @@ function updateFort(ctx: Ctx): number {
   const a = archOf(ctx);
   const t = state.time, tick = state.tick;
   const turtle = cs.personality === "turtle", rusher = cs.personality === "rusher";
-  const fortress = cs.council?.campaign?.strategy === "fortress";
+  // 37 a frightened (or desperate, careful) King digs in like the fortress strategy
+  const afraid = Math.max(mood(ctx, "fear"), COMMANDER.FEEL.HOTHEADS.includes(cs.personality) ? 0 : mood(ctx, "desperation")) >= COMMANDER.FEEL.FEAR_FORT;
+  const fortress = cs.council?.campaign?.strategy === "fortress" || afraid;
   const hitW = (cs.hits ?? []).reduce((s, h) => s + h.w, 0);
   const top = cs.beliefs ? strongestEnemies(cs.beliefs)[0]?.est ?? 0 : 0;
   const mine = Math.max(1, armyValue(state, pid));
@@ -169,10 +172,11 @@ function updateFort(ctx: Ctx): number {
     // scenarios their army). What is seen coming or has already struck commissions it.
     if (t >= A.NO_WALL_S && sighted) why = "an enemy army seen near the base";
     else if (t >= A.NO_WALL_S && hitW > 0.3) why = "the base was hit";
+    else if (t >= A.NO_WALL_S && afraid) why = "the King is afraid";
     else if (t >= l1) why = `${(t / 60).toFixed(1)} min in${turtle ? " (Turtle)" : ""}`;
     if (why) next = 1;
   } else if (next === 1 && planOf(ctx) && ringDone(ctx, 0) >= A.LAYER_DONE) {
-    if ((turtle || fortress) && t >= A.L2_TURTLE_S) why = turtle ? "the Turtle digs in" : "the fortress strategy";
+    if ((turtle || fortress) && t >= A.L2_TURTLE_S) why = turtle ? "the Turtle digs in" : afraid ? "the King is afraid" : "the fortress strategy";
     else if (t >= A.L2_S && hitW >= A.L2_HIT_W) why = `the base keeps being hit (weight ${hitW.toFixed(1)})`;
     else if (t >= A.L2_S && top >= A.L2_STRONGER * mine) why = `the strongest enemy is believed ${(top / mine).toFixed(2)}× my army`;
     else if (t >= A.L2_S && p.gold >= COMMANDER.ECON.FLOAT_LIMIT) why = `gold is piling up (${p.gold | 0})`;
@@ -321,7 +325,7 @@ export function architectRequests(ctx: Ctx, budget: Budget, D: number): void {
       coreN++;
     } else if (d.gate) {
       if (fort >= 1) towerAt(d.type, d.x, d.y, `gate2:${d.type}@${d.x},${d.y}`, 40 + 20 * D, `ring 1 gate's second tower — fort ${fort}`);
-    } else if (pers.defenseBudget >= COMMANDER.DEF_EXTRA_MIN_BUDGET || D > 0.4) {
+    } else if (pers.defenseBudget >= COMMANDER.DEF_EXTRA_MIN_BUDGET || D > 0.4 || mood(ctx, "fear") >= COMMANDER.FEEL.FEAR_FORT) {
       towerAt(d.type, d.x, d.y, `extra:${d.type}@${d.x},${d.y}`, 30 + 20 * D + 50 * pers.defenseBudget, `ring 1 extra ${d.type}`);
     }
   }

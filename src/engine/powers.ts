@@ -6,7 +6,7 @@ import { CITADEL_POWERS } from "../config/constants";
 import { clamp } from "../core/math";
 import type { GameState, PlayerId, Vec2 } from "../core/types";
 import { createUnit } from "../state/entities";
-import { dealDamage, isEnemy, removeDead } from "./combat";
+import { dealDamage, isFoe, removeDead } from "./combat";
 import { nearestPassableTile } from "./pathfinding";
 
 /** Powers that need a target point (the area strikes); others fire instantly. */
@@ -52,7 +52,7 @@ export function firePower(state: GameState, owner: PlayerId, key: string, target
 
 function areaDamage(state: GameState, owner: PlayerId, center: Vec2, radius: number, dmg: number): void {
   for (const e of state.entities) {
-    if (e.hp <= 0 || !isEnemy(owner, e)) continue;
+    if (e.hp <= 0 || !isFoe(owner, e)) continue; // 38 spares Peacemakers and treaty partners
     const px = e.kind === "building" ? clamp(center.x, e.x, e.x + e.width) : e.x;
     const py = e.kind === "building" ? clamp(center.y, e.y, e.y + e.height) : e.y;
     if (Math.hypot(px - center.x, py - center.y) <= radius) dealDamage(state, e, dmg, owner);

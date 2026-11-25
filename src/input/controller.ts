@@ -70,6 +70,8 @@ const UNIT_LABELS: Record<UnitType, string> = {
   heavyTank: "Heavy Tank",
   artillery: "Artillery",
   medic: "Field Medic",
+  peacemaker: "Peacemaker",
+  treatyCart: "Treaty Cart",
 };
 
 export class InputController {
@@ -773,9 +775,19 @@ export class InputController {
   }
 
   /** `` ` `` / rim button: select every own combat unit on the map. */
+  // ── 38 deals (each an order: the sim checks it again) ──
+  dealSend(to: PlayerId): void { this.emit("DEAL_SEND", { to }); }
+  dealDecline(): void { this.emit("DEAL_DECLINE", {}); }
+  dealAnswer(dealId: number, accept: boolean): void { this.emit("DEAL_ANSWER", { dealId, accept }); }
+  /** The selected units guard my treaty cart on the move. */
+  escortSelected(): void {
+    const ids = [...this.selectedIds];
+    if (ids.length) this.emit("ESCORT", { unitIds: ids });
+  }
+
   selectArmy(): void {
     const ids = new Set<number>();
-    for (const e of this.state.entities) if (e.kind === "unit" && e.owner === this.local && e.unitType !== "worker" && e.hp > 0) ids.add(e.id);
+    for (const e of this.state.entities) if (e.kind === "unit" && e.owner === this.local && e.unitType !== "worker" && e.unitType !== "peacemaker" && e.unitType !== "treatyCart" && e.hp > 0) ids.add(e.id);
     if (ids.size) this.selectedIds = ids;
   }
 

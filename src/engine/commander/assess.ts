@@ -1,6 +1,7 @@
 // 22 §C — situation assessment: the blackboard inputs. Pure reads over GameState; every layer
 // calls these fresh (cheap linear scans — entity counts are small). Values feed §D/§E/§K decisions.
 
+import { partners } from "../diplomacy";
 import {
   CITADEL_POWERS, COMMANDER, COUNTER_BONUS, COUNTERS, DEFENSE_STATS, MEDIC, SIEGE_BUILDING_BONUS, UNIT_STATS,
 } from "../../config/constants";
@@ -14,7 +15,8 @@ import { weaponDamageMult } from "../../state/upgrades";
  *  memory-based estimates, while the reads below that scan `state.entities` directly (contact, fight
  *  odds, threats near a point) only ever react to what is in sight right now. */
 export function unitsOf(state: GameState, pid: PlayerId): Unit[] {
-  const live = state.entities.filter((e): e is Unit => e.kind === "unit" && e.owner === pid && e.hp > 0);
+  // (38: a Peacemaker or a treaty cart belongs to the deal, not to anyone's army)
+  const live = state.entities.filter((e): e is Unit => e.kind === "unit" && e.owner === pid && e.hp > 0 && e.unitType !== "peacemaker" && e.unitType !== "treatyCart");
   const mem = state.aiRemembered;
   return mem && mem.length ? live.concat(mem.filter((u) => u.owner === pid)) : live;
 }
@@ -35,7 +37,8 @@ export function baseCenter(state: GameState, pid: PlayerId): Vec2 | null {
   return cy ? { x: cy.x + cy.width / 2, y: cy.y + cy.height / 2 } : null;
 }
 export function livingEnemies(state: GameState, pid: PlayerId): PlayerId[] {
-  return state.players.filter((p) => p.id !== pid && !p.eliminated).map((p) => p.id);
+  // 38 a treaty partner is not an enemy while the treaty holds
+  return state.players.filter((p) => p.id !== pid && !p.eliminated && !partners(state, pid, p.id)).map((p) => p.id);
 }
 
 const d2 = (ax: number, ay: number, bx: number, by: number): number => (ax - bx) ** 2 + (ay - by) ** 2;

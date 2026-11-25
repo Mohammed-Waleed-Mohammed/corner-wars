@@ -13,6 +13,7 @@ import type { ReqCat } from "./budget";
 import { aiLog, type Ctx } from "./commander";
 import { ask, councilOf, PUSHING } from "./reports";
 import { staleness } from "../aiPerception";
+import { moodNeed, moodPress } from "./feelings";
 
 const SIM_HZ = 30;
 const dist = (a: Vec2, b: Vec2): number => Math.hypot(a.x - b.x, a.y - b.y);
@@ -316,18 +317,18 @@ export function strategyOf(ctx: Ctx): GrandStrategy {
 
 /** The PRESSURE row's multiplier on attackRatio × est (0: the table never presses). */
 export function pressMul(ctx: Ctx): number {
-  if (!active(ctx)) return 1;
+  if (!active(ctx)) return moodPress(ctx, ctx.cs.targetPlayer);
   const C = COMMANDER.CAMPAIGN;
   const m = C.PRESS_MUL[strategyOf(ctx)];
   if (m === 0) return 0;
   const tgt = ctx.cs.targetPlayer;
   const spike = campaignOf(ctx).windows.some((w) => (w.kind === "mySpike" || w.kind === "theirSpike") && w.on === tgt);
-  return m * (spike ? C.SPIKE_PRESS_MUL : 1);
+  return m * (spike ? C.SPIKE_PRESS_MUL : 1) * moodPress(ctx, tgt); // 37 fear raises the bar, confidence and fury lower it
 }
 
 /** The launch odds' multiplier (the Marshal's need, the plan's strike nerve). */
 export function needMul(ctx: Ctx): number {
-  return active(ctx) ? COMMANDER.CAMPAIGN.NEED_MUL[strategyOf(ctx)] : 1;
+  return (active(ctx) ? COMMANDER.CAMPAIGN.NEED_MUL[strategyOf(ctx)] : 1) * moodNeed(ctx, ctx.cs.targetPlayer); // 37 and the King's mood
 }
 
 /** A striking window not yet taken (counter-punch, third party): the King goes ALL_IN on it once. */

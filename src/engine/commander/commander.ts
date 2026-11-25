@@ -14,6 +14,7 @@ import { initIntel, perceive } from "../aiPerception";
 import { runKing } from "./king";
 import { runSession } from "./council";
 import { runMarshal } from "./marshal";
+import { runDiplomacy } from "./diplomat";
 
 export type Submit = (cmd: Command) => void;
 
@@ -121,6 +122,7 @@ export function runCommander(state: GameState, p: Player, submit: Submit): void 
   // Marshal (and the seats' squads) on the tactical clock — same order as the old three layers
   if (dueS) runKing(ctx);
   if (dueO) runSession(ctx);
+  if (dueO) runDiplomacy(ctx); // 38 the deals: offers, letters, escorts, and what they make the King feel
   if (dueT) runMarshal(ctx);
 }
 

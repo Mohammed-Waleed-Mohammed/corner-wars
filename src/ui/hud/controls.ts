@@ -1,7 +1,7 @@
 // 30 — what the HUD may ask of the input controller. Every order goes through these (and so through the
 // session as a Command); the HUD itself never mutates the sim. InputController satisfies this shape.
 
-import type { Building, BuildingType, FormationId, ResearchKey, UnitType } from "../../core/types";
+import type { Building, BuildingType, FormationId, PlayerId, ResearchKey, UnitType } from "../../core/types";
 
 export interface HudControls {
   enterPlacement(type: BuildingType): void;
@@ -29,4 +29,9 @@ export interface HudControls {
   selectArmy(): void;
   centerOn(x: number, y: number): void;
   idleWorkerCount(): number;
+  // 38 deals
+  dealSend(to: PlayerId): void;
+  dealDecline(): void;
+  dealAnswer(dealId: number, accept: boolean): void;
+  escortSelected(): void;
 }

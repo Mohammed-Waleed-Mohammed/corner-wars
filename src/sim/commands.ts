@@ -18,6 +18,7 @@ import { assignBuilders } from "../engine/construction";
 import { planWallLine, wallLineTiles, footprintClear, withinBuildRadius } from "../engine/placement";
 import { firePower } from "../engine/powers";
 import { useAbility } from "../engine/abilities";
+import { answerLetter, declineOffer, escortCart, sendPeacemaker, setDiplomacyFrame } from "../engine/diplomacy";
 import { cancelProduction, enqueueUnit } from "../engine/production";
 import { sellBuilding } from "../engine/sell";
 import { buildAvailability } from "../state/buildRules";
@@ -34,7 +35,10 @@ export type CommandType =
   | "USE_ABILITY" // 27 §C commander ability (target point or null)
   | "FORM_UP" | "BREAK_FORMATION" | "FALL_BACK" // 19 formations
   | "SELL_BUILDING" // 06 §Selling
-  | "CONCEDE"; // 20 §J pause menu — surrender (deterministic: all peers execute it)
+  | "CONCEDE" // 20 §J pause menu — surrender (deterministic: all peers execute it)
+  // 38 deals: { to } send the Peacemaker · {} let the offer pass · { dealId, accept } answer a letter ·
+  // { unitIds } escort my treaty cart
+  | "DEAL_SEND" | "DEAL_DECLINE" | "DEAL_ANSWER" | "ESCORT";
 
 export interface Command {
   type: CommandType;
@@ -50,7 +54,8 @@ function ownedUnits(state: GameState, pid: PlayerId, ids: number[]): Unit[] {
   const out: Unit[] = [];
   // Iterate state.entities (ascending id) rather than the id list so order is deterministic.
   for (const e of state.entities) {
-    if (e.kind === "unit" && e.owner === pid && e.hp > 0 && set.has(e.id)) out.push(e);
+    // (38: a Peacemaker or a treaty cart takes no orders — the deal drives it)
+    if (e.kind === "unit" && e.owner === pid && e.hp > 0 && set.has(e.id) && e.unitType !== "peacemaker" && e.unitType !== "treatyCart") out.push(e);
   }
   return out;
 }
@@ -74,6 +79,7 @@ function clearOrder(u: Unit): void {
   u.repairTarget = null;
   u.path = [];
   u.pathGoal = null;
+  u.escortOf = null; // 38 a new order ends an escort
 }
 
 /** A fresh id for a GUARD / HOLD_FIRE order group (deterministic: a counter on the sim state). */
@@ -217,6 +223,7 @@ export function executeCommand(state: GameState, cmd: Command): void {
     }
     case "USE_POWER":
       // firePower re-checks Command Energy + target requirement internally (desync-safe).
+      setDiplomacyFrame(state); // 38 its blast spares what diplomacy spares, as of this state
       firePower(state, pid, pl.powerId, pl.x != null && pl.y != null ? { x: pl.x, y: pl.y } : null);
       break;
     case "USE_ABILITY":
@@ -245,6 +252,21 @@ export function executeCommand(state: GameState, cmd: Command): void {
     case "SELL_BUILDING": {
       const b = ownedBuilding(state, pid, pl.buildingId);
       if (b) sellBuilding(state, b); // validates (never a Construction Yard)
+      break;
+    }
+    case "DEAL_SEND":
+      if (typeof pl?.to === "number") sendPeacemaker(state, pid, pl.to as PlayerId);
+      break;
+    case "DEAL_DECLINE":
+      declineOffer(state, pid);
+      break;
+    case "DEAL_ANSWER":
+      if (typeof pl?.dealId === "number") answerLetter(state, pid, pl.dealId, pl.accept === true);
+      break;
+    case "ESCORT": {
+      const units = ownedUnits(state, pid, Array.isArray(pl?.unitIds) ? pl.unitIds : []);
+      for (const u of units) clearOrder(u);
+      escortCart(state, pid, units);
       break;
     }
     case "CONCEDE":

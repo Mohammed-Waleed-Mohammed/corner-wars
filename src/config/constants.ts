@@ -144,12 +144,44 @@ export const UNIT_STATS: Record<UnitType, UnitStat> = {
     combatType: "support",
     hp: 50, damage: 0, cooldown: 1.0, range: 0, speed: 2.5, collisionRadius: 0.35, sight: 6, gold: 120, buildTime: 14,
   },
+  // 38 deals: no weapon, no combat class (never in a formation, never auto-acquires). gold 0: their
+  // price is the deal's (DEALS.ENVOY_COST), and they are worth nothing to an army's value.
+  peacemaker: { hp: 40, damage: 0, cooldown: 1.0, range: 0, speed: 5.5, collisionRadius: 0.3, sight: 7, gold: 0, buildTime: 6 },
+  treatyCart: { hp: 2400, damage: 0, cooldown: 1.0, range: 0, speed: 1.2, collisionRadius: 0.6, sight: 5, gold: 0, buildTime: 20 },
 };
 
 // ── Combat overhaul (19-formations-v2.md) ────────────────────────────────────
 // §B pacing: every unit's base maxHp × this (damage/costs/building HP unchanged).
 export const COMBAT_PACE = { UNIT_HP_MULT: 1.5 } as const;
 // §D Field Medic behavior. STIM_HEAL_PER_S applies once "Combat Stims" is researched.
+// 38 deals (engine/diplomacy.ts) — sim rules, so every peer runs them alike
+export const DEALS = {
+  FROM_S: 300, // no offer before 5:00
+  MIN_PLAYERS: 3, // alive players for deals to exist
+  DOMINANT: 1.3, // the strongest is dominant at this × the next one's strength…
+  DOMINANT_EXIT: 1.15, // …and stays dominant down to this
+  // strength = army value + BUILDING_W × buildings' worth + a minute's income. Buildings count for less:
+  // every base holds much the same ones, and at full weight they hid a 2:1 army lead (measured: the
+  // top ÷ next ratio never passed 1.36 in three 15-minute FFAs)
+  BUILDING_W: 0.4,
+  INCOME_S: 60, // a minute's income counts toward strength
+  DOMINANT_HOLD_S: 20, // an offer opens this long after the dominance is announced (time to raise the gold)
+  OFFER_S: 30, // the weakest has this long to send a Peacemaker
+  LETTER_S: 30, // the receiver has this long to answer the letter
+  WAIT_S: 240, // after a declined or failed deal (or an offer let lapse), the sender waits this long
+  ENVOY_COST: 1000,
+  PREP_S: 6, // the Peacemaker is readied at the main yard
+  STAND_OFF: 10, // it stops this far outside the receiver's nearest building
+  CART_PREP_S: 20,
+  TRIBUTE: 500, // carried by the cart, paid by the sender as it sets out
+  TREATY_S: 480, // a treaty lasts at most this…
+  WARN_S: 60, // …and warns this long before it ends
+  ARRIVE_R: 3, // arrival: within this of the stand point / the yard
+  BLOCKED_R: 18, // a walk that stops gaining ground this close (a wall in the way) counts as arrived
+  STALL_S: 6,
+  LOG_KEEP: 40,
+} as const;
+
 export const MEDIC = { HEAL_PER_S: 4, RANGE: 2.5, MAX_HEALERS_PER_TARGET: 2, STIM_HEAL_PER_S: 6 } as const;
 
 // §E/§F/§G/§H/§K formation dials — every tunable in one place, mirroring file 19 §N.
@@ -178,6 +210,8 @@ export const UNIT_WEAPON: Record<UnitType, WeaponKind> = {
   heavyTank: "shell",
   artillery: "shell", // lobbed shell (carries splash, min-range)
   medic: "melee", // inert — the Medic never attacks (damage 0); entry exists for the Record type
+  peacemaker: "melee", // inert (38)
+  treatyCart: "melee", // inert (38)
 };
 // Siege units deal +100% to buildings (15-logic §4), outside the counter triangle.
 export const SIEGE_BUILDING_BONUS = 1.0;
@@ -323,6 +357,8 @@ export const UNIT_DESC: Record<UnitType, string> = {
   heavyTank: "Late-game bruiser (+50% vs Infantry).",
   artillery: "Siege: long range, splash, +100% vs buildings; fragile.",
   medic: "Support: no attack; auto-heals the lowest-HP friendly nearby.",
+  peacemaker: "Envoy: carries a peace letter; no weapon; only a direct attack order can hit it.",
+  treatyCart: "Treaty cart: carries the tribute that seals a deal; slow, armoured, seen by everyone.",
 };
 
 // Display names (shared by the HUD + build-rule tooltips; no DOM).
@@ -335,7 +371,7 @@ export const BUILDING_LABEL: Record<BuildingType, string> = {
 export const UNIT_LABEL: Record<UnitType, string> = {
   worker: "Worker", rifleman: "Rifleman", grenadier: "Grenadier", rocket: "Rocket",
   scoutBuggy: "Scout Buggy", tank: "Tank", heavyTank: "Heavy Tank", artillery: "Artillery",
-  medic: "Field Medic",
+  medic: "Field Medic", peacemaker: "Peacemaker", treatyCart: "Treaty Cart",
 };
 export const UNLOCK_LABEL: Record<UnlockKey, string> = {
   advancedVehicles: "Advanced Vehicles", siegeDoctrine: "Siege Doctrine", advancedDefenses: "Advanced Defenses",
@@ -536,8 +572,8 @@ export const TERRAIN_MAP_COLOR: Record<TerrainType, string> = {
 /** Fastest multiplier per class — scales the A* heuristic so weighted pathfinding stays admissible. */
 export const FASTEST_MOVE: Record<MoveClass, number> = { foot: 1.15, wheeled: 1.35, tracked: 1.2 };
 export const UNIT_MOVE_CLASS: Record<UnitType, MoveClass> = {
-  worker: "foot", rifleman: "foot", rocket: "foot", grenadier: "foot", medic: "foot",
-  scoutBuggy: "wheeled",
+  worker: "foot", rifleman: "foot", rocket: "foot", grenadier: "foot", medic: "foot", peacemaker: "foot",
+  scoutBuggy: "wheeled", treatyCart: "wheeled",
   tank: "tracked", heavyTank: "tracked", artillery: "tracked",
 };
 export const TERRAIN_FX = {
@@ -1154,6 +1190,53 @@ export const COMMANDER = {
     OUTPOST_STRAT_S: 600, // attrition / strangulation / fortress: corridor outposts from here
     CANDIDATES: 40, // best-scored sites given the (costlier) flow check
     NO_SPOT_LOG_TICKS: 900,
+  },
+  // 37 the King's feelings (engine/commander/feelings.ts)
+  FEEL: {
+    FROM_S: 180, // no fear, confidence, greed or desperation before this: the opening's estimates are guesses
+    FURY_S: 180, // fury lasts this long (renewed by a new offence)
+    GRATITUDE_S: 240, // after a treaty ends, the partner is not my first target for this long
+    // how fast a feeling fades once its cause is gone (time constant, s); it rises at RISE per update
+    TAU_S: { fear: 90, confidence: 60, desperation: 120, suspicion: 120, greed: 90 },
+    RISE: 0.5,
+    SHOW: 0.25, // a feeling is shown (overlay, card) and logged from this strength…
+    HIDE: 0.15, // …and stays shown down to this
+    // the strongest enemy's worth (believed army + buildings) ÷ mine: no fear … full fear. Worth, not army:
+    // a booming economy fields a small army by design (measured: read on armies, the Boomer was afraid at
+    // 2:00 every game, spent on towers, and lost all three duels to the Opportunist it otherwise drew)
+    FEAR_RATIO: [1.3, 2.4] as const,
+    FEAR_ANNOUNCED: 0.6, // 38: the most fear an announced dominant player inspires (public news, seen or not)
+    FEAR_ANNOUNCED_RATIO: [1.3, 3.0] as const, // …ramped on its announced strength over mine
+    FEAR_LOSS: 350, // value lost in the last minute's battles (and at 1.5× what I killed) that frightens
+    CONF_RATIO: [1.15, 2.0] as const, // min(army ratio, trade ratio) vs the target: no confidence … full
+    SUSP_PER_EYE: 0.1, // suspicion per enemy eye seen in my territory per session
+    GREED_INCOME: [1.15, 1.75] as const, // their income ÷ mine: no greed … full greed
+    DESPERATE_ARMY: 0.4, // my army ÷ the strongest enemy's under this, with fear, is desperate
+    DESPERATE_ALLIN_S: 60, // a hot-headed King's all-in when desperate lasts this long…
+    DESPERATE_GAP_S: 240, // …at most once per this
+    // effects (each × the feeling's strength)
+    FURY_NEED: 0.15, // launch odds against the one I'm furious at × (1 − this)
+    FURY_PRESS: 0.2, // and the PRESSURE bar × (1 − this)
+    FEAR_PRESS: 0.35, // the PRESSURE bar × (1 + this)
+    FEAR_NEED: 0.12,
+    CONF_PRESS: 0.25, // the PRESSURE bar × (1 − this)
+    CONF_NEED: 0.1,
+    CONF_HOLD: 0.12, // the retreat odds × (1 − this): a confident army holds the field longer
+    FEAR_HOLD: 0.1, // × (1 + this)
+    LEAN: { fear: { defense: 10, survival: 4 }, confidence: { military: 6 }, fury: { military: 8 }, desperation: { survival: 10 } },
+    FEAR_FORT: 0.55, // fear this strong raises the fortification level as if the enemy were at the door
+    SUSP_SENTRY: 0.5, // suspicion this strong posts a second sentry toward them and hunts their scouts on sight
+    GREED_RAID: 0.5, // greed this strong sends the raids at their economy
+    TARGET_W: { fury: 100, gratitude: 3, greed: 0.8 }, // pickTarget: fury wins outright; gratitude −; greed +
+    // personality: how strongly each feeling takes this King
+    TEMPER: {
+      rusher: { fury: 1.3, fear: 0.6, confidence: 1.3, suspicion: 0.8, greed: 1.0, desperation: 1.0 },
+      boomer: { fury: 1.0, fear: 1.0, confidence: 0.9, suspicion: 1.0, greed: 1.1, desperation: 1.0 },
+      turtle: { fury: 0.9, fear: 1.4, confidence: 0.7, suspicion: 1.3, greed: 0.6, desperation: 1.0 },
+      techer: { fury: 1.0, fear: 1.1, confidence: 1.0, suspicion: 1.1, greed: 0.8, desperation: 1.0 },
+      opportunist: { fury: 0.9, fear: 0.9, confidence: 1.1, suspicion: 1.0, greed: 1.5, desperation: 1.0 },
+    },
+    HOTHEADS: ["rusher", "opportunist"] as string[], // desperation → all-in; the others seek a deal and dig in
   },
   // §B personalities — parameter sets, not code (firstPush = Infinity: never initiates).
   PERSONALITIES: {

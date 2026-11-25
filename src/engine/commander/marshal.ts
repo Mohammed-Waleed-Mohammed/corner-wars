@@ -20,6 +20,8 @@ import { ask, homeRadius, strikeRead, veto } from "./reports";
 import { opReady, runLeash, siegeHolds, watchFeint } from "./operations";
 import { runStandoff } from "./standoff";
 import { econVictimMul, needMul, raidRest } from "./estimate";
+import { moodHold, raidVictim } from "./feelings";
+import { runCartHunt } from "./diplomat";
 import { runAAR } from "./aar";
 
 export function runMarshal(ctx: Ctx): void {
@@ -75,6 +77,9 @@ function runMainArmy(ctx: Ctx, s: Squad): void {
   const contact = contactPoint(state, pid, s.unitIds);
   const odds = contact ? squadOdds(state, pid, units, contact) : 99;
 
+  // 38 a treaty cart meant to unite them against me goes first: destroyed, there is no deal
+  if (runCartHunt(ctx, s)) return;
+
   // Finishing blow beats every other consideration (except a hopeless rout).
   const kill = finishingTarget(ctx, center);
   if (kill && odds >= COMMANDER.FINISH_ODDS) {
@@ -102,11 +107,12 @@ function runMainArmy(ctx: Ctx, s: Squad): void {
     const reach = COMMANDER.LOCAL_ODDS_RADIUS + COMMANDER.ENGAGE_RADIUS + COMMANDER.ARRIVE_TILES;
     readOdds = Math.max(odds, fightOdds(state, pid, contact, COMMANDER.LOCAL_ODDS_RADIUS, units.filter((u) => dist(u, contact) <= reach)));
   }
-  if (contact && readOdds < COMMANDER.RETREAT_ODDS) s.lowOddsSince ??= state.tick;
+  const retreatAt = COMMANDER.RETREAT_ODDS * moodHold(ctx); // 37 confidence holds the field longer, fear gives it up sooner
+  if (contact && readOdds < retreatAt) s.lowOddsSince ??= state.tick;
   else s.lowOddsSince = undefined;
   const confirmed = !committedPush || readOdds < COMMANDER.ROUT_ODDS * 0.7 ||
     state.tick - (s.lowOddsSince ?? state.tick) >= COMMANDER.RETREAT_CONFIRM_TICKS;
-  if (contact && readOdds < COMMANDER.RETREAT_ODDS && confirmed && s.mission !== "retreat" && !atHome) {
+  if (contact && readOdds < retreatAt && confirmed && s.mission !== "retreat" && !atHome) {
     s.lowOddsSince = undefined;
     retreat(ctx, s, readOdds, value, "outmatched");
     return;
@@ -215,7 +221,7 @@ function runMainArmy(ctx: Ctx, s: Squad): void {
       let stale = false;
       // (a counter-punch or a third party's strike has no time to look first: the window is short, and
       // their army was just seen dying)
-      const hurry = cs.stance === "ALL_IN" && (cs.allInWhy === "counter" || cs.allInWhy === "thirdparty");
+      const hurry = cs.stance === "ALL_IN" && (cs.allInWhy === "counter" || cs.allInWhy === "thirdparty" || cs.allInWhy === "desperate");
       if (age > COMMANDER.ATTACK_INTEL_TICKS && fighters.length >= COMMANDER.ATTACK_MIN_UNITS && !hurry) {
         const req = cs.scoutRequest;
         if (!req || dist(req, objective) > 6 || state.tick - req.tick > 2 * COMMANDER.ATTACK_INTEL_WAIT_TICKS) {
@@ -245,7 +251,7 @@ function runMainArmy(ctx: Ctx, s: Squad): void {
       // really are decisive (a crippled target; at the unit cap, where units I can't add are worth spending)
       // 34 §M.6 the counter-punch and the third party's chance are windows too; 34 §M.2 the grand
       // strategy scales every other launch (attrition takes only good trades, a decisive battle less)
-      const windowed = cs.stance === "ALL_IN" && (cs.allInWhy === "crippled" || cs.allInWhy === "cap" || cs.allInWhy === "counter" || cs.allInWhy === "thirdparty");
+      const windowed = cs.stance === "ALL_IN" && (cs.allInWhy === "crippled" || cs.allInWhy === "cap" || cs.allInWhy === "counter" || cs.allInWhy === "thirdparty" || cs.allInWhy === "desperate");
       const need = windowed ? COMMANDER.FIGHT_ODDS
         : +((cs.stance === "ALL_IN" ? pers.strikeOdds : 1 + (pers.attackRatio - 1) * COMMANDER.ATTACK_ODDS_SCALE) * needMul(ctx)).toFixed(2);
       // 34 §E.1 no strike on a guess: a close call on low confidence asks the Spymaster for a look at
@@ -488,7 +494,7 @@ function runRaid(ctx: Ctx, s: Squad): void {
     }
     return;
   }
-  const target = cs.targetPlayer;
+  const target = raidVictim(ctx); // 37 the raids go where greed (or fury) points, else at the target
   if (target == null) return;
   const op = cs.council?.op;
   if (op?.kind === "feint" && op.phase === "lure" && !cs.opsOff) return; // 34 §W.4 the feint has the raiders

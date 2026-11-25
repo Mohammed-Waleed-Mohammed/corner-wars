@@ -101,6 +101,10 @@ export const UNIT_ART: Record<UnitType, UnitArtSpec> = {
     look: "a tracked tank seen from straight above, front toward the top: two tracks, a hull, a round turret in the middle and one cannon pointing to the top" },
   heavyTank: { footprint: 0.88, gamePx: 40, vehicle: true, noun: "a super-heavy tank",
     look: "a very large tracked tank seen from straight above, front toward the top: wide double tracks, a massive hull, a big turret with a long, thick cannon pointing to the top" },
+  peacemaker: { footprint: 0.5, gamePx: 18, vehicle: false, noun: "an unarmed envoy carrying a white flag",
+    look: "a single unarmed person seen from straight above in a long coat, a satchel of letters on the hip, holding a tall pole with a white flag" },
+  treatyCart: { footprint: 0.9, gamePx: 34, vehicle: true, noun: "an armoured tribute cart",
+    look: "a heavy four-wheeled armoured wagon seen from straight above, front toward the top: a plated strongbox in the bed, a white pennant on a short mast" },
   artillery: { footprint: 0.88, gamePx: 36, vehicle: true, noun: "a self-propelled artillery gun",
     look: "a tracked self-propelled howitzer seen from straight above, front toward the top: a compact hull and a very long gun barrel reaching toward the top edge" },
 };

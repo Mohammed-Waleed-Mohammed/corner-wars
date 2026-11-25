@@ -17,12 +17,14 @@ import { OPS_SCENARIOS } from "./opsScenarios";
 import { CAMP_SCENARIOS } from "./campScenarios";
 import { CAMP_INTEL_SCENARIOS } from "./campIntelScenarios";
 import { ARCH_SCENARIOS } from "./archScenarios";
+import { DEAL_SCENARIOS } from "./dealScenarios";
+import { FEEL_SCENARIOS } from "./feelScenarios";
 import { archMap } from "./archProbe";
 import { expMining } from "./exp";
 import { spectateCheck } from "./spectateCheck";
 
 // 33 §T + 34 §T — every scenario list the suite runs
-const SCENARIOS = [...BASE_SCENARIOS, ...COUNCIL_SCENARIOS, ...CRAFT_SCENARIOS, ...PUPPET_SCENARIOS, ...OPS_SCENARIOS, ...CAMP_SCENARIOS, ...CAMP_INTEL_SCENARIOS, ...ARCH_SCENARIOS];
+const SCENARIOS = [...BASE_SCENARIOS, ...COUNCIL_SCENARIOS, ...CRAFT_SCENARIOS, ...PUPPET_SCENARIOS, ...OPS_SCENARIOS, ...CAMP_SCENARIOS, ...CAMP_INTEL_SCENARIOS, ...ARCH_SCENARIOS, ...FEEL_SCENARIOS, ...DEAL_SCENARIOS];
 const GROUPS = [...BASE_GROUPS, ...COUNCIL_GROUPS];
 
 

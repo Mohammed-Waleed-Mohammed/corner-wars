@@ -10,6 +10,7 @@ import { ownerColor, SIM_DT } from "../../config/constants";
 import { COMMANDER_INFO } from "../../content/factions";
 import type { AIStance, CommanderId, GameState, GrandStrategy, PlayerId } from "../../core/types";
 import { armyValue } from "../../engine/commander/assess";
+import { moodLine } from "../../engine/commander/feelings";
 import { el } from "../components/ui";
 import type { Difficulty } from "../screens/spectateSetup";
 import type { FeedLayer, FeedLine, LogFeed } from "./logFeed";
@@ -403,6 +404,8 @@ export class SpectatorHud {
         const target = cs.targetPlayer !== null ? ` → P${cs.targetPlayer + 1}` : "";
         mind = `${STANCE[cs.stance]}${strat ? ` · ${STRATEGY[strat]}` : ""}${target}`;
         if (cs.saveFor && cs.saveKey) mind += ` · saving for ${cs.saveKey}`;
+        const moodNow = moodLine(cs, state.tick, 1, 1); // 37 the King's strongest feeling
+        if (moodNow) mind += ` · ${moodNow}`;
       } else mind = p.ai ? `Simple AI · ${p.ai.mode}` : "—";
       setText(r.mind, mind);
 

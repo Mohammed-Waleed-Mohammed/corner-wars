@@ -89,6 +89,14 @@ export function drawUnit(
       drawMedic(ctx, p.x, p.y, z, u);
       selectR = RENDER.workerRadius;
       break;
+    case "peacemaker":
+      drawPeacemaker(ctx, p.x, p.y, z, u);
+      selectR = RENDER.workerRadius;
+      break;
+    case "treatyCart":
+      drawTreatyCart(ctx, p.x, p.y, z, u);
+      selectR = RENDER.tankSize * 0.7;
+      break;
   }
 
   // White hit-flash when recently struck (§10).
@@ -144,6 +152,72 @@ function drawMedic(ctx: CanvasRenderingContext2D, x: number, y: number, z: numbe
   ctx.lineTo(x + r * 0.5, y);
   ctx.moveTo(x, y - r * 0.5);
   ctx.lineTo(x, y + r * 0.5);
+  ctx.stroke();
+}
+
+// 38 Peacemaker: a small owner-coloured envoy under a tall white flag — reads "parley" at a glance.
+function drawPeacemaker(ctx: CanvasRenderingContext2D, x: number, y: number, z: number, u: Unit): void {
+  const r = RENDER.workerRadius * z * 0.85;
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, Math.PI * 2);
+  ctx.fillStyle = ownerColor(u.owner);
+  ctx.fill();
+  ctx.strokeStyle = COLORS.outline;
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  // the pole and the flag (upright whatever the heading: a flag is held up)
+  const px = x + r * 0.55, top = y - r * 2.6;
+  ctx.strokeStyle = COLORS.outlineDeep;
+  ctx.lineWidth = Math.max(1, 1.2 * z);
+  ctx.beginPath();
+  ctx.moveTo(px, y + r * 0.4);
+  ctx.lineTo(px, top);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(px, top);
+  ctx.lineTo(px + r * 1.7, top + r * 0.45);
+  ctx.lineTo(px, top + r * 1.1);
+  ctx.closePath();
+  ctx.fillStyle = "#f4f1e6";
+  ctx.fill();
+  ctx.strokeStyle = COLORS.outline;
+  ctx.lineWidth = 1;
+  ctx.stroke();
+}
+
+// 38 Treaty cart: a long armoured wagon with a pale strongbox and four wheels, a white pennant aloft.
+function drawTreatyCart(ctx: CanvasRenderingContext2D, x: number, y: number, z: number, u: Unit): void {
+  const s = RENDER.tankSize * 1.15 * z;
+  withFacing(ctx, x, y, facing(u), () => {
+    ctx.fillStyle = COLORS.outlineDeep; // wheels
+    for (const [wx, wy] of [[-0.32, -0.36], [0.32, -0.36], [-0.32, 0.36], [0.32, 0.36]]) ctx.fillRect(s * wx - s * 0.11, s * wy - s * 0.07, s * 0.22, s * 0.14);
+    ctx.fillStyle = ownerColor(u.owner);
+    ctx.fillRect(-s * 0.5, -s * 0.3, s, s * 0.6);
+    ctx.strokeStyle = COLORS.outline;
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(-s * 0.5, -s * 0.3, s, s * 0.6);
+    ctx.fillStyle = "#e9dfc2"; // the strongbox of tribute
+    ctx.fillRect(-s * 0.3, -s * 0.18, s * 0.42, s * 0.36);
+    ctx.strokeRect(-s * 0.3, -s * 0.18, s * 0.42, s * 0.36);
+    ctx.beginPath(); // the tongue, forward
+    ctx.moveTo(s * 0.5, 0);
+    ctx.lineTo(s * 0.72, 0);
+    ctx.strokeStyle = COLORS.outlineDeep;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  });
+  ctx.fillStyle = "#f4f1e6"; // the pennant, upright
+  ctx.beginPath();
+  ctx.moveTo(x, y - s * 0.75);
+  ctx.lineTo(x + s * 0.4, y - s * 0.62);
+  ctx.lineTo(x, y - s * 0.5);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = COLORS.outlineDeep;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(x, y);
+  ctx.lineTo(x, y - s * 0.75);
   ctx.stroke();
 }
 

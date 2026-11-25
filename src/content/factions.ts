@@ -222,10 +222,10 @@ export function fullName(c: CharacterInfo): string {
 
 // ── 27 §A unit names ───────────────────────────────────────────────────────────────────────────
 export const UNIT_NAMES: Record<FactionId, Record<UnitType, string>> = {
-  concord: { worker: "Engineer", rifleman: "Custodian", grenadier: "Breacher", rocket: "Lancer", scoutBuggy: "Outrider", tank: "Bulwark", heavyTank: "Paladin", artillery: "Hammer", medic: "Corpsman" },
-  halcyon: { worker: "Technician", rifleman: "Contractor", grenadier: "Shockman", rocket: "Javelin", scoutBuggy: "Skiff", tank: "Atlas", heavyTank: "Colossus", artillery: "Meridian Battery", medic: "Medtech" },
-  cantons: { worker: "Hand", rifleman: "Militia", grenadier: "Bombardier", rocket: "Rocketeer", scoutBuggy: "Runner", tank: "Ironside", heavyTank: "Mammoth", artillery: "Long Tom", medic: "Mender" },
-  choir: { worker: "Acolyte", rifleman: "Zealot", grenadier: "Censer", rocket: "Seraph", scoutBuggy: "Pilgrim", tank: "Reliquary", heavyTank: "Cathedral", artillery: "Requiem", medic: "Anointer" },
+  concord: { worker: "Engineer", rifleman: "Custodian", grenadier: "Breacher", rocket: "Lancer", scoutBuggy: "Outrider", tank: "Bulwark", heavyTank: "Paladin", artillery: "Hammer", medic: "Corpsman", peacemaker: "Herald", treatyCart: "Treaty Wagon" },
+  halcyon: { worker: "Technician", rifleman: "Contractor", grenadier: "Shockman", rocket: "Javelin", scoutBuggy: "Skiff", tank: "Atlas", heavyTank: "Colossus", artillery: "Meridian Battery", medic: "Medtech", peacemaker: "Liaison", treatyCart: "Escrow Hauler" },
+  cantons: { worker: "Hand", rifleman: "Militia", grenadier: "Bombardier", rocket: "Rocketeer", scoutBuggy: "Runner", tank: "Ironside", heavyTank: "Mammoth", artillery: "Long Tom", medic: "Mender", peacemaker: "Go-Between", treatyCart: "Tribute Cart" },
+  choir: { worker: "Acolyte", rifleman: "Zealot", grenadier: "Censer", rocket: "Seraph", scoutBuggy: "Pilgrim", tank: "Reliquary", heavyTank: "Cathedral", artillery: "Requiem", medic: "Anointer", peacemaker: "Emissary", treatyCart: "Ark of Peace" },
 };
 
 // ── 27 §B/§C tooltip text, templated from the numbers ────────────────────────────────────────

@@ -16,7 +16,10 @@ export type UnitType =
   | "scoutBuggy"
   | "heavyTank"
   | "artillery"
-  | "medic"; // 19 §D — Field Medic (no attack, auto-heals)
+  | "medic" // 19 §D — Field Medic (no attack, auto-heals)
+  // 38 deals — never trained, never commanded: the sim spawns and drives them
+  | "peacemaker" // the weakest player's envoy (no weapon; never auto-targeted)
+  | "treatyCart"; // the slow, armoured tribute cart that seals a deal (seen by everyone)
 // Counter triangle (05-units.md): infantry→ranged→heavy→infantry. "siege" sits OUTSIDE the
 // triangle (15-logic §4): normal vs units, +100% vs buildings, fragile. "support" (19 §D) is also
 // outside: no attack at all — the Medic.
@@ -219,6 +222,7 @@ export interface Unit extends Entity {
   // Combat orders (engine-only):
   attackMove?: boolean; // engage enemies en route to moveTarget
   forcedTargetId?: number | null; // a specific enemy ordered to attack (chases beyond aggro)
+  escortOf?: number | null; // 38 ESCORT: the treaty cart this unit guards on the move (its guard point follows it)
   // Worker-built construction (engine-only, 15-logic §"worker-built construction"):
   buildTargetId?: number | null; // construction site this worker is assigned to build
   repairTarget?: number | null; // engine-only (16 §7): friendly building this worker is repairing
@@ -364,7 +368,7 @@ export interface AIIntel {
 // ── 22 §P — the AI Commander's blackboard (engine-only, host-side) ────────────
 export type AIPersonality = "rusher" | "boomer" | "turtle" | "techer" | "opportunist";
 export type AIStance = "BUILD_UP" | "PRESSURE" | "ALL_IN" | "DEFEND" | "RECOVER";
-export type SquadRole = "main" | "homeGuard" | "raid" | "citadel" | "scout" | "sentry" | "hunt";
+export type SquadRole = "main" | "homeGuard" | "raid" | "citadel" | "scout" | "sentry" | "hunt" | "escort"; // escort: 38 guards my treaty cart
 
 export interface AISquad {
   id: number;
@@ -376,6 +380,7 @@ export interface AISquad {
   timer: number; // role-specific cooldown in ticks (e.g. next raid tick)
   lastFormTick: number; // throttles FORM_UP so re-forming never becomes a stall loop
   lastOrderTick: number; // periodic re-issue of the squad order (keeps reinforcements flowing)
+  targetId?: number; // 38 the treaty cart the army hunts
   retreatTick?: number; // 22 §K v2: tick of the last retreat (regroup hysteresis)
   valueAtRetreat?: number; // 22 §K v2: squad value when it retreated (must regrow before re-pushing)
   lastThreat?: { at: Vec2; value: number; tick: number }; // 22 §K v4: last territory threat seen (REPEL hysteresis)
@@ -422,6 +427,20 @@ export interface ArchLayer {
   walls: Vec2[];
   openings: Vec2[];
   towers: { type: BuildingType; x: number; y: number }[];
+}
+
+/** 37 the King's feelings: per rival (fury, suspicion, gratitude, greed) and overall (fear, confidence,
+ *  desperation). Strength v ∈ [0, ~1.5] (× the personality's temper); fury and gratitude run to `until`. */
+export type RivalFeeling = "fury" | "suspicion" | "gratitude" | "greed";
+export type SelfFeeling = "fear" | "confidence" | "desperation";
+export interface Feeling { v: number; why: string; since: number; until?: number }
+export interface Feelings {
+  tick: number; // the last update (strategic clock)
+  rival: Partial<Record<number, Partial<Record<RivalFeeling, Feeling>>>>;
+  self: Partial<Record<SelfFeeling, Feeling>>;
+  yards: Record<number, PlayerId | null>; // my yard id → who last hit it (to know who razed it)
+  shown: Record<string, boolean>; // "fury:2", "fear" → above SHOW at the last update (log on change)
+  allInTick?: number; // the last desperate all-in
 }
 
 /** 36 the Architect's own state (cs.arch). */
@@ -473,7 +492,7 @@ export interface CommanderState {
   insuranceOff?: boolean; // dev harness only: the insurance yard off (camp.insurance ablation)
   counterIntel?: CounterIntel; // 34 §M.4: what the enemy knows about me (the Spymaster)
   insurance?: InsuranceYard; // 34 §M.7: the second Construction Yard (the Treasurer)
-  allInWhy?: "crippled" | "away" | "cap" | "plan" | "counter" | "thirdparty"; // 34 §E.2: which window opened the ALL_IN (sets the launch odds)
+  allInWhy?: "crippled" | "away" | "cap" | "plan" | "counter" | "thirdparty" | "desperate"; // 34 §E.2: which window opened the ALL_IN (sets the launch odds)
   projects?: AIExpansion[]; // 33 §C.4: running expansion projects
   hits?: { x: number; y: number; w: number; tick: number }[]; // 33 §E.4: where my territory was attacked (decaying weight)
   danger?: number; // 33 §E.1: danger D ∈ [0, 1] from the last operational tick
@@ -482,6 +501,9 @@ export interface CommanderState {
   evac?: Partial<Record<number, number>>; // 33 §C.6: gold source id → tick its crew may return
   incomeHist?: { tick: number; mined: number }[]; // 33 §C: my own goldMined samples (measured income)
   arch?: ArchState; // 36 the Architect
+  feelings?: Feelings; // 37 the King's feelings
+  feelOff?: boolean; // dev harness only: the feelings off (feel.* ablation)
+  dip?: { seq: number; offerUntil: number; letters: number[]; escorted: number[] }; // 38 the deal events read, the offer and letters answered, carts escorted
 }
 
 // ── 34 the Council ────────────────────────────────────────────────────────────
@@ -742,6 +764,49 @@ export interface Formation {
   breaking: boolean;
 }
 
+// ── 38 deals ──────────────────────────────────────────────────────────────────
+/** The weakest player's 30 s chance to send a Peacemaker (times are sim seconds). */
+export interface DealOffer { to: PlayerId; dominant: PlayerId; until: number }
+/** prep (Peacemaker readied at the yard) → walk → letter (the receiver answers) → enter → cartPrep → cart;
+ *  home = declined, the Peacemaker walks back. */
+export type DealPhase = "prep" | "walk" | "letter" | "enter" | "cartPrep" | "cart" | "home";
+export interface Deal {
+  id: number; from: PlayerId; to: PlayerId; dominant: PlayerId;
+  phase: DealPhase; at: number; // the phase's start (sim s)
+  envoyId: number | null; cartId: number | null;
+  stand: Vec2 | null; // where the Peacemaker stops to throw its letter
+  tribute: number; // gold in the cart (paid when it sets out)
+  lastHit: PlayerId | null; // the last player to hit the Peacemaker or the cart
+  best: number; bestAt: number; // closest it has come to where it is going, and when (stall check)
+  struck?: PlayerId; // a party struck the other between acceptance and the seal: torn down next tick
+}
+/** A sealed deal: a ceasefire between a and b against the dominant player. */
+export interface Treaty { a: PlayerId; b: PlayerId; dominant: PlayerId; start: number; until: number; warned: boolean }
+export type DiploKind = "dominant" | "offer" | "sent" | "letter" | "accepted" | "declined" | "envoyKilled" | "envoyHome" | "cartOut" | "cartKilled"
+  | "sealed" | "broken" | "ending" | "ended" | "failed";
+/** A diplomatic event, for the HUD alerts, the spectator feed and the AI (who did what to whom). */
+export interface DiploEvent {
+  seq: number; tick: number; kind: DiploKind; text: string;
+  to: PlayerId[] | null; // who is told (null = everyone)
+  from?: PlayerId; on?: PlayerId; by?: PlayerId | null; dealId?: number; x?: number; y?: number;
+}
+export interface Diplomacy {
+  offer: DealOffer | null;
+  deals: Deal[];
+  treaties: Treaty[];
+  wait: Partial<Record<number, number>>; // player → sim time it may be offered a deal again
+  betrayers: PlayerId[]; // broke a treaty: no deal ever again
+  dominant: PlayerId | null;
+  domSince: number; // sim time the current dominance was announced
+  strength: number[]; // per player, the last evaluation (army + buildings + a minute's income)
+  mined: { t: number; m: number[] }[]; // goldMined samples (income)
+  nextEval: number;
+  nextDeal: number;
+  seq: number;
+  log: DiploEvent[]; // ring of DEALS.LOG_KEEP
+  deaths: Record<number, PlayerId | null>; // Peacemaker / cart id → who struck the last blow (set as it dies)
+}
+
 export interface GameState {
   tick: number;
   time: number; // engine-only: total elapsed seconds
@@ -772,6 +837,7 @@ export interface GameState {
   fogTimer?: number; // engine-only: accumulator for the periodic fog recompute
   fogVersion?: number; // engine-only: bumped when fog changes (render-cache invalidation)
   navBudget?: number; // engine-only: A* expansions left this tick (NAV.expansionsPerTick; unset = unlimited)
+  diplomacy?: Diplomacy; // 38 deals: offers, envoys, carts, treaties (sim state, hashed; created on first use)
   // 22 §C v3 — set ONLY on an AI perception view (never on the real state): enemy units this AI
   // remembers but can't currently see, at their last-seen spot. Strategic estimates (army value,
   // composition) count them; live tactical reads (contact, fight odds, threats) don't.

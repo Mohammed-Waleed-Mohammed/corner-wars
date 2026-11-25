@@ -58,6 +58,7 @@ export function checksum(state: GameState): number {
       h = mix(h, e.buildTargetId ?? -1);
       h = mix(h, e.repairTarget ?? -1);
       h = mix(h, e.forcedTargetId ?? -1);
+      h = mix(h, e.escortOf ?? -1); // 38
       // 34 §W.6–7: hold ground / hold fire stances and the guard order's point, group, sortie and rest.
       h = mix(h, (e.holdGround ? 1 : 0) + (e.guardPoint ? 2 : 0));
       h = mix(h, e.holdFire ?? -1);
@@ -102,6 +103,19 @@ export function checksum(state: GameState): number {
   for (const f of state.fields) { h = mix(h, f.owner); h = mixStr(h, f.kind); h = mix(h, Math.round(f.x * 100)); h = mix(h, Math.round(f.y * 100)); h = mix(h, Math.round(f.until * 100)); }
   h = mix(h, state.strikes.length);
   for (const s of state.strikes) { h = mix(h, ownerInt(s.owner)); h = mix(h, Math.round(s.x * 100)); h = mix(h, Math.round(s.y * 100)); h = mix(h, Math.round(s.at * 100)); h = mix(h, Math.round(s.damage)); }
+
+  // 38 deals: the offer, every deal's phase and timers, the treaties, who may deal again
+  const d = state.diplomacy;
+  if (d) {
+    h = mix(h, d.offer ? d.offer.to * 1000 + Math.round(d.offer.until) : -1);
+    h = mix(h, d.dominant ?? -1);
+    h = mix(h, Math.round(d.domSince * 100));
+    h = mix(h, d.seq);
+    for (const x of d.deals) { h = mix(h, x.id); h = mixStr(h, x.phase); h = mix(h, Math.round(x.at * 100)); h = mix(h, x.envoyId ?? -1); h = mix(h, x.cartId ?? -1); h = mix(h, x.tribute); h = mix(h, x.struck ?? -1); }
+    for (const t of d.treaties) { h = mix(h, t.a * 4 + t.b); h = mix(h, Math.round(t.until * 100)); h = mix(h, t.warned ? 1 : 0); }
+    for (const b of d.betrayers) h = mix(h, b);
+    for (const [k, v] of Object.entries(d.wait)) { h = mix(h, +k); h = mix(h, Math.round((v ?? 0) * 100)); }
+  }
 
   const c = state.citadel;
   h = mix(h, ownerInt(c.controllingPlayer));

@@ -2,6 +2,7 @@
 // danger (§E), keep workers and sites busy, then let every planner post requests and the budget
 // arbiter (§D) decide what the gold buys. Emits only commands; the sim enforces costs and legality.
 
+import { dealRequests } from "./diplomat";
 import { COMMANDER, UNIT_STATS } from "../../config/constants";
 import { armyValue, combatUnitsOf, fightersOf, mainYard } from "./assess";
 import { arbitrate, Budget } from "./budget";
@@ -53,7 +54,8 @@ export function runSession(ctx: Ctx): void {
   militaryRequests(ctx, budget, D); tag("quartermaster", n); n = budget.reqs.length;
   defenseRequests(ctx, budget, D); tag("warden", n); n = budget.reqs.length;
   architectRequests(ctx, budget, D); tag("architect", n); n = budget.reqs.length;
-  techRequests(ctx, budget, D); tag("scholar", n);
+  techRequests(ctx, budget, D); tag("scholar", n); n = budget.reqs.length;
+  dealRequests(ctx, budget); tag("king", n); // 38 gold held for a Peacemaker
   const research = budget.reqs.filter((r) => r.key.startsWith("research:")).sort((a, b) => b.prio - a.prio || (a.key < b.key ? -1 : 1))[0];
   briefScholar(ctx, research ? { key: research.key.slice(9) as never, why: research.reason ?? `prio ${research.prio.toFixed(0)}` } : null);
   briefMarshal(ctx);

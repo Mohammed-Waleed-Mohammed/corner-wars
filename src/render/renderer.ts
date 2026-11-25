@@ -22,6 +22,7 @@ import { drawAIOverlay } from "./draw/aiDebug";
 import { drawMinimap } from "./draw/minimap";
 import { drawWeather } from "./weather";
 import { concealedFromView, fogAt } from "../engine/fog";
+import { allySees, alwaysSeen } from "../engine/diplomacy";
 import { isLowPower } from "../state/gameState";
 
 export function renderGame(
@@ -68,8 +69,10 @@ export function renderGame(
     const rx = (e.prevX ?? e.x) + (e.x - (e.prevX ?? e.x)) * alpha;
     const ry = (e.prevY ?? e.y) + (e.y - (e.prevY ?? e.y)) * alpha;
     if (!camera.isTileVisible(rx, ry)) continue;
-    if (e.owner !== state.viewPlayer && fogAt(state, Math.floor(rx), Math.floor(ry)) !== "visible") continue;
-    if (concealedFromView(state, e)) continue; // 24 §B: hidden in a forest beyond spotting range
+    // 38: Peacemakers and treaty carts are seen by everyone; a treaty partner shares sight of the dominant player
+    const seen = alwaysSeen(e) || (!state.observer && allySees(state, state.viewPlayer, e));
+    if (!seen && e.owner !== state.viewPlayer && fogAt(state, Math.floor(rx), Math.floor(ry)) !== "visible") continue;
+    if (!seen && concealedFromView(state, e)) continue; // 24 §B: hidden in a forest beyond spotting range
     drawUnit(ctx, camera, e, view.selectedIds.has(e.id), rx, ry);
   }
 

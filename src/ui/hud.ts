@@ -23,6 +23,7 @@ import { glyph, icon } from "./hud/glyphs";
 import { pct, setDisabled, setHidden, setStyle, setText, setTitle } from "./hud/domWrite";
 import { ProductionTabs } from "./hud/prodTabs";
 import { SelectionPanel } from "./hud/selectionPanel";
+import { DiplomacyPanel } from "./hud/diplomacyPanel";
 import "./hud/hud-layout.css";
 
 export interface HudInfo {
@@ -60,6 +61,7 @@ export class Hud {
   private readonly selection: SelectionPanel;
   private readonly tabs: ProductionTabs;
   private readonly alerts: Alerts;
+  private readonly dip: DiplomacyPanel; // 38
   private ctrl: HudControls | null = null;
   private readonly worldTip: WorldTip;
   private menuHandler: (() => void) | null = null;
@@ -174,6 +176,7 @@ export class Hud {
     this.selection = new SelectionPanel(q(root, "[data-sel]"), localPlayerId);
     this.tabs = new ProductionTabs(q(root, "[data-tabs]"), localPlayerId);
     this.alerts = new Alerts(q(root, "[data-alerts]"), localPlayerId);
+    this.dip = new DiplomacyPanel(root, localPlayerId, this.alerts); // 38 deals
 
     q(root, "[data-menu]").addEventListener("click", () => this.menuHandler?.());
     this.idleBtn.addEventListener("click", () => this.ctrl?.selectIdleWorker());
@@ -196,6 +199,7 @@ export class Hud {
     this.selection.bind(controls);
     this.tabs.bind(controls);
     this.alerts.bind(controls);
+    this.dip.bind(controls);
   }
 
   /** Space with no dialogue showing: centre on the latest located alert. */
@@ -303,6 +307,7 @@ export class Hud {
     this.worldTip.update(this.ctrl);
     this.tabs.update(state, info.selectedBuilding);
     this.alerts.update(state);
+    this.dip.update(state);
 
     // Tech tree (18 §I): driven by the selected Lab; closes when the selection leaves it.
     if (this.techTree.isOpen) {

@@ -8,6 +8,7 @@ import { COMMANDER, UNIT_STATS } from "../../config/constants";
 import type { AIBeliefs, Building, CounterIntel, EnemyBelief, EnemyEye, MineBelief, PlayerId, SquadRole, Unit, Vec2 } from "../../core/types";
 import { staleness } from "../aiPerception";
 import { baseCenter, buildingsOf, claimedSources, contactPoint, defenseCover, defenseScore, fightersOf, livingEnemies, mainYard, squadCenter } from "./assess";
+import { moodToward } from "./feelings";
 import { aiLog, ensureSquad, type Ctx } from "./commander";
 import { nearestPassableTile } from "../pathfinding";
 import { cmd, myFormation, squadOdds, squadUnits, valueOf, type Squad } from "./captain";
@@ -355,6 +356,14 @@ export function runSentries(ctx: Ctx): void {
     const k = Math.min(0.5, (wallR + I.SENTRY_OUT) / d);
     return nearestPassableTile(state, home.x + (c.x - home.x) * k, home.y + (c.y - home.y) * k);
   });
+  // 37 a suspicious King posts a second sentry toward them, off the first one's line
+  for (const { e, c } of enemies) {
+    if (moodToward(ctx, e, "suspicion") < COMMANDER.FEEL.SUSP_SENTRY) continue;
+    const d = dist(c, home) || 1;
+    const k = Math.min(0.5, (wallR + I.SENTRY_OUT) / d);
+    const nx = -(c.y - home.y) / d, ny = (c.x - home.x) / d;
+    posts.push(nearestPassableTile(state, home.x + (c.x - home.x) * k + nx * 8, home.y + (c.y - home.y) * k + ny * 8));
+  }
   let units = squadUnits(state, sq);
   while (units.length < posts.length && mainUnits.length >= I.SENTRY_MIN_ARMY) {
     const pick = [...mainUnits].sort((a, b) => (a.unitType === "scoutBuggy" ? 0 : 1) - (b.unitType === "scoutBuggy" ? 0 : 1) ||
@@ -584,7 +593,8 @@ export function runHunt(ctx: Ctx): void {
   // army). A scout passing through is not hunted: it is gone before the hunters arrive, and chasing it
   // costs the base its fast units
   const quarry = scanEyes(ctx)
-    .filter((e) => t - e.tick <= CA.HUNT_MEMORY_TICKS && t - (e.since ?? t) >= CA.HUNT_LINGER_TICKS)
+    // (37 a suspicious King hunts their eyes sooner)
+    .filter((e) => t - e.tick <= CA.HUNT_MEMORY_TICKS && t - (e.since ?? t) >= CA.HUNT_LINGER_TICKS * (moodToward(ctx, e.owner, "suspicion") >= COMMANDER.FEEL.SUSP_SENTRY ? 0.5 : 1))
     .map((e) => ({ e, at: (live.get(e.id) ?? e.at) as Vec2, live: live.has(e.id) }))
     .filter((q) => inReach(q.at));
   // an attack in my territory (scanEyes) is defended by everyone: the hunt gives its units back

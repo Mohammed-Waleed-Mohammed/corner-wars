@@ -13,6 +13,7 @@ import { updateBeliefs } from "./spymaster";
 import { ask, strikeRead, veto } from "./reports";
 import { runPlan } from "./plan";
 import { leaderTarget, pressMul, runCampaign, stayOut, strikeWindow } from "./estimate";
+import { desperateStrike, furyTarget, moodScore, runFeelings } from "./feelings";
 
 const HIST_KEEP_TICKS = 1800;
 
@@ -41,6 +42,7 @@ export function runKing(ctx: Ctx): void {
   if (aggressor != null) cs.grudges[aggressor] = t;
 
   runCampaign(ctx, myArmy); // 34 §M the estimate, the grand strategy, windows, FFA politics
+  runFeelings(ctx, myArmy); // 37 what the war has made the King feel
   pickTarget(ctx, enemies, t);
 
   const est = (e: PlayerId | null): number => (e != null ? b.enemies[e]?.est ?? 0 : 0);
@@ -68,6 +70,7 @@ export function runKing(ctx: Ctx): void {
 
   const prev = cs.stance;
   let win: ReturnType<typeof strikeWindow> = null;
+  let desperate: PlayerId | null = null;
   if (losingAtHome || alertBad) {
     cs.stance = "DEFEND"; // row 1
   } else if (cs.stance === "DEFEND" && ((cs.danger ?? 0) >= D2.DEFEND_EXIT_DANGER ||
@@ -87,6 +90,12 @@ export function runKing(ctx: Ctx): void {
     cs.stance = "ALL_IN";
     cs.allInWhy = win.kind as "counter" | "thirdparty";
     cs.stanceUntilTick = win.close;
+  } else if ((desperate = desperateStrike(ctx, myArmy)) != null) {
+    // 37 a hot-headed King, desperate, throws everything at someone (the one he's furious at, or the weakest)
+    cs.targetPlayer = desperate;
+    cs.stance = "ALL_IN";
+    cs.allInWhy = "desperate";
+    cs.stanceUntilTick = t + COMMANDER.FEEL.DESPERATE_ALLIN_S * 30;
   } else if (target != null && tb && (cs.allInWhy = allInWindow(ctx, tb, myArmy, dropped(target, COMMANDER.ALLIN_ENEMY_DROP)) ?? undefined)) {
     cs.stance = "ALL_IN"; // row 3
     cs.stanceUntilTick = t + COMMANDER.ALLIN_WINDOW_TICKS;
@@ -171,6 +180,13 @@ function pickTarget(ctx: Ctx, enemies: PlayerId[], t: number): void {
   const b = cs.beliefs!;
   if (enemies.length === 0) { cs.targetPlayer = null; return; }
   if (cs.targetPlayer != null && !enemies.includes(cs.targetPlayer)) cs.targetPlayer = null;
+  // 37 fury: the one the King is furious at is target #1, over the leader and over a push on another
+  const fury = furyTarget(ctx);
+  if (fury != null) {
+    if (cs.targetPlayer !== fury) aiLog(cs, t, "S", `target → P${fury} (the King is furious at them)`);
+    cs.targetPlayer = fury;
+    return;
+  }
   // 34 §M.9 hit the leader: a runaway leader is the target even if another enemy is nearer (not in the
   // middle of a push on another: never two wars)
   const lead = leaderTarget(ctx);
@@ -198,6 +214,7 @@ function pickTarget(ctx: Ctx, enemies: PlayerId[], t: number): void {
     const nowV = b.enemies[e]?.known ?? 0;
     if (before != null && before > 0 && (before - nowV) / before > 0.1 && cs.grudges[e] !== t) s -= W.BUSY;
     if (b.enemies[e]?.away) s += W.EXPOSED;
+    s += moodScore(ctx, e); // 37 gratitude spares a former partner, greed tempts
     scores.set(e, s);
   });
   const best = enemies.reduce((a, c) => ((scores.get(a) ?? 0) >= (scores.get(c) ?? 0) ? a : c));

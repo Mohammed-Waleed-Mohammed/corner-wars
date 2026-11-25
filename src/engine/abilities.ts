@@ -3,6 +3,7 @@
 // Deterministic: only state.time, plain arithmetic and Math.hypot (as the Citadel powers use).
 // Field EFFECTS are read through state/fields.ts by combat, movement and concealment.
 
+import { spared } from "./diplomacy";
 import { ABILITIES, ABILITY_BUILDING_MULT, COMMANDERS, type AbilityDef } from "../config/commanders";
 import { clamp } from "../core/math";
 import type { AbilityId, GameState, Owner, PendingStrike, Player, PlayerId, Vec2 } from "../core/types";
@@ -89,7 +90,7 @@ export function resolveStrike(state: GameState, s: PendingStrike): void {
   const r2 = s.r * s.r;
   for (const e of state.entities) {
     if (e.hp <= 0) continue;
-    if (s.owner !== "neutral" && (e.owner === s.owner || e.owner === "neutral")) continue;
+    if (s.owner !== "neutral" && (e.owner === s.owner || e.owner === "neutral" || spared(s.owner, e))) continue; // 38 spares Peacemakers and partners
     if (s.owner === "neutral" && e.owner === "neutral") continue;
     let px: number, py: number;
     if (e.kind === "building") {
