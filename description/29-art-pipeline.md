@@ -137,7 +137,7 @@ The faction art for file 27 §H: 4 factions × (10 buildings + 9 units).
 - **Guides:** the procedural faction art (`render/unitArt.ts` → `generateUnitSprite`, `generateBuildingSprite`), on magenta.
   - A unit guide is the unit centred at its footprint.
   - A building guide is the building filling its footprint rectangle (a whole number of px per tile, larger side ≈ 90% of the 1024 canvas, centred).
-  - **A building guide fixes only its rectangle, the camera and the faction colours.** The procedural roofs are too alike to tell apart at game size. So instead of the guide's layout, a building prompt describes the roof from its type's **signature** and **layout** (file 27 §H.1). Every type then reads at a glance, and the same type looks alike in all four factions. The QA (§D) is unaffected: it measures the key, the fill of the rectangle and the aspect, never the roof.
+  - **A building guide fixes only its rectangle, the camera and the faction colours.** The procedural roofs draw each type's signature and layout, but only as a rough plan. So instead of copying the guide's roof, a building prompt describes it from its type's **signature** and **layout** (file 27 §H.1). Every type then reads at a glance, and the same type looks alike in all four factions. The QA (§D) is unaffected: it measures the key, the fill of the rectangle and the aspect, never the roof.
 - **No player colour in the art.** The game adds ownership itself: a ring under each unit, and a trim around each building. Paint only the faction palette (file 27 §H).
 - **Sizes in game (zoom 1):**
   - units: their subject spans `UNIT_ART.gamePx` (worker 18 … heavy tank 40 px);

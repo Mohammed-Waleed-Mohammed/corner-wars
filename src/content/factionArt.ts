@@ -126,8 +126,22 @@ export interface BuildingArtSpec {
   notLike: string; // the types it is most easily confused with, and what tells them apart
 }
 
-/** Construction / hazard yellow and black, shared by the Construction Yard crane and the War Factory door. */
-const HAZARD = "construction-yellow #e0a526 with black #1a1a1a hazard bands";
+/**
+ * 27 §H.1 signature colours, the same for every faction. Used by the procedural buildings
+ * (render/art/factionBuildings.ts, which are also the Art Lab guides) and quoted in BUILDING_ART.
+ */
+export const SIG = {
+  hazard: "#e0a526", hazardDark: "#1a1a1a", // construction yellow + black bands (Yard crane, Factory door and gantry)
+  helipad: "#e8e4d8",
+  towerRim: "#d9d6cc", towerHole: "#121416", // Power Plant cooling towers
+  goldHot: "#ffd23f", goldRim: "#f29a1a", ore: "#e0a82e", oreDark: "#8a5a12", // Refinery
+  parade: "#c8bfa6", // Barracks parade ground
+  dish: "#e8ecef", // Lab radar dish
+  cyanCore: "#5ee8ff", cyanEdge: "#1aa6c8", // Resonance Tap crystal
+  missile: "#d8342a", missileBand: "#f2f2f2", // Missile Tower tips
+} as const;
+
+const HAZARD = `construction-yellow ${SIG.hazard} with black ${SIG.hazardDark} hazard bands`;
 
 export const BUILDING_ART: Record<ArtBuildingType, BuildingArtSpec> = {
   constructionYard: {
@@ -140,7 +154,7 @@ export const BUILDING_ART: Record<ArtBuildingType, BuildingArtSpec> = {
       "along the bottom edge, two or three vehicle-bay roofs side by side",
       "down the right side, stacked supply containers and crates in the faction's colours",
     ],
-    colours: `the crane jib in ${HAZARD}; the helipad ring pale #e8e4d8`,
+    colours: `the crane jib in ${HAZARD}; the helipad ring pale ${SIG.helipad}`,
     notLike: "the War Factory: no long ribbed hall roof, no bay door across the front",
   },
   powerPlant: {
@@ -153,7 +167,7 @@ export const BUILDING_ART: Record<ArtBuildingType, BuildingArtSpec> = {
       "the bottom-right quarter: a transformer yard, rows of insulators and thick black cables in a tidy grid",
       "a few small red warning lamps on the tower rims",
     ],
-    colours: "tower rims pale concrete #d9d6cc around near-black #121416 openings: the strongest light/dark contrast in the base",
+    colours: `tower rims pale concrete ${SIG.towerRim} around near-black ${SIG.towerHole} openings: the strongest light/dark contrast in the base`,
     notLike: "the Refinery (no gold, no ore, nothing glowing) and the Research Lab (the round shapes are open dark holes, not glass domes)",
   },
   refinery: {
@@ -166,7 +180,7 @@ export const BUILDING_ART: Record<ArtBuildingType, BuildingArtSpec> = {
       "a conveyor belt runs from the ore heap up into the crucible, carrying gold nuggets",
       "the rest is a low smelter-hall roof with one short chimney (no smoke) and a small stack of gold ingots on a pallet",
     ],
-    colours: "molten gold #ffd23f at the centre to #f29a1a at the rim; ore and ingots #e0a82e with #8a5a12 shadows. They are brighter and more saturated than any faction trim, Halcyon's brushed gold included. This gold is the ore and the metal, not decoration: it is required for every faction, including those that never use gold trim",
+    colours: `molten gold ${SIG.goldHot} at the centre to ${SIG.goldRim} at the rim; ore and ingots ${SIG.ore} with ${SIG.oreDark} shadows. They are brighter and more saturated than any faction trim, Halcyon's brushed gold included. This gold is the ore and the metal, not decoration: it is required for every faction, including those that never use gold trim`,
     notLike: "the Power Plant: the round shape is a glowing pool of gold, not a dark hole",
   },
   barracks: {
@@ -179,7 +193,7 @@ export const BUILDING_ART: Record<ArtBuildingType, BuildingArtSpec> = {
       "the flagpole stands in the middle of the parade ground; the flag (accent colour, faction emblem on it) streams to the right and is clearly visible",
       "a guarded gate with a small sentry box in the bottom-left corner",
     ],
-    colours: "the parade ground pale sand #c8bfa6, against the darker roofs; the flag in the faction's accent colour",
+    colours: `the parade ground pale sand ${SIG.parade}, against the darker roofs; the flag in the faction's accent colour`,
     notLike: "the War Factory: many narrow roofs and an open square, not one big hall",
   },
   warFactory: {
@@ -205,7 +219,7 @@ export const BUILDING_ART: Record<ArtBuildingType, BuildingArtSpec> = {
       "two or three slim antenna masts and small cooling units in the bottom-right",
       "a narrow walkway ring around the dome",
     ],
-    colours: "the dome in the faction's glass colour, bright and glossy; the dish pale #e8ecef",
+    colours: `the dome in the faction's glass colour, bright and glossy; the dish pale ${SIG.dish}`,
     notLike: "the Power Plant (the dome is shiny glass, not a dark hole) and the Resonance Tap (no crystals, no pylons)",
   },
   turret: {
@@ -251,7 +265,7 @@ export const BUILDING_ART: Record<ArtBuildingType, BuildingArtSpec> = {
       "the 3 × 3 grid of round tube openings fills its centre, each with a red-and-white missile tip",
       "a small radar dish in the top-right corner",
     ],
-    colours: "missile tips red #d8342a with white #f2f2f2 bands",
+    colours: `missile tips red ${SIG.missile} with white ${SIG.missileBand} bands`,
     notLike: "the Pillbox: a square with a grid of red tips, not an octagon with slits",
   },
   resonanceTap: {
@@ -263,7 +277,7 @@ export const BUILDING_ART: Record<ArtBuildingType, BuildingArtSpec> = {
       "four conductor pylons at the four diagonal points around the pit, each with a glowing cyan tip",
       "thick cables run from the pylons to a small control hut in the bottom-right corner",
     ],
-    colours: "the crystal cyan #5ee8ff at the core to #1aa6c8 at its edges; the pylon tips the same cyan",
+    colours: `the crystal cyan ${SIG.cyanCore} at the core to ${SIG.cyanEdge} at its edges; the pylon tips the same cyan`,
     notLike: "the Research Lab (a crystal and pylons, not a glass dome) and the Refinery (cyan, never gold)",
   },
 };

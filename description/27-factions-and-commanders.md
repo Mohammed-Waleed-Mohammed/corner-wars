@@ -138,7 +138,7 @@ Seen from above, every building type has **one signature**: the element that nam
 | Anti-Armor Cannon | 1×1 | one very long, thick barrel with a muzzle brake, reaching the top edge | — |
 | Missile Tower | 1×1 | a square launcher with a 3 × 3 grid of red missile tips | tips `#d8342a` with white bands |
 
-The full layout of each building (where each part sits in the footprint), and the types it must not be confused with, are in `BUILDING_ART` (`src/content/factionArt.ts`). The Art Lab's building prompts are built from them (file 29 §G).
+The full layout of each building (where each part sits in the footprint), and the types it must not be confused with, are in `BUILDING_ART` (`src/content/factionArt.ts`). The Art Lab's building prompts are built from them (file 29 §G). The procedural buildings (`render/art/factionBuildings.ts`) draw the same signature and layout in the same colours (`SIG` in `factionArt.ts`), so the in-game fallback, the HUD icons and the Art Lab guides already read by type.
 
 - **Source of truth:** `src/content/factionArt.ts` (`FACTION_LOOK`, `UNIT_ART`, `BUILDING_ART`). It feeds the procedural art, the Art Lab guides and the Gemini prompts.
 - **Buildings:** each building draws its faction's art, a real file if one exists (file 29 §G), otherwise the procedural version (`render/art/factionBuildings.ts`). A thin **trim in the owner's colour** runs around the footprint; the Construction Yard's is thicker. Under construction, the sprite is drawn at half opacity with a yellow scaffold hatch.
