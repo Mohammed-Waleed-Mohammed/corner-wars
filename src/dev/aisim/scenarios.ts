@@ -151,6 +151,28 @@ export const SCENARIOS: Scenario[] = [
     },
   },
   {
+    id: "eco.side", title: "39 my mines run dry: no crew walks to the rival's natural (no Refinery, their side of the map)",
+    make: () => vsIdle(),
+    run: (m) => {
+      m.run(200);
+      const h0 = m.home(P0), h1 = m.home(P1);
+      const theirs = m.state.goldSources.filter((g) => dist(g, h1) < dist(g, h0) && g.goldRemaining > 0).map((g) => g.id);
+      for (const g of m.state.goldSources) if (!theirs.includes(g.id)) g.goldRemaining = 1; // my side runs dry
+      const crew0 = m.units(P0, "worker").length;
+      // (a crew may still go there to build a Refinery — an expansion with an army lead — so builders
+      // don't count; a harvesting crew on their side with no Refinery of mine there does)
+      let worst = 0, when = -1;
+      for (let i = 0; i < 60; i++) {
+        m.run(2);
+        const refs = m.buildings(P0, "refinery");
+        const guarded = (w: Unit): boolean => refs.some((r) => dist(ctr(r), w) <= COMMANDER.CLAIM_RADIUS);
+        const n = m.units(P0, "worker").filter((w) => dist(w, h1) < dist(w, h0) && w.buildTargetId == null && !guarded(w)).length;
+        if (n > worst) { worst = n; when = m.state.time; }
+      }
+      return res(worst === 0, `${crew0} workers (${theirs.length} mine${theirs.length === 1 ? "" : "s"} left, all on their side), 2 min after my mines ran dry: at most ${worst} on their side of the map with no Refinery of mine (0)${when >= 0 ? ` at ${when | 0} s` : ""} · ${m.units(P0, "worker").length} alive`);
+    },
+  },
+  {
     id: "eco.taps", title: "The Resonance Grid is up before the gold is gone",
     make: () => vsIdle(),
     run: (m) => {

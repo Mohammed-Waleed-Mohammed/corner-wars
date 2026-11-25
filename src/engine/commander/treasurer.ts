@@ -65,9 +65,17 @@ export function manageWorkers(ctx: Ctx): void {
   // where workers should be: active mines first (cap wpm each); with none, the safest mine with gold
   const act = activeMines(ctx);
   const pool: { id: number; at: Vec2; cap: number }[] = act.map((m) => ({ id: m.id, at: mineCenter(m), cap: wpm }));
+  // a mine with no Refinery of mine deep on a rival's side: no crew stays there
+  const unsafe = (id: number): boolean => { const m = b.mines.find((x) => x.id === id); return !!m && !m.refinery && nearRival(ctx, m); };
   if (pool.length === 0) {
+    // no Refinery mine to work (mined out, or evacuated): workers long-distance mine the nearest safe
+    // mine with gold (better than idle) — but not one deep on a rival's side (39 §E). A crew sent to the
+    // rival's natural walks the whole way past their army with nothing to guard it, and the economy goes
+    // with it (the Boomer lost 11–19 workers a duel that way). With none, they wait at home for an
+    // expansion or the evacuation to end. (A central mine is fine: late in a match it is often the only
+    // gold left, and idling there cost FFAs their endgame.)
     const home = baseCenter(state, pid);
-    const fallback = b.mines.filter((m) => !evac(m.id) && !m.theirs && !mineInDanger(m, t) && live.has(m.id))
+    const fallback = b.mines.filter((m) => !evac(m.id) && !m.theirs && !mineInDanger(m, t) && live.has(m.id) && !nearRival(ctx, m))
       .sort((a, c) => (home ? dist(home, mineCenter(a)) - dist(home, mineCenter(c)) : 0) || a.id - c.id)[0];
     if (fallback) pool.push({ id: fallback.id, at: mineCenter(fallback), cap: 99 });
   }
@@ -82,11 +90,11 @@ export function manageWorkers(ctx: Ctx): void {
   const takeFree = (w: Unit): void => { if (!freeIds.has(w.id)) { freeIds.add(w.id); free.push(w); } };
   for (const w of workers) {
     if (w.buildTargetId != null || w.forcedTargetId != null) continue;
-    if (w.moveTarget && !(w.gatherSourceId != null && evac(w.gatherSourceId))) { if (w.state !== "idle") continue; }
+    if (w.moveTarget && !(w.gatherSourceId != null && (evac(w.gatherSourceId) || unsafe(w.gatherSourceId)))) { if (w.state !== "idle") continue; }
     if (w.repairTarget != null) { if (broke) takeFree(w); continue; }
     if (w.state === "idle" || !w.autoHarvest) { takeFree(w); continue; }
     const sid = w.gatherSourceId;
-    if (sid != null && (evac(sid) || !live.has(sid))) { takeFree(w); continue; } // evacuated / mined out
+    if (sid != null && (evac(sid) || !live.has(sid) || unsafe(sid))) { takeFree(w); continue; } // evacuated / mined out / their side
   }
   // rebalance: off over-crewed mines, and off mines outside the pool (long walks) when the pool has room
   const poolIds = new Set(pool.map((x) => x.id));
@@ -114,7 +122,7 @@ export function manageWorkers(ctx: Ctx): void {
       const s = dist(g.at, w) + (l >= g.cap ? 200 + 10 * (l - g.cap) : 0);
       if (s < bs) { bs = s; best = g; }
     }
-    if (!best) { if (w.gatherSourceId != null && evac(w.gatherSourceId)) evacuees.push(w.id); continue; }
+    if (!best) { if (w.gatherSourceId != null && (evac(w.gatherSourceId) || unsafe(w.gatherSourceId))) evacuees.push(w.id); continue; }
     load.set(best.id, (load.get(best.id) ?? 0) + 1);
     const ids = orders.get(best.id) ?? [];
     ids.push(w.id);
@@ -337,14 +345,34 @@ function runProjects(ctx: Ctx, budget: Budget, D: number): void {
   }
 }
 
+/** Contested ground I can hold: my army ≥ RICH_MINE_LEAD × the nearest rival's believed army, and no
+ *  fight at the mine I'd lose (the test pickExpansion puts to a mine past the middle). */
+function canHold(ctx: Ctx, m: MineBelief): boolean {
+  const { state, pid } = ctx;
+  const c = mineCenter(m);
+  const nearest = strongestEnemies(ctx.cs.beliefs!).filter((e) => e.home).sort((a, e2) => dist(a.home!, c) - dist(e2.home!, c))[0];
+  if (!nearest || armyValue(state, pid) < E.RICH_MINE_LEAD * nearest.est) return false;
+  return !(fightOdds(state, pid, c, COMMANDER.LOCAL_ODDS_RADIUS) < 1 && enemyValueNear(state, pid, c, 14) > 0);
+}
+
+/** A mine deep on a rival's side: farther from my base than FALLBACK_SIDE × its distance from the
+ *  nearest rival's (a rival's natural; not the central mines). No army-lead exception, unlike an
+ *  expansion: a crew with no Refinery walks the whole road, and the believed lead was wrong often
+ *  enough that allowing it gave back every worker the rule saved (39 §E). */
+function nearRival(ctx: Ctx, m: MineBelief): boolean {
+  const homes = strongestEnemies(ctx.cs.beliefs!).map((e) => e.home).filter((h): h is Vec2 => !!h);
+  if (homes.length === 0) return false;
+  const c = mineCenter(m);
+  return m.dist > Math.min(...homes.map((h) => dist(h, c))) * E.FALLBACK_SIDE;
+}
+
 /** The mine to claim next: most gold for the walk, safe, not theirs, on my side (or contested with an
  *  army lead). The first project of the match is simply the nearest mine (the home mine). */
 function pickExpansion(ctx: Ctx, projects: AIExpansion[]): MineBelief | null {
-  const { state, cs, pid } = ctx;
+  const { state, cs } = ctx;
   const b = cs.beliefs!;
   const t = state.tick;
   const homes = strongestEnemies(b).map((e) => e.home).filter((h): h is Vec2 => !!h);
-  const myArmy = armyValue(state, pid);
   const best = { m: null as MineBelief | null, s: -Infinity };
   const taken = new Set(projects.map((p) => p.sourceId));
   const urgent = activeMines(ctx).length === 0;
@@ -353,12 +381,8 @@ function pickExpansion(ctx: Ctx, projects: AIExpansion[]): MineBelief | null {
     if ((cs.evac?.[m.id] ?? -1) > t) continue;
     const c = mineCenter(m);
     const dEnemy = Math.min(9999, ...homes.map((h) => dist(h, c)));
-    if (m.dist > dEnemy * 1.05) {
-      const nearest = strongestEnemies(b).filter((e) => e.home).sort((a, e2) => dist(a.home!, c) - dist(e2.home!, c))[0];
-      if (!nearest || myArmy < E.RICH_MINE_LEAD * nearest.est || m.dist > dEnemy * 1.4) continue;
-      // contested ground needs my army to hold it
-      if (fightOdds(state, pid, c, COMMANDER.LOCAL_ODDS_RADIUS) < 1 && enemyValueNear(state, pid, c, 14) > 0) continue;
-    }
+    // contested ground needs my army to hold it
+    if (m.dist > dEnemy * E.SIDE_FRAC && (m.dist > dEnemy * 1.4 || !canHold(ctx, m))) continue;
     // with no income at all, time-to-first-gold is everything: the nearest viable mine wins
     const s = urgent ? -m.dist : m.gold / (1 + m.dist / E.EXPAND_DIST_NORM) * (insideMyBase(ctx, c, 2) ? E.INSIDE_BONUS : 1);
     if (s > best.s) { best.s = s; best.m = m; }

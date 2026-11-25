@@ -100,6 +100,44 @@ Log lines:
 - `back door on P1: round to (92,69) by (87,54) (92,69)`
 - `back door: at the back door (92,69) after 85 s → gather and strike`
 
+## §E The crews stay on my side (the Treasurer)
+
+With Spies, the Rusher sees where the Boomer's workers are and when nothing guards them, and that exposed an older bug.
+
+**The bug.** On the duel map each side has two mines: a home mine (5,000 g) and a natural (8,000 g). When the Treasurer has no Refinery mine to work, because the home mine has run dry and the natural is evacuated or mined out, it used a fallback: every worker went to the nearest unthreatened mine with gold. Often that is the rival's natural. On the duel map that is 56 tiles from home, a 35-tile walk to the nearest drop-off past the rival's army, with nothing to guard it.
+
+**What it cost.** In the Hard Boomer–Rusher duels with Spies, it cost 11–19 workers a match on four of the nine seeds. Raids, and the Rusher's army on its way home, met the crew on the road. It was present on spec 38 too: `eco.side` fails there with 22 workers on their side of the map.
+
+**The fix.**
+- **No mine deep on a rival's side.** The fallback skips a mine that is farther from my base than `ECON.FALLBACK_SIDE` (1.3) × its distance from the nearest rival's base. That catches a rival's natural (on the duel map 56 against 35 tiles, 1.6×).
+- **Central mines are still allowed** (about 1×). Late in a match they are often the only gold left.
+- **Crews already there come home.** A worker harvesting such a mine with no Refinery of mine there is called off and sent home.
+- **Otherwise they wait.** With no other mine, the crews wait at home for an expansion or the end of the evacuation.
+- **The Treasurer's expansion is unchanged.** It still takes a mine past the middle only with an army lead and no fight there it would lose; that test is now `canHold`, and its line is `ECON.SIDE_FRAC` (1.05).
+
+**Tried and dropped.**
+- **The `SIDE_FRAC` line for the fallback, with one mine's crew.** It also kept crews off the central mines and cut long hauls to one crew. In the 4-player FFAs, workers idled in the endgame, and two of the three `war.ffa` matches stalled at 50 minutes.
+- **An army-lead exception, as for an expansion.** When the believed army lead allowed the rival's natural, crews walked there and died: the Boomer held 3 of 9 again. A crew with no Refinery walks the whole road, and the believed lead is wrong too often.
+
+**Effect.** The nine Hard Boomer–Hard Rusher duels with Spies, at 12 minutes. "Held" means the Boomer kept ≤ 15 workers and wasn't eliminated (the `war.bvr` measure).
+
+| | Held | Rusher wins |
+|---|---|---|
+| Spec 38 | 6 / 9 | 1 |
+| Spec 39 before §E | 3 / 9 | 3 |
+| Spec 39 with §E | 6 / 9 | 3 |
+| Spec 39 with §E, Spies off | 7 / 9 | 2 |
+
+Five seeds now lose 0–1 workers.
+
+**Elsewhere.** On nine seeds of `camp.comeback`'s set-up (the Boomer 40% behind the Rusher), the Boomer lives to 10 minutes in all nine, both before and after. Its workers lost fall from 1–18 a match to 0–1.
+
+The FFA results are noise. The `war.ffa` match reaches a result within 50 minutes on 3 of seeds 1–9 against 4 before. It is a different three, so the 3-seed `war.ffa` group moved from 2 of 3 to 1 of 3.
+
+**The suite.** With §E it passes 119 of 129. All ten failures, counting the `war.ffa` and `war.bvr` groups, also fail on spec 38: the seven in "As built" (§E doesn't change `war.bvr`'s 2 of 3), plus the single bout of `camp.comeback` and the 3-seed `war.ffa` group, which are back to failing. `det` and `spectate` pass.
+
+**What is left.** The three Rusher wins (seeds 1, 4 and 6, at 7.1–7.6 min) are military, not workers walking off. The Boomer's home mine runs dry at about 3:30, so from then on its whole economy is the natural. The Rusher's raids evacuate the natural again and again (two riflemen are enough), and its Spies show when the natural and the army are apart. By 5:00 the Rusher out-earns the Boomer about 3.5× and breaks in at about 6:00. The answer would be the Boomer holding its natural with the army, not with the crews; that is not part of this spec.
+
 ## §T Scenarios
 
 `aisim scen spy.`, `scout.sweep`, `op.backdoor`. Code: `src/dev/aisim/spyScenarios.ts`, `src/dev/aisim/flankScenarios.ts`.
@@ -113,6 +151,7 @@ Log lines:
 | `scout.sweep` | Hard Boomer, duel, 6 minutes: the map seen with sweeping vs without (`sweepOff`) |
 | `op.backdoor` | A base with five turrets facing P0. A Hard Opportunist with two posted Spies chooses the back door, walks round and strikes. Compared on two seeds with the same bout with operations off: half the base falls sooner, more falls in 6 minutes (by 10 points or more), and the army kept at the half-way mark is within 15 points of the direct push's |
 | `spy.eyes` | The same base, the Spies bought in the match. With Spies the Marshal launches (by the back door). Without them (`spiesOff`) its scout bounces off the turret arc and the base is not touched in 6 minutes |
+| `eco.side` | Hard Boomer against an idle seat, 3:20: both mines on my side are emptied by hand. For 2 minutes no worker harvests on their side of the map without a Refinery of mine there (builders don't count). It fails on spec 38: 22 workers go |
 
 ## As built
 
@@ -144,7 +183,7 @@ On four_corners, recent sight is about even (61%).
 
 Per player per match, a Spy takes 4–25 posts and is seen 5–45 times in duels, and up to 78 times in four-player matches. The back door was chosen in 4 of 9 duels and 5 of 9 FFAs.
 
-**The Boomer and the Rusher.** With Spies the Rusher sees the Boomer's greed, and its timing strikes land. Rusher against Boomer went 3 of 3 to the Rusher, against 1 Rusher and 1 Boomer win without spec 39. Most of that is the Rusher's own Spies: with only the Rusher's switched off, seed 1 goes to 10 minutes undecided. `war.bvr` stays at 2 of 3, as before, but the lost seed moved from 2 to 1. The Boomer's answer (towers that see Spies, or a cheaper opening) is not part of this spec.
+**The Boomer and the Rusher.** With Spies the Rusher sees the Boomer's greed, and its timing strikes land. In the first sweep, Rusher against Boomer went 3 of 3 to the Rusher, against 1 Rusher and 1 Boomer win without spec 39. Over the nine Boomer–Rusher seeds the Boomer held only 3. Most of its losses were crews sent to the Rusher's natural; §E fixes that, and the Boomer holds 6 of 9 again, as on spec 38. The Rusher still finishes it in 3 of 9 (1 on spec 38), on the economics of a one-mine Boomer (§E, What is left).
 
 **Two changes to earlier work.**
 - **`COMMANDER.COUNCIL.ATTACK_GAP_TICKS`: 60 s → 40 s.** With the sweep, the Turtle sees each of `read.profile`'s waves earlier on its way in. The gap between one wave's last sighting and the next's first fell from about 60 s to about 50 s, so the 60-s rule merged three waves into one attack.

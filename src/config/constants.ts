@@ -951,6 +951,12 @@ export const COMMANDER = {
     CREEP_MAX_STEPS: 6, // stepping stones per project
     PROJECT_STALL_TICKS: 2700, // a project that can't place a step for 90 s is dropped
     RICH_MINE_LEAD: 1.0, // a contested (central) mine needs my army ≥ this × the nearest enemy's est
+    // an expansion to a mine farther from my base than this × from the nearest rival's needs an army
+    // lead (canHold)
+    SIDE_FRAC: 1.05,
+    // 39 §E the no-Refinery fallback crew never works a mine farther from my base than this × from the
+    // nearest rival's: a rival's natural (on the duel map 56 vs 35 tiles, 1.6×), not a central mine (~1×)
+    FALLBACK_SIDE: 1.3,
     TAP_START_S: 300, // Resonance Tapping from 5 min…
     TAP_MINES_LEFT_S: 300, // …or earlier when projected mine gold ÷ income < this
     TAP_SOFT: 4, // 36 §F: Taps are unlimited; past this many, another only when the mines run dry or gold floats
