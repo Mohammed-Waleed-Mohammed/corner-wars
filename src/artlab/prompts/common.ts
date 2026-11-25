@@ -51,7 +51,9 @@ export function referenceLines(list: readonly Attachment[], self: Asset): string
     const img = `Image ${att.n}`;
     switch (att.role) {
       case "guide":
-        out.push(`${img} is the GUIDE: the game's own procedural placeholder for exactly this ${self.kind}. It fixes the layout, size, outline, colours and light. Paint over it; do not redesign it.`);
+        out.push(self.kind === "building"
+          ? `${img} is the GUIDE: the game's own procedural placeholder for this building. It fixes the footprint rectangle (size, position, proportions), the camera and the faction colours. Its roof is only a stand-in: follow SIGNATURE and LAYOUT for what is on the roof.`
+          : `${img} is the GUIDE: the game's own procedural placeholder for exactly this ${self.kind}. It fixes the layout, size, outline, colours and light. Paint over it; do not redesign it.`);
         break;
       case "master":
         out.push(self.kind === "building"
@@ -59,10 +61,12 @@ export function referenceLines(list: readonly Attachment[], self: Asset): string
           : `${img} is ${anchorFile(a)}, the game's MASTER STYLE texture (${a.title}, Verdant Reach). Copy ONLY its painting style, brushwork, level of detail and ground scale. Do NOT copy its content, colours or features: this is a different material in a different biome.`);
         break;
       case "style":
-        out.push(`${img} is ${anchorFile(a)}, the matching asset of the Concord, the game's first faction: copy ONLY its painting style, rendering and level of detail; this is a different faction with different colours and shapes. Do NOT copy its colours, emblem, materials or outline.`);
+        out.push(self.kind === "building"
+          ? `${img} is ${anchorFile(a)}, the same building of the Concord, the game's first faction. Copy its painting style, rendering and level of detail, and keep the same SIGNATURE in the same place, so players recognise the building type in any faction. Do NOT copy its colours, emblem, materials or shape language: this is a different faction.`
+          : `${img} is ${anchorFile(a)}, the matching asset of the Concord, the game's first faction: copy ONLY its painting style, rendering and level of detail; this is a different faction with different colours and shapes. Do NOT copy its colours, emblem, materials or outline.`);
         break;
       case "faction":
-        out.push(`${img} is ${anchorFile(a)}, this faction's Construction Yard: match its materials, colours, emblem placement and rendering exactly so the faction's set is one family.${self.kind === "unit" ? " It is a building: take its look, not its shape or scale." : " This is a different building, as described in PAINT: do not copy its layout."}`);
+        out.push(`${img} is ${anchorFile(a)}, this faction's Construction Yard: match its materials, colours, emblem placement and rendering exactly so the faction's set is one family.${self.kind === "unit" ? " It is a building: take its look, not its shape or scale." : " This is a different building, as described in SIGNATURE and LAYOUT: do not copy its crane, helipad or layout."}`);
         break;
       case "ground":
         out.push(self.kind === "texture"

@@ -120,6 +120,26 @@ Every faction builds the same roster, but each one **looks** different. A player
 | Cantons | `#6b7046` `#8a6a44` `#3a3a24` `#b8b48a` `#22c55e` `#9ccf9a` | irregular, patched, bolted | olive paint over rust, sandbags, salvaged plates, green chevrons |
 | Choir | `#4a1c22` `#2a1a1c` `#120a0c` `#d8c8b8` `#ef4444` `#8a6cf0` | pointed, spiked, tall | oxblood and black iron, red banners, glowing blue-violet crystals |
 
+### H.1 Building signatures
+
+Seen from above, every building type has **one signature**: the element that names it at a glance, from across the map. At game size (32 px per tile) the roof detail blurs away, but the signature still reads. The signature is the **same for all four factions**, so a player learns it once. The faction changes the skin (materials, palette, shape language), never the signature. No two types share a signature, and each one is the largest, highest-contrast element on its roof.
+
+| Building | Tiles | Signature (what reads from far away) | Signature colours |
+|---|---|---|---|
+| Construction Yard | 3×3 | a tower crane whose jib runs diagonally across the whole yard, and a round helipad on the main roof | crane `#e0a526` with black hazard bands; helipad `#e8e4d8` |
+| Power Plant | 2×2 | two big round cooling towers: pale rings around dark, open holes | rims `#d9d6cc`, openings `#121416` |
+| Refinery | 2×2 | an open crucible of glowing **molten gold** next to a heap of **gold ore**: the brightest, warmest spot in the base | molten `#ffd23f` → `#f29a1a`, ore `#e0a82e` |
+| Barracks | 2×2 | an open sand parade ground with a tall flag in the faction's accent colour, beside narrow parallel bunkhouse roofs | parade ground `#c8bfa6`; flag in the faction accent |
+| War Factory | 3×2 | one huge ribbed assembly hall crossed by a gantry crane, with a hazard-striped bay door along the front | `#e0a526` with black hazard bands |
+| Research Lab | 2×2 | a big glass dome lit from inside, with a large pale radar dish | the faction's glass colour; dish `#e8ecef` |
+| Resonance Tap | 2×2 | a glowing cyan crystal core in a round pit, ringed by four conductor pylons | `#5ee8ff` → `#1aa6c8` |
+| Gun Turret | 1×1 | a round gun turret with two short barrels pointing up | — |
+| Pillbox | 1×1 | a flat octagonal bunker with a firing slit in each side and no barrel | — |
+| Anti-Armor Cannon | 1×1 | one very long, thick barrel with a muzzle brake, reaching the top edge | — |
+| Missile Tower | 1×1 | a square launcher with a 3 × 3 grid of red missile tips | tips `#d8342a` with white bands |
+
+The full layout of each building (where each part sits in the footprint), and the types it must not be confused with, are in `BUILDING_ART` (`src/content/factionArt.ts`). The Art Lab's building prompts are built from them (file 29 §G).
+
 - **Source of truth:** `src/content/factionArt.ts` (`FACTION_LOOK`, `UNIT_ART`, `BUILDING_ART`). It feeds the procedural art, the Art Lab guides and the Gemini prompts.
 - **Buildings:** each building draws its faction's art, a real file if one exists (file 29 §G), otherwise the procedural version (`render/art/factionBuildings.ts`). A thin **trim in the owner's colour** runs around the footprint; the Construction Yard's is thicker. Under construction, the sprite is drawn at half opacity with a yellow scaffold hatch.
 - **Units:** a unit draws its faction sprite once a real file exists: an **owner-colour ring** sits under it and the sprite turns to face its heading. Until then it keeps its role shape. At 18–40 px, procedural detail would only blur the silhouette that counters depend on.
