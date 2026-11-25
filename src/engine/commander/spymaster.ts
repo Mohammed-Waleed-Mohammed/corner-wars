@@ -15,6 +15,7 @@ import { cmd, myFormation, squadOdds, squadUnits, valueOf, type Squad } from "./
 import { sightOf } from "../../state/terrain";
 import { jobsFor } from "./manual";
 import { PUSHING } from "./reports";
+import { stalestCells } from "./staleMap";
 
 const I = COMMANDER.INTEL;
 const dist = (a: Vec2, b: Vec2): number => Math.hypot(a.x - b.x, a.y - b.y);
@@ -293,7 +294,7 @@ export function runScout(ctx: Ctx): void {
 
   // 33 §B.2: importance × staleness — enemy mains matter most (more while I'm weighing an attack or
   // only guessing at their army), then their expansions, then free mines (where expansions appear)
-  const pois: { at: Vec2; imp: number; owner: PlayerId | null }[] = [];
+  const pois: { at: Vec2; imp: number; owner: PlayerId | null; sweep?: boolean }[] = [];
   const beliefs = cs.beliefs;
   for (const e of livingEnemies(state, pid)) {
     const eb = beliefs?.enemies[e];
@@ -306,8 +307,13 @@ export function runScout(ctx: Ctx): void {
   const mine = new Set(claimedSources(state, pid).map((g) => g.id));
   for (const g of state.goldSources) if (!mine.has(g.id)) pois.push({ at: { x: g.x + 0.5, y: g.y + 0.5 }, imp: 1, owner: null });
   pois.push({ at: { x: state.citadel.x, y: state.citadel.y }, imp: 1, owner: null });
+  // 39 Hard sweeps the whole map too: the stalest ground (the lanes most) between those looks
+  if (tier.fullAdaptation && !cs.sweepOff) {
+    const homes = (e: PlayerId): Vec2 | null => beliefs?.enemies[e]?.home ?? baseCenter(state, e);
+    for (const c of stalestCells(state, pid, intel, homes, u)) pois.push({ at: c.at, imp: c.w * COMMANDER.INTEL.SWEEP.IMP, owner: null, sweep: true });
+  }
 
-  let best: { at: Vec2; imp: number; owner: PlayerId | null } | null = null, bs = -Infinity;
+  let best: (typeof pois)[number] | null = null, bs = -Infinity;
   for (const poi of pois) {
     const age = staleness(state, intel, poi.at.x, poi.at.y);
     if (age < COMMANDER.SCOUT_STALE_TICKS) continue;
@@ -327,7 +333,7 @@ export function runScout(ctx: Ctx): void {
   s.mission = "scouting";
   s.objective = to;
   s.timer = state.tick + interval;
-  aiLog(cs, state.tick, "T", `scout → (${to.x | 0},${to.y | 0})`);
+  aiLog(cs, state.tick, "T", `scout → (${to.x | 0},${to.y | 0})${best.sweep ? ` sweeping stale ground (${Number.isFinite(staleness(state, intel, to.x, to.y)) ? `unseen ${(staleness(state, intel, to.x, to.y) / 30) | 0} s` : "never seen"})` : ""}`);
 }
 
 // ── 33 §B.2 sentries (Hard): watch posts on the approaches, for early warning ─────────────────

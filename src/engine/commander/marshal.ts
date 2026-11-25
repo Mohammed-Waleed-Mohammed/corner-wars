@@ -15,8 +15,9 @@ import { staleness } from "../aiPerception";
 import { planAbility } from "../aiAbilities";
 import { baseThreatened, centerOf, cmd, runCaptains, dist, driveSquad, ensureFormation, gatePost, myFormation, pickFormation, retreat, squadOdds, squadUnits, valueOf, type Squad } from "./captain";
 import { runHunt, runScout, runSentries } from "./spymaster";
+import { runSpies } from "./spies";
 import { defenseAnchor, runHomeGuard } from "./warden";
-import { ask, homeRadius, strikeRead, veto } from "./reports";
+import { ask, councilOf, homeRadius, strikeRead, veto } from "./reports";
 import { opReady, runLeash, siegeHolds, watchFeint } from "./operations";
 import { runStandoff } from "./standoff";
 import { econVictimMul, needMul, raidRest } from "./estimate";
@@ -37,6 +38,7 @@ export function runMarshal(ctx: Ctx): void {
   runScout(ctx);
   runSentries(ctx);
   runHunt(ctx); // 34 §M.4 counter-intelligence: the hunt task force
+  runSpies(ctx); // 39 the Spies' watch posts
   runPowers(ctx);
   runAbility(ctx); // 27 §E commander ability
   runCaptains(ctx); // 34 §W.1 the manual: artillery discipline, kiting, focus fire
@@ -317,7 +319,8 @@ function runMainArmy(ctx: Ctx, s: Squad): void {
         return;
       }
       if (!opReady(ctx, s, target, objective, center)) return; // 34 §W.4 the operation holds the launch
-      const gp = gatherPoint(state, objective, center);
+      const op = councilOf(ctx).op; // 39 a back door gathers where the march round ended
+      const gp = op?.kind === "backdoor" && op.target === target && op.spot ? op.spot : gatherPoint(state, objective, center);
       ensureFormation(ctx, s, pickFormation(ctx, center, "travel"), objective);
       cmd(ctx, "ATTACK_MOVE", { unitIds: s.unitIds, x: gp.x, y: gp.y, spread: false });
       s.mission = "gather";

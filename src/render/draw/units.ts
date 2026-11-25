@@ -97,6 +97,10 @@ export function drawUnit(
       drawTreatyCart(ctx, p.x, p.y, z, u);
       selectR = RENDER.tankSize * 0.7;
       break;
+    case "spy":
+      drawSpy(ctx, p.x, p.y, z, u);
+      selectR = RENDER.workerRadius;
+      break;
   }
 
   // White hit-flash when recently struck (§10).
@@ -183,6 +187,39 @@ function drawPeacemaker(ctx: CanvasRenderingContext2D, x: number, y: number, z: 
   ctx.strokeStyle = COLORS.outline;
   ctx.lineWidth = 1;
   ctx.stroke();
+}
+
+// 39 Spy: a dark hooded figure with an owner-coloured trim and a pale eye-glint. Drawn faded while no
+// enemy can see it (its owner sees it; an enemy only ever draws it while revealed).
+function drawSpy(ctx: CanvasRenderingContext2D, x: number, y: number, z: number, u: Unit): void {
+  const r = RENDER.workerRadius * z * 0.8;
+  const a = ctx.globalAlpha;
+  if (!u.revealedTo) ctx.globalAlpha = a * 0.55;
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, Math.PI * 2);
+  ctx.fillStyle = "#23262c";
+  ctx.fill();
+  ctx.strokeStyle = ownerColor(u.owner);
+  ctx.lineWidth = Math.max(1.5, 2 * z);
+  ctx.stroke();
+  // the hood, pointing where it walks
+  const f = facing(u);
+  ctx.beginPath();
+  ctx.moveTo(x + Math.cos(f) * r * 1.35, y + Math.sin(f) * r * 1.35);
+  ctx.lineTo(x + Math.cos(f + 2.3) * r * 0.75, y + Math.sin(f + 2.3) * r * 0.75);
+  ctx.lineTo(x + Math.cos(f - 2.3) * r * 0.75, y + Math.sin(f - 2.3) * r * 0.75);
+  ctx.closePath();
+  ctx.fillStyle = "#3a3e46";
+  ctx.fill();
+  ctx.strokeStyle = COLORS.outline;
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  // the eye
+  ctx.beginPath();
+  ctx.arc(x + Math.cos(f) * r * 0.55, y + Math.sin(f) * r * 0.55, Math.max(1, r * 0.22), 0, Math.PI * 2);
+  ctx.fillStyle = "#e8f0ff";
+  ctx.fill();
+  ctx.globalAlpha = a;
 }
 
 // 38 Treaty cart: a long armoured wagon with a pale strongbox and four wheels, a white pennant aloft.

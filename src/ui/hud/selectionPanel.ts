@@ -17,9 +17,9 @@ import { icon } from "./glyphs";
 import { pct, setClass, setHidden, setStyle, setText, setTitle } from "./domWrite";
 
 const PRODUCERS: BuildingType[] = ["constructionYard", "barracks", "warFactory"];
-const TYPE_ORDER: UnitType[] =["worker", "rifleman", "grenadier", "rocket", "medic", "scoutBuggy", "tank", "heavyTank", "artillery", "peacemaker", "treatyCart"];
+const TYPE_ORDER: UnitType[] =["worker", "rifleman", "grenadier", "rocket", "medic", "scoutBuggy", "tank", "heavyTank", "artillery", "peacemaker", "treatyCart", "spy"];
 // Approximate on-screen px of each unit shape at zoom 1, for portrait fitting (file 21 §G.3a).
-const UNIT_PX: Partial<Record<UnitType, number>> = { worker: 16, medic: 16, rifleman: 14, rocket: 13, grenadier: 14, scoutBuggy: 15, tank: 18, heavyTank: 22, artillery: 18, peacemaker: 15, treatyCart: 22 };
+const UNIT_PX: Partial<Record<UnitType, number>> = { worker: 16, medic: 16, rifleman: 14, rocket: 13, grenadier: 14, scoutBuggy: 15, tank: 18, heavyTank: 22, artillery: 18, peacemaker: 15, treatyCart: 22, spy: 15 };
 
 function el(tag: string, cls: string, text?: string): HTMLElement {
   const e = document.createElement(tag);

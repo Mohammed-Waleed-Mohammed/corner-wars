@@ -3,6 +3,7 @@
 // arbiter (§D) decide what the gold buys. Emits only commands; the sim enforces costs and legality.
 
 import { dealRequests } from "./diplomat";
+import { spyRequests } from "./spies";
 import { COMMANDER, UNIT_STATS } from "../../config/constants";
 import { armyValue, combatUnitsOf, fightersOf, mainYard } from "./assess";
 import { arbitrate, Budget } from "./budget";
@@ -55,7 +56,8 @@ export function runSession(ctx: Ctx): void {
   defenseRequests(ctx, budget, D); tag("warden", n); n = budget.reqs.length;
   architectRequests(ctx, budget, D); tag("architect", n); n = budget.reqs.length;
   techRequests(ctx, budget, D); tag("scholar", n); n = budget.reqs.length;
-  dealRequests(ctx, budget); tag("king", n); // 38 gold held for a Peacemaker
+  dealRequests(ctx, budget); tag("king", n); n = budget.reqs.length; // 38 gold held for a Peacemaker
+  spyRequests(ctx, budget); tag("spymaster", n); // 39 a Spy or two
   const research = budget.reqs.filter((r) => r.key.startsWith("research:")).sort((a, b) => b.prio - a.prio || (a.key < b.key ? -1 : 1))[0];
   briefScholar(ctx, research ? { key: research.key.slice(9) as never, why: research.reason ?? `prio ${research.prio.toFixed(0)}` } : null);
   briefMarshal(ctx);

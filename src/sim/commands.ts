@@ -322,6 +322,11 @@ function applyMove(state: GameState, pid: PlayerId, ids: number[], x: number, y:
 function applyAttackTarget(state: GameState, pid: PlayerId, ids: number[], targetId: number, keepHarvest: boolean): void {
   for (const u of ownedUnits(state, pid, ids)) {
     clearOrder(u);
+    if (u.unitType === "spy") { // 39 unarmed: an attack order walks it to the target
+      const t = state.entities.find((e) => e.id === targetId);
+      if (t) { u.moveTarget = { x: t.x + (t.kind === "building" ? t.width / 2 : 0), y: t.y + (t.kind === "building" ? t.height / 2 : 0) }; u.state = "moving"; }
+      continue;
+    }
     u.holdFire = null; // 34 §W.6: an explicit attack opens fire for this unit (its group keeps holding)
     u.forcedTargetId = targetId;
     u.target = targetId;

@@ -19,7 +19,8 @@ export type UnitType =
   | "medic" // 19 §D — Field Medic (no attack, auto-heals)
   // 38 deals — never trained, never commanded: the sim spawns and drives them
   | "peacemaker" // the weakest player's envoy (no weapon; never auto-targeted)
-  | "treatyCart"; // the slow, armoured tribute cart that seals a deal (seen by everyone)
+  | "treatyCart" // the slow, armoured tribute cart that seals a deal (seen by everyone)
+  | "spy"; // 39 unarmed, hidden from each enemy unless near one of their towers
 // Counter triangle (05-units.md): infantry→ranged→heavy→infantry. "siege" sits OUTSIDE the
 // triangle (15-logic §4): normal vs units, +100% vs buildings, fragile. "support" (19 §D) is also
 // outside: no attack at all — the Medic.
@@ -223,6 +224,10 @@ export interface Unit extends Entity {
   attackMove?: boolean; // engage enemies en route to moveTarget
   forcedTargetId?: number | null; // a specific enemy ordered to attack (chases beyond aggro)
   escortOf?: number | null; // 38 ESCORT: the treaty cart this unit guards on the move (its guard point follows it)
+  // 39 a Spy: per player, the sim time it stays revealed to them (a tower's range + REVEAL_PAD, and
+  // LINGER_S after); revealedTo = bit p set while revealed to player p (the targeting scanners read it)
+  revealUntil?: number[];
+  revealedTo?: number;
   // Worker-built construction (engine-only, 15-logic §"worker-built construction"):
   buildTargetId?: number | null; // construction site this worker is assigned to build
   repairTarget?: number | null; // engine-only (16 §7): friendly building this worker is repairing
@@ -504,6 +509,13 @@ export interface CommanderState {
   feelings?: Feelings; // 37 the King's feelings
   feelOff?: boolean; // dev harness only: the feelings off (feel.* ablation)
   dip?: { seq: number; offerUntil: number; letters: number[]; escorted: number[] }; // 38 the deal events read, the offer and letters answered, carts escorted
+  // 39 each Spy's post: whom it watches, from where (one of 16 bearings round their base), since when,
+  // and the bearings it was seen on lately
+  spies?: Record<number, { on: PlayerId; at: Vec2; bearing: number; tick: number; stage?: Vec2[] | null; flee?: Vec2 | null; fleeTick?: number }>;
+  spyDepth?: Record<number, { d: number[]; tick: number }>; // 39 per rival: how far out a post must stand on each of 16 bearings (learned from reveals)
+  spiesOff?: boolean; // 39 harness ablation: no Spies
+  sweepOff?: boolean; // 39 harness ablation: the scout tours points of interest only
+  backdoorOff?: boolean; // 39 harness ablation: no back-door operation
 }
 
 // ── 34 the Council ────────────────────────────────────────────────────────────
@@ -532,8 +544,8 @@ export interface Reports {
 }
 export interface Ruling { tick: number; seat: Seat; key: string; verdict: "fund" | "deny" | "save"; why: string }
 /** 34 §W.4 — the operation carrying out the current launch (operations.ts). */
-export type OpKind = "direct" | "feint" | "siege";
-export interface CouncilOp { kind: OpKind; target: PlayerId; start: number; phase: "lure" | "siege" | "go"; why: string; spot?: Vec2; siegeStart?: number; reconsidered?: boolean; struckAt?: number; answeredAt?: number; answer?: number }
+export type OpKind = "direct" | "feint" | "siege" | "backdoor";
+export interface CouncilOp { kind: OpKind; target: PlayerId; start: number; phase: "lure" | "siege" | "detour" | "go"; route?: Vec2[]; leg?: number; why: string; spot?: Vec2; siegeStart?: number; reconsidered?: boolean; struckAt?: number; answeredAt?: number; answer?: number }
 
 /** 34 §W.3 — how one enemy behaves, measured by the Spymaster (samples, oldest first). */
 export interface EnemyProfile {
@@ -586,6 +598,7 @@ export interface CouncilState {
   profiles?: Partial<Record<number, EnemyProfile>>; // 34 §W.3 per enemy
   op?: CouncilOp; // 34 §W.4 the current operation
   lastOpTick?: number; // when a non-direct operation was last chosen
+  backdoorLook?: { target: PlayerId; at: Vec2; tick: number }; // 39 a look at a back door the launch waits for
   /** 34 §C.2 the grand plan: phase index, when it began, ticks paused by emergencies, the strike launch */
   plan?: { phase: number; since: number; paused: number; pauseStart?: number; launched?: number; strikeLogged?: boolean };
   campaign?: CampaignState; // 34 §M the King's campaign: estimate, grand strategy, windows, FFA politics

@@ -64,7 +64,7 @@ export function runStandoff(ctx: Ctx, s: Squad, center: Vec2, value: number, hom
   const st = (s.standoff ??= { since: -1, step: 0, stepAt: 0, v0: 0, f0: 0, cycles: 0, lastMission: s.mission });
   // dance: an advance that turned back near a force that faced me (the count lapses after DANCE_FORGET_S
   // without facing anyone: a new approach is a new story)
-  const adv = ["gather", "engage", "attack", "flank"], back = ["retreat", "stage", "regroup"];
+  const adv = ["gather", "engage", "attack", "flank", "detour"], back = ["retreat", "stage", "regroup"];
   // (a pause between the two — hold, standoff — is neither: it doesn't break the advance-and-back)
   if (adv.includes(st.lastMission) && back.includes(s.mission) && t - (st.facedAt ?? -1e9) <= 60 * SIM_HZ) {
     st.cycles++;

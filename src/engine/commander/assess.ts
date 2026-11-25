@@ -21,7 +21,8 @@ export function unitsOf(state: GameState, pid: PlayerId): Unit[] {
   return mem && mem.length ? live.concat(mem.filter((u) => u.owner === pid)) : live;
 }
 export function combatUnitsOf(state: GameState, pid: PlayerId): Unit[] {
-  return unitsOf(state, pid).filter((u) => u.unitType !== "worker");
+  // (39: a Spy is unarmed and has its own orders — the Spymaster's)
+  return unitsOf(state, pid).filter((u) => u.unitType !== "worker" && u.unitType !== "spy");
 }
 export function fightersOf(state: GameState, pid: PlayerId): Unit[] {
   return combatUnitsOf(state, pid).filter((u) => u.combatType !== "support");

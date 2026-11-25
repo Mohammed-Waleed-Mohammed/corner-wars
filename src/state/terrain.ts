@@ -9,6 +9,7 @@ import { BIOME_RULES, DEFAULT_BIOME, MIN_SIGHT } from "../config/biomes";
 import type { AnyEntity, BiomeId, GameState, MoveClass, PlayerId, TerrainType, Unit } from "../core/types";
 import { forestSpotRange, roughTerrainFactor } from "./doctrine";
 import { cloakSpotRange, hostileSpeedMult } from "./fields";
+import { spyHidden } from "./stealth";
 
 /** Tile at (x, y); out of bounds reads as impassable void. */
 export function terrainAt(state: GameState, x: number, y: number): TerrainType {
@@ -123,10 +124,12 @@ function viewerNear(state: GameState, viewer: PlayerId, x: number, y: number, ra
  *   • forest: inside a forest and no viewer entity within FOREST_SPOT_RANGE (Lindqvist: 3);
  *   • Ghost Roads / Ashstorm: inside its owner's cloaking field and no viewer entity within the
  *     field's spot range (2).
- *  Visibility only — it never changes targeting. Spectators (eliminated viewers) see everything. */
+ *  Visibility only — it never changes targeting. Spectators (eliminated viewers) see everything.
+ *  39 a Spy is hidden by its own rule (state/stealth.ts), which also keeps it from being targeted. */
 export function concealedFrom(state: GameState, viewer: PlayerId, e: AnyEntity): boolean {
   if (e.kind !== "unit" || e.owner === viewer || e.owner === "neutral") return false;
   if (state.players[viewer]?.eliminated) return false;
+  if (spyHidden(viewer, e)) return true; // 39 a Spy, away from the viewer's towers
   const cloak = cloakSpotRange(state, e);
   if (cloak !== null && !viewerNear(state, viewer, e.x, e.y, cloak)) return true;
   if (terrainAt(state, e.x, e.y) !== "forest") return false;

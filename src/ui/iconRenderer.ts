@@ -21,7 +21,7 @@ export type IconKind =
   | "citadel" | "flask" | "speaker" | "speakerMuted" | "warning" | "lock" | "check" | "shield" | "speed"
   | `formation:${string}`;
 
-const UNIT_KINDS = new Set<string>(["worker", "rifleman", "rocket", "tank", "grenadier", "scoutBuggy", "heavyTank", "artillery", "medic", "peacemaker", "treatyCart"]);
+const UNIT_KINDS = new Set<string>(["worker", "rifleman", "rocket", "tank", "grenadier", "scoutBuggy", "heavyTank", "artillery", "medic", "peacemaker", "treatyCart", "spy"]);
 const BUILDING_KINDS = new Set<string>([
   "constructionYard", "powerPlant", "refinery", "barracks", "warFactory", "lab", "turret",
   "wall", "gate", "pillbox", "antiArmorCannon", "missileTower", "resonanceTap",
@@ -32,7 +32,7 @@ const BUILDING_KINDS = new Set<string>([
 // Approximate on-screen px of each unit shape at zoom 1 (draw fns size in px, not tiles).
 const UNIT_PX: Record<string, number> = {
   worker: 16, medic: 16, rifleman: 14, rocket: 13, grenadier: 14,
-  scoutBuggy: 15, tank: 18, heavyTank: 22, artillery: 18, peacemaker: 15, treatyCart: 22,
+  scoutBuggy: 15, tank: 18, heavyTank: 22, artillery: 18, peacemaker: 15, treatyCart: 22, spy: 15,
 };
 
 let iconOwner: PlayerId = 0; // "local player's color unless specified" — set once per match by the HUD

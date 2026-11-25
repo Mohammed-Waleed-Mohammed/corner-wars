@@ -72,6 +72,7 @@ const UNIT_LABELS: Record<UnitType, string> = {
   medic: "Field Medic",
   peacemaker: "Peacemaker",
   treatyCart: "Treaty Cart",
+  spy: "Spy",
 };
 
 export class InputController {
@@ -787,7 +788,7 @@ export class InputController {
 
   selectArmy(): void {
     const ids = new Set<number>();
-    for (const e of this.state.entities) if (e.kind === "unit" && e.owner === this.local && e.unitType !== "worker" && e.unitType !== "peacemaker" && e.unitType !== "treatyCart" && e.hp > 0) ids.add(e.id);
+    for (const e of this.state.entities) if (e.kind === "unit" && e.owner === this.local && e.unitType !== "worker" && e.unitType !== "peacemaker" && e.unitType !== "treatyCart" && e.unitType !== "spy" && e.hp > 0) ids.add(e.id);
     if (ids.size) this.selectedIds = ids;
   }
 

@@ -59,6 +59,8 @@ export function checksum(state: GameState): number {
       h = mix(h, e.repairTarget ?? -1);
       h = mix(h, e.forcedTargetId ?? -1);
       h = mix(h, e.escortOf ?? -1); // 38
+      h = mix(h, e.revealedTo ?? 0); // 39 to whom a Spy is revealed
+      if (e.revealUntil) for (const v of e.revealUntil) h = mix(h, Math.round(v * 100));
       // 34 §W.6–7: hold ground / hold fire stances and the guard order's point, group, sortie and rest.
       h = mix(h, (e.holdGround ? 1 : 0) + (e.guardPoint ? 2 : 0));
       h = mix(h, e.holdFire ?? -1);

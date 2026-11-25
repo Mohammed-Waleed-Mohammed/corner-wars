@@ -102,6 +102,7 @@ function allyLight(state: GameState, viewer: PlayerId): Uint8Array | null {
 export function allySees(state: GameState, viewer: PlayerId, e: AnyEntity): boolean {
   const d = state.diplomacy;
   if (!d || !d.treaties.length || e.owner === "neutral" || e.owner === viewer) return false;
+  if (e.kind === "unit" && e.unitType === "spy") return false; // 39 a partner's towers reveal it to them, not to me
   if (!d.treaties.some((t) => (t.a === viewer || t.b === viewer) && t.dominant === e.owner)) return false;
   const g = allyLight(state, viewer);
   if (!g) return false;

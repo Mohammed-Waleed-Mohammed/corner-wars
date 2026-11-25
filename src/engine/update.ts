@@ -32,6 +32,7 @@ import { isLowPower } from "../state/gameState";
 import { updateResearch } from "../state/upgrades";
 import { updateResonanceTaps } from "./resonance";
 import { setDiplomacyFrame, updateDiplomacy } from "./diplomacy";
+import { updateSpies } from "./spy";
 
 export function updateGame(state: GameState, dt: number): void {
   state.soundEvents = []; // host drained last frame's; collect this frame's
@@ -64,6 +65,7 @@ export function updateGame(state: GameState, dt: number): void {
 
   updateDiplomacy(state); // 38 deals: offers, Peacemakers, carts, treaties (may spawn / remove envoys)
   setDiplomacyFrame(state); // 38 who spares whom, for this tick's target scans
+  updateSpies(state); // 39 to whom each Spy is revealed this tick (the scans and the view read it)
 
   // Broad-phase index for this step's targeting + Citadel capture (rebuilt once).
   entityHash.rebuild(state);
@@ -106,8 +108,8 @@ export function updateGame(state: GameState, dt: number): void {
 }
 
 function dispatchUnit(state: GameState, u: Unit, dt: number): void {
-  // 38 a Peacemaker or a treaty cart only walks where the deal sends it
-  if (u.unitType === "peacemaker" || u.unitType === "treatyCart") {
+  // 38 a Peacemaker or a treaty cart only walks where the deal sends it; 39 a Spy only walks (unarmed)
+  if (u.unitType === "peacemaker" || u.unitType === "treatyCart" || u.unitType === "spy") {
     updateUnitMovement(state, u, dt);
     return;
   }

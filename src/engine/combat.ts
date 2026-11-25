@@ -36,6 +36,7 @@ import { updateUnitMovement } from "./movement";
 import { navigateTo } from "./navigation";
 import { entityHash } from "./spatial";
 import { noteEnvoyDeath, noteStrike, spared } from "./diplomacy";
+import { spyHidden } from "../state/stealth";
 
 const FRENZY_DMG_MULT = 1 + (CITADEL_POWERS.frenzy.damageBonus ?? 0);
 const FRENZY_SPEED_MULT = 1 + (CITADEL_POWERS.frenzy.speedBonus ?? 0);
@@ -45,9 +46,10 @@ export function isEnemy(owner: Owner, e: AnyEntity): boolean {
 }
 
 /** 38 an enemy this owner's units and towers may pick on their own: not a Peacemaker, not a treaty
- *  partner, not the treaty cart coming to me (a direct attack order still can — see resolveTarget). */
+ *  partner, not the treaty cart coming to me (a direct attack order still can — see resolveTarget).
+ *  39 nor a Spy hidden from them (no order can reach one: they can't see it). */
 export function isFoe(owner: Owner, e: AnyEntity): boolean {
-  return isEnemy(owner, e) && !spared(owner, e);
+  return isEnemy(owner, e) && !spared(owner, e) && !spyHidden(owner, e);
 }
 
 /** Center point of an entity (footprint center for buildings, position for units). */
@@ -596,7 +598,7 @@ export function removeDead(state: GameState): void {
 function resolveTarget(state: GameState, u: Unit): AnyEntity | null {
   if (u.forcedTargetId != null) {
     const t = findEntityById(state, u.forcedTargetId);
-    if (t && t.hp > 0 && isEnemy(u.owner, t)) return t;
+    if (t && t.hp > 0 && isEnemy(u.owner, t) && !spyHidden(u.owner, t)) return t; // 39 a Spy slipping away is lost
     u.forcedTargetId = null;
   }
   // Only combat units auto-acquire; workers fight strictly when force-ordered (05-units.md).

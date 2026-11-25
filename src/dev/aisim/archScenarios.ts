@@ -132,9 +132,14 @@ export const ARCH_SCENARIOS: Scenario[] = [
       const at8 = [ringDone(m, P0), ringDone(m, P1)];
       m.run(120);
       const at10 = [ringDone(m, P0), ringDone(m, P1)];
-      const need = (p: number, pers: string): boolean => (pers === "turtle" ? at8[p] >= 0.95 : true) && at10[p] >= 0.8 || m.state.players[p].eliminated;
+      // a match decided before the mark can't be judged at it: the loser is gone and the winner stopped
+      // building when it won (a Rusher that wins at 7 min with its Spies' eyes hasn't failed to wall)
+      const decided = (mark: number): boolean => m.state.winner !== null && m.state.time < mark;
+      const need = (p: number, pers: string): boolean =>
+        m.state.players[p].eliminated || ((pers === "turtle" && !decided(480) ? at8[p] >= 0.95 : true) && (decided(600) || at10[p] >= 0.8));
       const ok = need(0, a) && need(1, b);
-      return res(ok, `8 min ${at8.map((v) => v.toFixed(2)).join("/")} · 10 min ${at10.map((v) => v.toFixed(2)).join("/")} · fort ${m.cs(P0)?.arch?.fort ?? 0}/${m.cs(P1)?.arch?.fort ?? 0}`);
+      const end = m.state.winner !== null ? ` · decided: P${m.state.winner} won at ${(m.state.time / 60).toFixed(1)} min` : "";
+      return res(ok, `8 min ${at8.map((v) => v.toFixed(2)).join("/")} · 10 min ${at10.map((v) => v.toFixed(2)).join("/")} · fort ${m.cs(P0)?.arch?.fort ?? 0}/${m.cs(P1)?.arch?.fort ?? 0}${end}`);
     },
   })),
   // §C no walls in the opening, no second ring before mid-game

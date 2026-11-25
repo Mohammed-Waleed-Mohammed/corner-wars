@@ -148,6 +148,7 @@ export const UNIT_STATS: Record<UnitType, UnitStat> = {
   // price is the deal's (DEALS.ENVOY_COST), and they are worth nothing to an army's value.
   peacemaker: { hp: 40, damage: 0, cooldown: 1.0, range: 0, speed: 5.5, collisionRadius: 0.3, sight: 7, gold: 0, buildTime: 6 },
   treatyCart: { hp: 2400, damage: 0, cooldown: 1.0, range: 0, speed: 1.2, collisionRadius: 0.6, sight: 5, gold: 0, buildTime: 20 },
+  spy: { hp: 40, damage: 0, cooldown: 1.0, range: 0, speed: 3.4, collisionRadius: 0.3, sight: 8, gold: 150, buildTime: 12 }, // 39
 };
 
 // ── Combat overhaul (19-formations-v2.md) ────────────────────────────────────
@@ -155,6 +156,13 @@ export const UNIT_STATS: Record<UnitType, UnitStat> = {
 export const COMBAT_PACE = { UNIT_HP_MULT: 1.5 } as const;
 // §D Field Medic behavior. STIM_HEAL_PER_S applies once "Combat Stims" is researched.
 // 38 deals (engine/diplomacy.ts) — sim rules, so every peer runs them alike
+// 39 the Spy: hidden from each enemy until it comes within REVEAL_PAD tiles of one of their powered
+// towers' reach; it stays revealed to them LINGER_S after leaving it.
+export const SPY = {
+  REVEAL_PAD: 2,
+  LINGER_S: 3,
+} as const;
+
 export const DEALS = {
   FROM_S: 300, // no offer before 5:00
   MIN_PLAYERS: 3, // alive players for deals to exist
@@ -212,6 +220,7 @@ export const UNIT_WEAPON: Record<UnitType, WeaponKind> = {
   medic: "melee", // inert — the Medic never attacks (damage 0); entry exists for the Record type
   peacemaker: "melee", // inert (38)
   treatyCart: "melee", // inert (38)
+  spy: "melee", // inert (39)
 };
 // Siege units deal +100% to buildings (15-logic §4), outside the counter triangle.
 export const SIEGE_BUILDING_BONUS = 1.0;
@@ -300,7 +309,7 @@ export const GATE = { openRadius: 1.5, closeDelay: 1.0 } as const; // friendly w
 export const PRODUCES: Partial<Record<BuildingType, UnitType[]>> = {
   constructionYard: ["worker"],
   warFactory: ["scoutBuggy", "tank", "heavyTank", "artillery", "worker"],
-  barracks: ["rifleman", "grenadier", "rocket", "medic"], // medic on slot R (19 §D)
+  barracks: ["rifleman", "grenadier", "rocket", "medic", "spy"], // medic on slot R (19 §D); 39 the Spy
 };
 
 // What each building can construct (structures, placed on the map). The Construction
@@ -336,7 +345,7 @@ export const BUILDING_DESC: Record<BuildingType, string> = {
   constructionYard: "Your main base. Trains Workers and unlocks every other building. Lose all your Yards and you are out.",
   powerPlant: "Makes power (+100). Without enough power, your defenses switch off and training slows down.",
   refinery: "Workers drop their gold here and earn 25% more for it. Comes with one free Worker.",
-  barracks: "Trains foot soldiers: Riflemen, Grenadiers, Rocket Soldiers and Medics.",
+  barracks: "Trains foot soldiers: Riflemen, Grenadiers, Rocket Soldiers, Medics and Spies.",
   warFactory: "Builds vehicles: Scout Buggies, Tanks, Heavy Tanks and Artillery. Can also make Workers.",
   lab: "Researches upgrades that make your army stronger, and unlocks advanced units and defenses.",
   turret: "A gun tower that shoots any enemy within 7 tiles. A good all-round defense.",
@@ -359,6 +368,7 @@ export const UNIT_DESC: Record<UnitType, string> = {
   medic: "Support: no attack; auto-heals the lowest-HP friendly nearby.",
   peacemaker: "Envoy: carries a peace letter; no weapon; only a direct attack order can hit it.",
   treatyCart: "Treaty cart: carries the tribute that seals a deal; slow, armoured, seen by everyone.",
+  spy: "Unseen scout (sight 8, no weapon): hidden from the enemy unless within 2 tiles of their towers' reach.",
 };
 
 // Display names (shared by the HUD + build-rule tooltips; no DOM).
@@ -371,7 +381,7 @@ export const BUILDING_LABEL: Record<BuildingType, string> = {
 export const UNIT_LABEL: Record<UnitType, string> = {
   worker: "Worker", rifleman: "Rifleman", grenadier: "Grenadier", rocket: "Rocket",
   scoutBuggy: "Scout Buggy", tank: "Tank", heavyTank: "Heavy Tank", artillery: "Artillery",
-  medic: "Field Medic", peacemaker: "Peacemaker", treatyCart: "Treaty Cart",
+  medic: "Field Medic", peacemaker: "Peacemaker", treatyCart: "Treaty Cart", spy: "Spy",
 };
 export const UNLOCK_LABEL: Record<UnlockKey, string> = {
   advancedVehicles: "Advanced Vehicles", siegeDoctrine: "Siege Doctrine", advancedDefenses: "Advanced Defenses",
@@ -573,7 +583,7 @@ export const TERRAIN_MAP_COLOR: Record<TerrainType, string> = {
 export const FASTEST_MOVE: Record<MoveClass, number> = { foot: 1.15, wheeled: 1.35, tracked: 1.2 };
 export const UNIT_MOVE_CLASS: Record<UnitType, MoveClass> = {
   worker: "foot", rifleman: "foot", rocket: "foot", grenadier: "foot", medic: "foot", peacemaker: "foot",
-  scoutBuggy: "wheeled", treatyCart: "wheeled",
+  scoutBuggy: "wheeled", treatyCart: "wheeled", spy: "foot",
   tank: "tracked", heavyTank: "tracked", artillery: "tracked",
 };
 export const TERRAIN_FX = {
@@ -971,6 +981,18 @@ export const COMMANDER = {
     DANGER_MEMORY_TICKS: 600, // a mine stays "in danger" 20 s after enemy fighters were seen there
     PEEK_DIST: 7, // the scout looks from this far short of its target
     FIRST_LOOK_DIST: 4, // 34 §M.3 a first look at a never-seen home stops this short (inside the scout's sight)
+    // 39 whole-map scouting (Hard): the staleness map (commander/staleMap.ts)
+    SWEEP: {
+      CELL: 14, // tiles a side
+      NEAR_HOME: 16, // cells this close to my base are mine to see…
+      NEAR_RIVAL: 22, // …and this close to a rival's, the looks at their base cover (the corner behind it is no news)
+      AGE_CAP: 20000, // ticks: never seen counts as this old (as the points of interest do)
+      MIN_AGE_TICKS: 3600, // a cell is worth a trip once unseen 2 min
+      LANE_DIST: 12, // a cell this close to the line from my base to a rival's is on a lane…
+      LANE_W: 1.5, // …and weighs this much more
+      IMP: 0.6, // against the points of interest (a rival's main 2–3, a mine 1)
+      TOP: 3, // the stalest few join the scout's pick
+    },
     SENTRY_OUT: 22, // sentries stand this far beyond my wall, toward the nearest enemies
     SENTRY_MAX: 2,
     SENTRY_FLEE_DIST: 9, // a sentry falls back from enemy fighters this close…
@@ -1129,6 +1151,17 @@ export const COMMANDER = {
     SIEGE_MAX_S: 90,
     CHASE_MAX: 10, // tiles past my territory a defender may chase before it is called back
     RAID_ROTATE: 8, // a raid scores the spot it just hit this much worse (tiles-equivalent)
+    // 39 the back door: their towers watch the front; go round and strike where they don't
+    BACKDOOR_MIN_FRONT: 20, // known tower fire (dps) along the front approach worth going round (a turret is 25)
+    BACKDOOR_BACK_FRAC: 0.5, // the back approach must face at most this share of it
+    BACKDOOR_MIN_TURN: 4, // bearings (of 16) between the front and the back: 90° at least
+    BACKDOOR_DETOUR: 2.0, // the way round may be this many times the direct march (+ 20 tiles)
+    BACKDOOR_FRESH_S: 90, // the back approach must have been seen this recently (else the Spymaster looks first…)
+    BACKDOOR_LOOK_WAIT_S: 50, // …the launch waiting this long for the look (a Spy may have to walk round)
+    BACKDOOR_RING_PAD: 3, // the way round keeps this far outside every known tower's reach
+    BACKDOOR_RING_MAX: 34, // …and no farther out than this from the objective
+    BACKDOOR_ARRIVE: 5, // a leg is walked when the army's center is this close to its waypoint
+    BACKDOOR_MAX_S: 120, // the detour gives up (and strikes from where it is) after this
   },
   // 34 the Council (§H dials)
   COUNCIL: {
@@ -1151,7 +1184,9 @@ export const COMMANDER = {
     OVERREACT_RATIO: 1.5, // they answer a raid with ≥ this × its value: feints work
     TURTLE_TOWERS: 8, // known towers that make an enemy a turtle
     ATTACK_MIN_VALUE: 400, // an incoming army worth this counts as an attack (aggression, routes)
-    ATTACK_GAP_TICKS: 1800, // sightings closer than this are the same attack
+    // sightings closer than this are the same attack (39: 40 s, was 60 s — with the whole-map sweep a wave is
+    // seen earlier on its way in, and 60 s merged waves sent 70 s apart into one attack)
+    ATTACK_GAP_TICKS: 1200,
  // the same veto is written to the AI log at most this often
   },
   // 36 the Architect (engine/commander/architect.ts)
@@ -1237,6 +1272,22 @@ export const COMMANDER = {
       opportunist: { fury: 0.9, fear: 0.9, confidence: 1.1, suspicion: 1.0, greed: 1.5, desperation: 1.0 },
     },
     HOTHEADS: ["rusher", "opportunist"] as string[], // desperation → all-in; the others seek a deal and dig in
+  },
+  // 39 the Spymaster's Spies (spies.ts)
+  SPIES: {
+    FROM_S: 180, // none bought in the opening
+    WANT_HARD: 2,
+    WANT_MEDIUM: 1,
+    PRIO: 52, // an investment: after the army's needs, before floating gold
+    POST_MIN: 6, // a post this far from their base at least (sight 8 still reaches its edge)…
+    POST_MAX: 26, // …and at most
+    POST_OUT: 2, // tiles of margin beyond a known tower's reach + the reveal pad
+    REPOST_S: 45, // look for a better (closer, still safe) post this often
+    FLEE: 8, // seen: back off this far straight out from their base (a tower's reach is 7–11 + the pad)
+    STAGE_OUT: 2, // a new post is reached along its own bearing, from this far beyond POST_MAX
+    DEPTH_PAD: 3, // seen at r tiles from their base: posts on that bearing stand r + this out from now on (r + 1 on its neighbours)
+    DEPTH_FORGET_S: 300, // a rival's reveal map is forgotten this long after its last reveal (towers fall, bases move)
+    FLEE_MAX_S: 8, // a retreat ends at its point, or after this long (blocked)
   },
   // §B personalities — parameter sets, not code (firstPush = Infinity: never initiates).
   PERSONALITIES: {

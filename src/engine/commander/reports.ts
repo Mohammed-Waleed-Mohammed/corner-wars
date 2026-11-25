@@ -166,7 +166,7 @@ export function briefMarshal(ctx: Ctx): void {
   const mission = main?.mission ?? "idle";
   file(ctx, "marshal", { tick: state.tick, at, mission, value: v, etaHomeS, committed: PUSHING.includes(mission) });
 }
-export const PUSHING = ["gather", "engage", "raze", "attack", "finish", "flank"];
+export const PUSHING = ["gather", "engage", "raze", "attack", "finish", "flank", "detour"]; // (39 detour: a back door's march round)
 
 // ── questions (34 §D) ─────────────────────────────────────────────────────────
 
