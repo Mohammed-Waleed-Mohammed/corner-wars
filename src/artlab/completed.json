@@ -17,14 +17,6 @@
       "bytes": 505918,
       "verified": "2026-11-25"
     },
-    "verdant/road": {
-      "file": "src/assets/terrain/verdant/road.png",
-      "sha256": "5d9f93bc6cf46eecab2f38ec9c6f0e29c4b52ab31f3c99c6820e051d8ccb1783",
-      "width": 512,
-      "height": 512,
-      "bytes": 495974,
-      "verified": "2026-11-25"
-    },
     "verdant/hill": {
       "file": "src/assets/terrain/verdant/hill.png",
       "sha256": "1a36db7a0141f528e77c8c81295c960cb042a78690a69103e073af94d09d6f0d",
@@ -71,30 +63,6 @@
       "width": 512,
       "height": 512,
       "bytes": 536285,
-      "verified": "2026-11-25"
-    },
-    "verdant/tree_1": {
-      "file": "src/assets/terrain/verdant/tree_1.png",
-      "sha256": "b312cf5465b6c3a670fd260ff5affcf2a328a2209bf057d0e18d09c223283ae0",
-      "width": 256,
-      "height": 256,
-      "bytes": 100302,
-      "verified": "2026-11-25"
-    },
-    "verdant/tree_2": {
-      "file": "src/assets/terrain/verdant/tree_2.png",
-      "sha256": "e65f0e56d81d6a87f969aa3bd642d01c81592c62010a0fa6bef4e6d91708c6e3",
-      "width": 256,
-      "height": 256,
-      "bytes": 100970,
-      "verified": "2026-11-25"
-    },
-    "verdant/tree_3": {
-      "file": "src/assets/terrain/verdant/tree_3.png",
-      "sha256": "fb743b1a8285ec918b3c7e35bb3487115dde00875e0761672934056e416d4423",
-      "width": 256,
-      "height": 256,
-      "bytes": 98544,
       "verified": "2026-11-25"
     }
   }
