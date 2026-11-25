@@ -24,7 +24,8 @@
   | Units | 9 per faction: the whole shared roster (§G) |
 
   That makes 6 × 25 = 150 terrain assets, plus 4 × 19 = 76 faction assets. A **faction selector** filters the building and unit groups.
-- **Status per asset:** **procedural** (no file yet), **real** (a file exists), plus the last QA verdict.
+- **Status per asset:** **procedural** (no file yet), **real** (a file exists), plus the last QA verdict, or **DONE** once it is on the completed list (§H).
+- **Show completed:** off by default, so the catalog lists only the assets still to make. Completed assets are hidden until it is switched on.
 - **Biome sheet:** the whole biome rendered as a mini-map scene, so you can judge consistency at a glance.
 
 ## B. Generation order (style anchors)
@@ -141,3 +142,25 @@ The faction art for file 27 §H: 4 factions × (10 buildings + 9 units).
   - a unit with no file keeps its role shape (file 11);
   - a player with no commander (and so no faction) gets the classic labelled blocks.
 - **Loading:** the Vite glob picks up a saved file on the next reload. Only files that exist are requested, so missing art never causes a 404.
+
+## H. Verifying and completing assets
+
+Once a file is in place it is verified, then tagged **completed**, and the Art Lab stops listing it.
+
+1. **Verify:** `npm run art -- check [filter…]` checks every asset file that exists. Add `--all-checks` to print the passing checks too. It exits 1 on any FAIL. The checks are:
+
+   | Check | Rule | Verdict if not met |
+   |---|---|---|
+   | Location | the file is at the slot's path (§E; verdant legacy names count) | not checked: listed under "Files no slot uses" |
+   | Format | a valid PNG: signature, every chunk CRC, IHDR, inflatable image data | FAIL |
+   | Dimensions | exactly the §C output: textures and portraits 512×512, trees 256×256, rocks/bushes/tufts and units 128×128, buildings footprint × 96 px | FAIL |
+   | Alpha | sprites, units and buildings have an alpha channel; textures and portraits are fully opaque | FAIL |
+   | Bit depth | 8 bits per channel | WARN |
+   | File size | at most the raw RGBA pixels + 64 KiB | WARN |
+   | §D QA | the §D checks that can be measured on a finished file: seam, lighting and palette for textures; subject, clean background, clipping, leftover magenta, footprint and (buildings) aspect for keyed sprites | as in §D |
+
+   Internal repetition (§D) isn't re-checked here: it is measured before the seamless blend, which only the Art Lab sees.
+2. **Complete:** `npm run art -- mark <filter…>` (or `--all`) runs the same checks and adds every file without a FAIL to **`src/artlab/completed.json`**. A FAIL is refused with its reason. `npm run art -- unmark <filter…>` removes entries, and `npm run art -- list` shows each entry's state. A filter is an asset id (`verdant/ground`), a prefix (`verdant`, `units/concord`) or a glob (`verdant/tree_*`).
+3. **Hide:** the Art Lab reads `completed.json` and hides those assets unless **Show completed** is on. Each entry stores the file's SHA-256, and on load the Art Lab re-hashes every completed file. A file that has changed since it was verified is listed again as **CHANGED**, and one that is gone as **MISSING**, until it is marked again.
+
+`completed.json` is committed with the art. The checker is `src/dev/artcheck/` (Node only, never in the game bundle), and the checks themselves are `src/artlab/verify.ts`.

@@ -21,16 +21,18 @@ export interface Persisted {
   verdicts: Record<string, { verdict: Verdict; at: number; saved?: boolean }>;
   lock: number;
   trim: number;
+  showCompleted: boolean; // 29 §H: also list completed assets in the catalog (off: hide them)
 }
 
 function load(): Persisted {
-  const def: Persisted = { selected: ASSETS[0].id, biome: "verdant", faction: "concord", verdicts: {}, lock: LOCK_DEFAULT, trim: 0 };
+  const def: Persisted = { selected: ASSETS[0].id, biome: "verdant", faction: "concord", verdicts: {}, lock: LOCK_DEFAULT, trim: 0, showCompleted: false };
   try {
     const raw = JSON.parse(localStorage.getItem(KEY) ?? "{}") as Partial<Persisted>;
     const p = { ...def, ...raw };
     if (!assetById(p.selected)) p.selected = def.selected;
     if (!BIOME_IDS.includes(p.biome)) p.biome = def.biome;
     if (!ART_FACTIONS.includes(p.faction)) p.faction = def.faction;
+    if (typeof p.showCompleted !== "boolean") p.showCompleted = def.showCompleted;
     return p;
   } catch { return def; }
 }

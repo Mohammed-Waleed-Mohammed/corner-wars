@@ -2,7 +2,9 @@
 
 Put PNGs in `src/assets/terrain/<biome>/<name>.png`, where `<biome>` is one of `verdant`, `saltglass`, `frostmarch`, `cinder`, `mire`, `scar`. The game picks them up automatically, with no code change. A biome's files load the first time that biome is played. Any missing file falls back to the built-in procedural art, so nothing ever 404s. Specs: `description/26-biomes.md` §D/§F and `description/29-art-pipeline.md`.
 
-**The easy way is the Art Lab.** Run `npm run dev` and open **http://localhost:5173/artlab.html**. For every asset it shows the guide image, the exact prompt and the style anchors to attach. It also normalises and QA-checks the image you drop in, then saves it to the right path here.
+**The easy way is the Art Lab.** Run `npm run dev` and open **http://localhost:5173/artlab.html**. For every asset it shows the guide image, the exact prompt and the style anchors to attach. It also normalises and QA-checks the image you drop in, then saves it to the right path here. In VS Code, the **hot start** task (Ctrl+Shift+B) starts the same dev server.
+
+**Finished files** are verified with `npm run art -- check` and tagged with `npm run art -- mark <id>` (for example `verdant/ground`). The Art Lab then hides them unless "Show completed" is on (29 §H).
 
 ## Names
 

@@ -1,0 +1,32 @@
+{
+  // "hot start": the Vite dev server with hot reload (npm run dev). Run it with Ctrl+Shift+B
+  // (the default build task) or Terminal → Run Task… → hot start. The terminal prints the URL
+  // (http://127.0.0.1:5173/ unless that port is taken); the Art Lab is at /artlab.html.
+  // Opened through WSL (Remote - WSL) the task runs bash directly; opened from Windows through
+  // \\wsl.localhost\… it goes through wsl.exe into the same folder.
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "hot start",
+      "detail": "Vite dev server with hot reload: the game at /, the Art Lab at /artlab.html",
+      "type": "process",
+      "command": "bash",
+      "args": ["-lc", "[ -s ~/.nvm/nvm.sh ] && . ~/.nvm/nvm.sh; exec npm run dev -- --host 127.0.0.1"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "windows": {
+        "options": { "cwd": "${env:USERPROFILE}" },
+        "command": "wsl.exe",
+        "args": ["-d", "ubuntu-20.04", "--cd", "${workspaceFolder}", "-e", "bash", "-lc", "[ -s ~/.nvm/nvm.sh ] && . ~/.nvm/nvm.sh; exec npm run dev -- --host 127.0.0.1"]
+      },
+      "isBackground": true,
+      "problemMatcher": {
+        "owner": "vite",
+        "pattern": { "regexp": "^\\b\\B$" },
+        "background": { "activatesOnStart": true, "beginsPattern": "VITE", "endsPattern": "ready in" }
+      },
+      "group": { "kind": "build", "isDefault": true },
+      "presentation": { "reveal": "always", "panel": "dedicated", "clear": true },
+      "runOptions": { "instanceLimit": 1 }
+    }
+  ]
+}

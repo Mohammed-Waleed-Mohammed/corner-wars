@@ -10,6 +10,7 @@ import type { Asset } from "./catalog";
 import { exportAllPrompts } from "./prompts";
 import { openBiomeSheet } from "./ui/biomeSheet";
 import { renderCatalog } from "./ui/catalogPanel";
+import { checkCompletedFiles, completedCounts, completedNotice, isHidden } from "./ui/completed";
 import { button, downloadText, el } from "./ui/dom";
 import { renderPreview } from "./ui/preview";
 import { dropStep, reportStep, saveStep } from "./ui/resultPanel";
@@ -22,6 +23,7 @@ const left = el("aside.col.left", { "aria-label": "Asset catalog" });
 const centre = el("main.col.centre", { "aria-label": "Selected asset" });
 const right = el("aside.col.right", { "aria-label": "Game-context preview" });
 const flash = el("div.flash", { hidden: true });
+const stats = el("div.top-stats", {});
 
 function current(): Asset { return assetById(persisted.selected) ?? ASSETS[0]; }
 
@@ -71,6 +73,7 @@ function renderCentre(a: Asset): void {
   const safe = (f: () => HTMLElement | null): void => {
     try { parts.push(f()); } catch (e) { parts.push(el("div.notice.bad", {}, `Could not render this section: ${e instanceof Error ? e.message : String(e)}`)); }
   };
+  safe(() => completedNotice(a));
   safe(() => specCard(a));
   safe(() => guideStep(a));
   safe(() => attachStep(a, select));
@@ -83,16 +86,17 @@ function renderCentre(a: Asset): void {
 
 function renderAll(): void {
   const a = current();
-  renderCatalog(left, { select, biome: setBiome, faction: setFaction });
+  const { done } = completedCounts(ASSETS);
+  stats.textContent = `${ASSETS.filter(hasReal).length} / ${ASSETS.length} real · ${done} completed`;
+  renderCatalog(left, { select, biome: setBiome, faction: setFaction, refresh: renderAll });
   renderCentre(a);
   renderPreviewSafe(a);
 }
 
 function header(): HTMLElement {
-  const real = ASSETS.filter(hasReal).length;
   return el("header.top", {},
     el("div.brand", {}, el("span.logo", {}, "◆"), el("div", {}, el("h1", {}, "Art Lab"), el("div.sub", {}, "The Fall of the Citadel · Gemini art pipeline (description/29)"))),
-    el("div.top-stats", {}, `${real} / ${ASSETS.length} real`),
+    stats,
     el("div.top-actions", {},
       button("Biome sheet", () => void openBiomeSheet(persisted.biome), "btn", { title: `Render a mini scene of ${BIOMES[persisted.biome].name} with its current art` }),
       button("Export all prompts", () => downloadText(exportAllPrompts(), "artlab_prompts.md"), "btn", { title: "Every prompt with its attachment list, in generation order (Markdown)" })),
@@ -102,11 +106,15 @@ function header(): HTMLElement {
 function boot(): void {
   const fromHash = decodeURIComponent(location.hash.slice(1));
   if (fromHash && assetById(fromHash)) persisted.selected = fromHash;
+  // The remembered asset was completed since (29 §H): start on the next one still to make instead.
+  else if (isHidden(current())) persisted.selected = (ASSETS.find((a) => !isHidden(a)) ?? current()).id;
   followSelectors(current());
+  save();
   app.replaceChildren(header(), flash, el("div.cols", {}, left, centre, right));
   const msg = takeFlash();
   if (msg) { flash.textContent = msg; flash.hidden = false; setTimeout(() => (flash.hidden = true), 9000); }
   renderAll();
+  void checkCompletedFiles(renderAll); // a completed file that changed since it was verified is listed again
 }
 
 boot();

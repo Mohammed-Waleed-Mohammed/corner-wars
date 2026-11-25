@@ -58,6 +58,7 @@ h1, h2, h3, h4 { font-weight: 700; letter-spacing: 0.01em; }
 .tag.v-pass { color: #052e16; background: var(--pass); }
 .tag.v-warn { color: #3b2201; background: var(--warn); }
 .tag.v-fail { color: #fff; background: var(--fail); }
+.tag.done { color: #bbf7d0; border-color: color-mix(in srgb, var(--pass) 55%, transparent); }
 .chips { display: inline-flex; gap: 4px; align-items: center; }
 
 /* ── catalog ── */
@@ -67,6 +68,10 @@ h1, h2, h3, h4 { font-weight: 700; letter-spacing: 0.01em; }
 .biome-select { flex: 1; font: 600 14px var(--sans); color: var(--text); background: var(--panel-2); border: 1px solid var(--border); border-radius: 7px; padding: 6px 8px; }
 .cat-head + .cat-head { margin-top: 10px; }
 .cat-sum { color: var(--muted); font-size: 12px; margin: 10px 0 4px; }
+.done-toggle { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 13px; padding: 6px 8px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 7px; }
+.done-toggle label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+.done-toggle input { accent-color: var(--pass); }
+.group-hidden { color: var(--muted); font-size: 12px; padding: 2px 6px 0 44px; }
 .group { margin-top: 14px; }
 .group h3 { display: flex; justify-content: space-between; font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin-bottom: 6px; }
 .group .count { font-family: var(--mono); }
@@ -108,6 +113,7 @@ ol.attach .fname { margin: 0; }
 .notice { margin-top: 10px; padding: 9px 12px; border-radius: 7px; border: 1px solid; font-size: 13px; }
 .notice.bad { color: #fecaca; border-color: color-mix(in srgb, var(--fail) 60%, transparent); background: color-mix(in srgb, var(--fail) 10%, transparent); }
 .notice.warn { color: #fde68a; border-color: color-mix(in srgb, var(--warn) 60%, transparent); background: color-mix(in srgb, var(--warn) 10%, transparent); }
+.notice.done { margin-top: 0; color: #bbf7d0; border-color: color-mix(in srgb, var(--pass) 55%, transparent); background: color-mix(in srgb, var(--pass) 10%, transparent); }
 .notice ul { margin: 6px 0 0 18px; }
 .prompt-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
 .copy-status { color: #86efac; font-weight: 600; font-size: 13px; }

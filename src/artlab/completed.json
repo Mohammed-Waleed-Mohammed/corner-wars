@@ -1,0 +1,101 @@
+{
+  "about": "Art Lab completed list (description/29 §H). Written by `npm run art -- mark <id>` after the file passes verification; remove an entry with `npm run art -- unmark <id>`.",
+  "assets": {
+    "verdant/ground": {
+      "file": "src/assets/terrain/verdant/ground.png",
+      "sha256": "ff5127c8912ce24860ae1264683e65f4e3d4f825ad9695aa549d65365f8e74db",
+      "width": 512,
+      "height": 512,
+      "bytes": 516481,
+      "verified": "2026-11-25"
+    },
+    "verdant/forest_floor": {
+      "file": "src/assets/terrain/verdant/forest_floor.png",
+      "sha256": "3140ca8ed86b8a7e6d159d97d0451bc2725f56c846d3c485b290bbe08f784ee7",
+      "width": 512,
+      "height": 512,
+      "bytes": 505918,
+      "verified": "2026-11-25"
+    },
+    "verdant/road": {
+      "file": "src/assets/terrain/verdant/road.png",
+      "sha256": "5d9f93bc6cf46eecab2f38ec9c6f0e29c4b52ab31f3c99c6820e051d8ccb1783",
+      "width": 512,
+      "height": 512,
+      "bytes": 495974,
+      "verified": "2026-11-25"
+    },
+    "verdant/hill": {
+      "file": "src/assets/terrain/verdant/hill.png",
+      "sha256": "1a36db7a0141f528e77c8c81295c960cb042a78690a69103e073af94d09d6f0d",
+      "width": 512,
+      "height": 512,
+      "bytes": 562028,
+      "verified": "2026-11-25"
+    },
+    "verdant/sand": {
+      "file": "src/assets/terrain/verdant/sand.png",
+      "sha256": "4f8f02d574a6526adda98abe7216feb358ac94d978b31d8fa6e0703772d2ceec",
+      "width": 512,
+      "height": 512,
+      "bytes": 516480,
+      "verified": "2026-11-25"
+    },
+    "verdant/shallows": {
+      "file": "src/assets/terrain/verdant/shallows.png",
+      "sha256": "45cec9cf862ec161f27369b7d844abe13dd162ef681575a2e45a86667c7dcac8",
+      "width": 512,
+      "height": 512,
+      "bytes": 556969,
+      "verified": "2026-11-25"
+    },
+    "verdant/water": {
+      "file": "src/assets/terrain/verdant/water.png",
+      "sha256": "3f55a847de0a9e3a66f7592f56ad2ddda93c6a03d4feedb7a619d363218c1e7f",
+      "width": 512,
+      "height": 512,
+      "bytes": 437316,
+      "verified": "2026-11-25"
+    },
+    "verdant/mountain": {
+      "file": "src/assets/terrain/verdant/mountain.png",
+      "sha256": "8fcff8dafe73a1a7f0ca8bee5992952bf6f698b752d01ade0fb5ee712a15fac6",
+      "width": 512,
+      "height": 512,
+      "bytes": 572303,
+      "verified": "2026-11-25"
+    },
+    "verdant/bridge": {
+      "file": "src/assets/terrain/verdant/bridge.png",
+      "sha256": "6575983192fde337e22708b2aa9102ca9af9d897068e1d55ece6c66852757b50",
+      "width": 512,
+      "height": 512,
+      "bytes": 536285,
+      "verified": "2026-11-25"
+    },
+    "verdant/tree_1": {
+      "file": "src/assets/terrain/verdant/tree_1.png",
+      "sha256": "b312cf5465b6c3a670fd260ff5affcf2a328a2209bf057d0e18d09c223283ae0",
+      "width": 256,
+      "height": 256,
+      "bytes": 100302,
+      "verified": "2026-11-25"
+    },
+    "verdant/tree_2": {
+      "file": "src/assets/terrain/verdant/tree_2.png",
+      "sha256": "e65f0e56d81d6a87f969aa3bd642d01c81592c62010a0fa6bef4e6d91708c6e3",
+      "width": 256,
+      "height": 256,
+      "bytes": 100970,
+      "verified": "2026-11-25"
+    },
+    "verdant/tree_3": {
+      "file": "src/assets/terrain/verdant/tree_3.png",
+      "sha256": "fb743b1a8285ec918b3c7e35bb3487115dde00875e0761672934056e416d4423",
+      "width": 256,
+      "height": 256,
+      "bytes": 98544,
+      "verified": "2026-11-25"
+    }
+  }
+}
